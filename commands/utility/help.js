@@ -13,7 +13,7 @@ module.exports = {
         {
           name: "Commandes avec préfixe ($)",
           value:
-            "`$ping` - Répond avec Pong!\n`$user` - Informations sur l'utilisateur\n`$server` - Informations sur le serveur\n`$help` - Affiche cette aide",
+            "`$ping` - Répond avec Pong!\n`$user` - Informations sur l'utilisateur\n`$userinfo [@utilisateur]` - Infos détaillées sur un utilisateur\n`$server` - Informations sur le serveur\n`$serverlogo` - Affiche le logo du serveur\n`$botinfo` - Informations sur le bot\n`$roleinfo <@role>` - Informations sur un rôle\n`$avatar [@utilisateur]` - Affiche l'avatar d'un utilisateur\n`$help` - Affiche cette aide\n`$clear [nombre]` - Supprime des messages",
           inline: false,
         },
       ],
@@ -34,7 +34,7 @@ module.exports = {
         {
           name: "Commandes avec préfixe ($)",
           value:
-            "`$ping` - Répond avec Pong!\n`$user` - Informations sur l'utilisateur\n`$server` - Informations sur le serveur\n`$help` - Affiche cette aide",
+            "`$ping` - Répond avec Pong!\n`$user` - Informations sur l'utilisateur\n`$userinfo [@utilisateur]` - Infos détaillées sur un utilisateur\n`$server` - Informations sur le serveur\n`$serverlogo` - Affiche le logo du serveur\n`$botinfo` - Informations sur le bot\n`$roleinfo <@role>` - Informations sur un rôle\n`$avatar [@utilisateur]` - Affiche l'avatar d'un utilisateur\n`$help` - Affiche cette aide\n`$clear [nombre]` - Supprime des messages",
           inline: false,
         },
       ],
