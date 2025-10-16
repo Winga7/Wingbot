@@ -2,6 +2,10 @@ require("dotenv").config();
 const fs = require("node:fs");
 const path = require("node:path");
 const { Client, Collection, Events, GatewayIntentBits } = require("discord.js");
+const { initDatabase, cleanOldMessages } = require("./database");
+
+// Initialiser la base de données
+initDatabase();
 
 const client = new Client({
   intents: [
@@ -10,6 +14,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildPresences,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates,
   ],
 });
 
@@ -39,9 +44,18 @@ for (const folder of commandFolders) {
   }
 }
 
+// Charger le système de logs
+const loadLogs = require("./events/logs");
+loadLogs(client);
+
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
+
+  // Nettoyer les vieux messages du cache tous les jours
+  setInterval(() => {
+    cleanOldMessages();
+  }, 24 * 60 * 60 * 1000); // 24 heures
 });
 
 // Événement pour les interactions (slash commands)

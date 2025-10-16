@@ -1,14 +1,34 @@
 # Dépendances
 node_modules/
 
-# Fichiers d'environnement
+# Fichiers de configuration sensibles
 .env
-config.json
+.env.local
+.env.*.local
+
+# Base de données
+*.db
+*.db-shm
+*.db-wal
+wingbot.db
 
 # Logs
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Fichiers système
+# Système d'exploitation
 .DS_Store
 Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Fichiers temporaires
+*.tmp
+*.temp
