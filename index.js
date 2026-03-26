@@ -2,7 +2,12 @@ require("dotenv").config();
 const fs = require("node:fs");
 const path = require("node:path");
 const { Client, Collection, Events, GatewayIntentBits } = require("discord.js");
-const { initDatabase, cleanOldMessages } = require("./database");
+const {
+  initDatabase,
+  cleanOldMessages,
+  getGuildPrefix,
+  isCommandEnabled,
+} = require("./database");
 
 // Initialiser la base de données
 initDatabase();
@@ -71,6 +76,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Chercher la commande dans la collection
   const command = client.commands.get(interaction.commandName);
 
+  if (
+    interaction.guildId &&
+    command &&
+    !isCommandEnabled(interaction.guildId, interaction.commandName)
+  ) {
+    return interaction.reply({
+      content:
+        "Cette commande est désactivée sur ce serveur. Réactive-la depuis le dashboard.",
+      ephemeral: true,
+    });
+  }
+
   if (!command) {
     console.error(
       `Aucune commande correspondant à ${interaction.commandName} n'a été trouvée.`
@@ -98,13 +115,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// Préfixe pour les commandes de message
-const prefix = "$";
-
 // Événement pour les messages
 client.on(Events.MessageCreate, (message) => {
   // Ignorer les messages du bot lui-même
   if (message.author.bot) return;
+
+  const guildId = message.guild?.id;
+  const prefix = guildId ? getGuildPrefix(guildId) : "$";
 
   // Vérifier si le message commence par le préfixe
   if (!message.content.startsWith(prefix)) return;
@@ -115,6 +132,12 @@ client.on(Events.MessageCreate, (message) => {
 
   // Chercher la commande dans la collection
   const command = client.commands.get(commandName);
+
+  if (guildId && command && !isCommandEnabled(guildId, commandName)) {
+    return message.reply(
+      "Cette commande est désactivée sur ce serveur. Réactive-la depuis le dashboard."
+    );
+  }
 
   if (!command) {
     return message.reply(

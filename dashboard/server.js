@@ -1,23 +1,38 @@
 /**
- * Dashboard HTTP : lit/écrit la même base SQLite que le bot (wingbot.db).
- * Démarre séparément : npm run dashboard
+ * Dashboard HTTP : lit/écrit wingbot.db + OAuth Discord (liste des serveurs admin).
  *
- * Variables .env (racine du projet) :
- *   DASHBOARD_PORT=3847
- *   DASHBOARD_TOKEN=un_secret_long_et_aleatoire
+ * .env :
+ *   DASHBOARD_TOKEN, TOKEN (bot), CLIENT_ID
+ *   DISCORD_CLIENT_SECRET — secret OAuth2 (Discord Developer Portal)
+ *   DASHBOARD_PUBLIC_URL — ex. http://127.0.0.1:3847 (URL exacte du dashboard)
+ *   BOT_INVITE_PERMISSIONS — optionnel, entier permissions (défaut : 268438528)
  */
 const path = require("node:path");
 const express = require("express");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
-const { ALL_KEYS, DASHBOARD_GROUPS } = require("../logFeatureDefinitions");
+const { DASHBOARD_GROUPS } = require("../logFeatureDefinitions");
+const { COMMAND_GROUPS, COMMANDS } = require("../commandsManifest");
 const {
   initDatabase,
   db,
-  getResolvedFeatureFlags,
-  saveFeatureFlags,
-  setLogChannel,
+  getGuildDashboardPayload,
+  applyGuildSettingsPatch,
+  ensureGuildLogRow,
 } = require("../database");
+const {
+  getSession,
+  createSession,
+  clearSessionCookie,
+  destroySession,
+  normalizeSnowflakeId,
+  canManageGuild,
+  userGuildIconUrl,
+  fetchUserGuilds,
+  fetchOAuthToken,
+  fetchDiscordMe,
+  buildInviteUrl,
+} = require("./discordAuth");
 
 initDatabase();
 
@@ -26,15 +41,52 @@ const PORT = Number(process.env.DASHBOARD_PORT) || 3847;
 const TOKEN = process.env.DASHBOARD_TOKEN || "";
 const DISCORD_API = "https://discord.com/api/v10";
 
-/** Appels Discord REST (même token que le bot, dans .env : TOKEN) */
-async function discordFetchJson(path) {
-  const botToken = process.env.TOKEN;
+function publicBaseUrl() {
+  const u = process.env.DASHBOARD_PUBLIC_URL || `http://127.0.0.1:${PORT}`;
+  return u.replace(/\/$/, "");
+}
+
+function oauthRedirectUri() {
+  return `${publicBaseUrl()}/api/auth/discord/callback`;
+}
+
+async function botGuildExists(guildId) {
+  const id = normalizeSnowflakeId(guildId);
+  if (!id) return false;
+  const botToken = (process.env.TOKEN || "").trim();
+  if (!botToken) return false;
+  const url = `${DISCORD_API}/guilds/${encodeURIComponent(id)}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await fetch(url, {
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        "User-Agent": "DiscordBot (https://discord.com, 1.0)",
+      },
+    });
+    if (r.status === 429 && attempt < 2) {
+      const reset = Number(r.headers.get("retry-after") || "1");
+      await new Promise((res) => setTimeout(res, Math.ceil(reset * 1000) + 100));
+      continue;
+    }
+    if (!r.ok && r.status !== 404 && r.status !== 403) {
+      console.warn(
+        `[dashboard] botGuildExists(${id}) HTTP ${r.status} — vérifie TOKEN (bot) dans .env`
+      );
+    }
+    return r.ok;
+  }
+  return false;
+}
+
+/** Appels Discord REST (bot) */
+async function discordFetchJson(pathStr) {
+  const botToken = (process.env.TOKEN || "").trim();
   if (!botToken) {
-    const err = new Error("TOKEN du bot manquant dans .env (requis pour noms / salons)");
+    const err = new Error("TOKEN du bot manquant dans .env");
     err.code = "NO_BOT_TOKEN";
     throw err;
   }
-  const r = await fetch(`${DISCORD_API}${path}`, {
+  const r = await fetch(`${DISCORD_API}${pathStr}`, {
     headers: {
       Authorization: `Bot ${botToken}`,
       "User-Agent": "WingbotDashboard (https://discord.com)",
@@ -49,13 +101,12 @@ async function discordFetchJson(path) {
   return text ? JSON.parse(text) : null;
 }
 
-function guildIconUrl(guildId, iconHash) {
+function guildIconUrlBot(guildId, iconHash) {
   if (!iconHash) return null;
   const ext = String(iconHash).startsWith("a_") ? "gif" : "png";
   return `https://cdn.discordapp.com/icons/${guildId}/${iconHash}.${ext}?size=64`;
 }
 
-/** Texte / annonces / forums — où on peut envoyer des embeds de logs */
 const LOGGABLE_CHANNEL_TYPES = new Set([0, 5, 15]);
 
 function formatChannelsForUi(channels) {
@@ -93,11 +144,11 @@ function formatChannelsForUi(channels) {
 
 app.use(express.json({ limit: "512kb" }));
 
-// Permet d'ouvrir le HTML depuis un autre port (ex. Live Server) tout en ciblant cette API
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Vary", "Origin");
   } else {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -106,7 +157,7 @@ app.use((req, res, next) => {
     "Access-Control-Allow-Headers",
     "Authorization, Content-Type"
   );
-  res.setHeader("Access-Control-Allow-Methods", "GET, PUT, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
   }
@@ -130,42 +181,187 @@ function requireToken(req, res, next) {
   next();
 }
 
-function guildPayload(guildId) {
-  const row = db
-    .prepare(
-      "SELECT log_channel_id FROM guild_config WHERE guild_id = ?"
-    )
-    .get(guildId);
-  return {
-    guild_id: guildId,
-    log_channel_id: row?.log_channel_id ?? null,
-    feature_flags: getResolvedFeatureFlags(guildId),
-  };
+function requireDiscordSession(req, res, next) {
+  const s = getSession(req);
+  if (!s) {
+    return res.status(401).json({
+      error: "discord_not_connected",
+      message: "Connecte ton compte Discord (bouton dans la barre latérale).",
+    });
+  }
+  req.discordSession = s;
+  next();
 }
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "wingbot-dashboard" });
 });
 
-/** Schéma UI (groupes + clés + libellés FR) */
+/** Démarre le flux OAuth Discord (redirection) */
+app.get("/api/auth/discord/login", (req, res) => {
+  const clientId = process.env.CLIENT_ID;
+  if (!clientId) {
+    return res.status(503).send("CLIENT_ID manquant dans .env");
+  }
+  const secret = process.env.DISCORD_CLIENT_SECRET;
+  if (!secret) {
+    return res.status(503).send("DISCORD_CLIENT_SECRET manquant — ajoute-le depuis le portail Discord (OAuth2).");
+  }
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: oauthRedirectUri(),
+    response_type: "code",
+    scope: "identify guilds",
+    prompt: "consent",
+  });
+  res.redirect(`https://discord.com/oauth2/authorize?${params}`);
+});
+
+/** Discord renvoie ici après autorisation */
+app.get("/api/auth/discord/callback", async (req, res) => {
+  try {
+    const code = req.query.code;
+    const err = req.query.error;
+    if (err) {
+      return res.redirect(`${publicBaseUrl()}/?discord=error&reason=${encodeURIComponent(err)}`);
+    }
+    if (!code) {
+      return res.redirect(`${publicBaseUrl()}/?discord=error`);
+    }
+    const clientId = process.env.CLIENT_ID;
+    const clientSecret = process.env.DISCORD_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      return res.status(503).send("OAuth non configuré (.env)");
+    }
+    const tokenData = await fetchOAuthToken(
+      code,
+      oauthRedirectUri(),
+      clientId,
+      clientSecret
+    );
+    const me = await fetchDiscordMe(tokenData.access_token);
+    createSession(res, {
+      accessToken: tokenData.access_token,
+      expiresInSec: tokenData.expires_in,
+      userId: me.id,
+      username: me.global_name || me.username,
+    });
+    res.redirect(`${publicBaseUrl()}/?discord=connected`);
+  } catch (e) {
+    console.error(e);
+    res.redirect(
+      `${publicBaseUrl()}/?discord=error&reason=${encodeURIComponent(String(e.message))}`
+    );
+  }
+});
+
+app.post("/api/auth/discord/logout", (req, res) => {
+  destroySession(req);
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+/** État session Discord (pour l’UI) */
+app.get("/api/auth/discord/status", requireToken, (req, res) => {
+  const s = getSession(req);
+  res.json({
+    connected: !!s,
+    username: s?.username || null,
+  });
+});
+
+/**
+ * Serveurs où tu es admin / gérant + présence du bot + lien d’invitation
+ */
+app.get(
+  "/api/me/guilds",
+  requireToken,
+  requireDiscordSession,
+  async (req, res) => {
+    try {
+      const accessToken = req.discordSession.accessToken;
+      const clientId = process.env.CLIENT_ID;
+      if (!clientId) {
+        return res.status(503).json({ error: "CLIENT_ID manquant" });
+      }
+
+      const rawGuilds = await fetchUserGuilds(accessToken);
+      /** IDs déjà couverts (snowflakes en string) */
+      const seen = new Set();
+      let manageable = rawGuilds.filter((g) => {
+        const ok = canManageGuild(g);
+        if (ok) seen.add(normalizeSnowflakeId(g.id));
+        return ok;
+      });
+
+      /** Guilde en base mais absente du filtre (ex. bug permissions) : on réintègre si OAuth dit encore « gérable » */
+      const dbGuildIds = db
+        .prepare("SELECT guild_id FROM guild_config")
+        .all()
+        .map((row) => normalizeSnowflakeId(row.guild_id));
+      for (const gid of dbGuildIds) {
+        if (!gid || seen.has(gid)) continue;
+        const raw = rawGuilds.find((g) => normalizeSnowflakeId(g.id) === gid);
+        if (raw && canManageGuild(raw)) {
+          manageable.push(raw);
+          seen.add(gid);
+        }
+      }
+
+      const byId = new Map();
+      for (const g of manageable) {
+        const gid = normalizeSnowflakeId(g.id);
+        if (gid) byId.set(gid, g);
+      }
+      manageable = [...byId.values()];
+
+      const hasRowInDb = (gid) =>
+        !!db
+          .prepare("SELECT 1 FROM guild_config WHERE guild_id = ?")
+          .get(gid);
+
+      const perms = process.env.BOT_INVITE_PERMISSIONS || "268438528";
+      const out = [];
+
+      for (const g of manageable) {
+        const gid = normalizeSnowflakeId(g.id);
+        const botIn = await botGuildExists(gid);
+        out.push({
+          guild_id: gid,
+          name: g.name,
+          icon_url: userGuildIconUrl(gid, g.icon),
+          bot_in_guild: botIn,
+          has_config_in_db: hasRowInDb(gid),
+          invite_url: buildInviteUrl(gid, clientId, perms),
+        });
+      }
+
+      out.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+
+      res.json({
+        discord_username: req.discordSession.username,
+        guilds: out,
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
 app.get("/api/manifest", requireToken, (_req, res) => {
   res.json({ groups: DASHBOARD_GROUPS });
 });
 
-/** Liste des serveurs présents en base avec flags résolus */
 app.get("/api/config", requireToken, (_req, res) => {
   try {
     const rows = db
       .prepare(
-        `
-        SELECT guild_id
-        FROM guild_config
-        ORDER BY updated_at DESC
-      `
+        `SELECT guild_id FROM guild_config ORDER BY updated_at DESC`
       )
       .all();
 
-    const guilds = rows.map((r) => guildPayload(r.guild_id));
+    const guilds = rows.map((r) => getGuildDashboardPayload(r.guild_id));
     res.json({ guilds });
   } catch (e) {
     console.error(e);
@@ -173,72 +369,50 @@ app.get("/api/config", requireToken, (_req, res) => {
   }
 });
 
-/** Détail d'un serveur */
-app.get("/api/guilds/:guildId", requireToken, (req, res) => {
+app.get("/api/guilds/:guildId", requireToken, async (req, res) => {
   try {
     const { guildId } = req.params;
     const exists = db
       .prepare("SELECT 1 FROM guild_config WHERE guild_id = ?")
       .get(guildId);
     if (!exists) {
-      return res.status(404).json({ error: "Serveur inconnu en base" });
+      const botIn = await botGuildExists(guildId);
+      if (!botIn) {
+        return res.status(404).json({
+          error: "not_found",
+          message: "Bot absent de ce serveur — utilise le lien d’invitation.",
+        });
+      }
+      ensureGuildLogRow(guildId);
     }
-    res.json(guildPayload(guildId));
+    res.json(getGuildDashboardPayload(guildId));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: String(e.message) });
   }
 });
 
-/** Sauvegarde des flags + optionnellement salon de logs */
-app.put("/api/guilds/:guildId", requireToken, (req, res) => {
+app.put("/api/guilds/:guildId", requireToken, async (req, res) => {
   try {
     const { guildId } = req.params;
-    const body = req.body || {};
-    const incoming = body.feature_flags;
-    if (typeof incoming !== "object" || incoming === null) {
-      return res
-        .status(400)
-        .json({ error: "feature_flags doit être un objet { clé: bool }" });
+    const botIn = await botGuildExists(guildId);
+    if (!botIn) {
+      return res.status(400).json({
+        error: "bot_not_in_guild",
+        message: "Invite le bot sur ce serveur avant d’enregistrer la configuration.",
+      });
     }
-
-    const current = getResolvedFeatureFlags(guildId);
-    const merged = { ...current };
-    for (const k of ALL_KEYS) {
-      if (Object.prototype.hasOwnProperty.call(incoming, k)) {
-        merged[k] = !!incoming[k];
-      }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(body, "log_channel_id")) {
-      const ch = body.log_channel_id;
-      const empty = ch === null || ch === "";
-      const okId =
-        typeof ch === "string" && /^\d{17,20}$/.test(ch.trim());
-      if (!empty && !okId) {
-        return res.status(400).json({
-          error:
-            "log_channel_id doit être un ID Discord (17–20 chiffres) ou vide pour retirer le salon",
-        });
-      }
-    }
-
-    saveFeatureFlags(guildId, merged);
-
-    if (Object.prototype.hasOwnProperty.call(body, "log_channel_id")) {
-      const ch = body.log_channel_id;
-      if (ch === null || ch === "") {
-        setLogChannel(guildId, null);
-      } else {
-        setLogChannel(guildId, String(ch).trim());
-      }
-    }
-
-    res.json(guildPayload(guildId));
+    ensureGuildLogRow(guildId);
+    applyGuildSettingsPatch(guildId, req.body || {});
+    res.json(getGuildDashboardPayload(guildId));
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: String(e.message) });
+    res.status(400).json({ error: String(e.message) });
   }
+});
+
+app.get("/api/commands-manifest", requireToken, (_req, res) => {
+  res.json({ groups: COMMAND_GROUPS, commands: COMMANDS });
 });
 
 app.get("/api/stats", requireToken, (_req, res) => {
@@ -260,21 +434,19 @@ app.get("/api/stats", requireToken, (_req, res) => {
   }
 });
 
-/** Métadonnées Discord (nom, icône) — uniquement si le serveur est déjà en base */
 app.get("/api/discord/guilds/:guildId", requireToken, async (req, res) => {
   try {
     const { guildId } = req.params;
-    const exists = db
-      .prepare("SELECT 1 FROM guild_config WHERE guild_id = ?")
-      .get(guildId);
-    if (!exists) {
-      return res.status(404).json({ error: "Serveur inconnu en base" });
+    const botIn = await botGuildExists(guildId);
+    if (!botIn) {
+      return res.status(404).json({ error: "Bot non présent sur ce serveur" });
     }
+    ensureGuildLogRow(guildId);
     const g = await discordFetchJson(`/guilds/${encodeURIComponent(guildId)}`);
     res.json({
       id: g.id,
       name: g.name,
-      icon_url: guildIconUrl(g.id, g.icon),
+      icon_url: guildIconUrlBot(g.id, g.icon),
     });
   } catch (e) {
     if (e.code === "NO_BOT_TOKEN") {
@@ -285,21 +457,18 @@ app.get("/api/discord/guilds/:guildId", requireToken, async (req, res) => {
   }
 });
 
-/** Salons texte / annonces / forums pour le sélecteur de salon de logs */
 app.get("/api/discord/guilds/:guildId/channels", requireToken, async (req, res) => {
   try {
     const { guildId } = req.params;
-    const exists = db
-      .prepare("SELECT 1 FROM guild_config WHERE guild_id = ?")
-      .get(guildId);
-    if (!exists) {
-      return res.status(404).json({ error: "Serveur inconnu en base" });
+    const botIn = await botGuildExists(guildId);
+    if (!botIn) {
+      return res.status(404).json({ error: "Bot non présent sur ce serveur" });
     }
+    ensureGuildLogRow(guildId);
     const channels = await discordFetchJson(
       `/guilds/${encodeURIComponent(guildId)}/channels`
     );
-    const channelsUi = formatChannelsForUi(channels);
-    res.json({ channels: channelsUi });
+    res.json({ channels: formatChannelsForUi(channels) });
   } catch (e) {
     if (e.code === "NO_BOT_TOKEN") {
       return res.status(503).json({ error: e.message });
@@ -309,17 +478,19 @@ app.get("/api/discord/guilds/:guildId/channels", requireToken, async (req, res) 
   }
 });
 
-// Les routes /api/* avant le static : évite toute ambiguïté avec les fichiers
 app.use(express.static(path.join(__dirname, "public")));
 
 app.listen(PORT, () => {
-  console.log(`📊 Dashboard Wingbot : http://127.0.0.1:${PORT}/`);
+  console.log(`📊 Dashboard Wingbot : ${publicBaseUrl()}/`);
   console.log(
-    `   Ouvre cette URL dans le navigateur (pas Live Server sur le HTML seul).`
+    `   OAuth redirect à déclarer sur Discord : ${oauthRedirectUri()}`
   );
   if (!TOKEN) {
+    console.warn("⚠️  DASHBOARD_TOKEN manquant dans .env");
+  }
+  if (!process.env.DISCORD_CLIENT_SECRET) {
     console.warn(
-      "⚠️  Définis DASHBOARD_TOKEN dans .env pour sécuriser l'API."
+      "⚠️  DISCORD_CLIENT_SECRET manquant — connexion « Mes serveurs » désactivée."
     );
   }
 });

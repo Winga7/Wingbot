@@ -6,6 +6,7 @@ const {
   LEGACY_MAP,
   TOGGLE_GROUP,
 } = require("./logFeatureDefinitions");
+const { ALL_COMMAND_IDS } = require("./commandsManifest");
 
 // Créer ou ouvrir la base de données
 const db = new Database(path.join(__dirname, "wingbot.db"));
@@ -61,6 +62,7 @@ function initDatabase() {
   ).run();
 
   migrateLogSettingsFeatureFlags();
+  migrateGuildConfigExtras();
 
   console.log("✅ Base de données initialisée");
 }
@@ -69,6 +71,31 @@ function migrateLogSettingsFeatureFlags() {
   const cols = db.prepare("PRAGMA table_info(log_settings)").all();
   if (!cols.some((c) => c.name === "feature_flags")) {
     db.prepare("ALTER TABLE log_settings ADD COLUMN feature_flags TEXT").run();
+  }
+}
+
+function migrateGuildConfigExtras() {
+  const cols = db.prepare("PRAGMA table_info(guild_config)").all();
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has("prefix")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN prefix TEXT").run();
+    db.prepare("UPDATE guild_config SET prefix = ? WHERE prefix IS NULL").run(
+      "$"
+    );
+  }
+  if (!names.has("logs_master_enabled")) {
+    db.prepare(
+      "ALTER TABLE guild_config ADD COLUMN logs_master_enabled INTEGER"
+    ).run();
+    db.prepare(
+      "UPDATE guild_config SET logs_master_enabled = 1 WHERE logs_master_enabled IS NULL"
+    ).run();
+  }
+  if (!names.has("commands_disabled")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN commands_disabled TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET commands_disabled = ? WHERE commands_disabled IS NULL"
+    ).run("[]");
   }
 }
 
@@ -188,9 +215,136 @@ function saveFeatureFlags(guildId, flags) {
   );
 }
 
+function isLogsMasterEnabled(guildId) {
+  const row = db
+    .prepare("SELECT logs_master_enabled FROM guild_config WHERE guild_id = ?")
+    .get(guildId);
+  if (!row) return true;
+  return row.logs_master_enabled !== 0;
+}
+
 function isLogEnabled(guildId, flagKey) {
+  if (!isLogsMasterEnabled(guildId)) return false;
   const f = getResolvedFeatureFlags(guildId);
   return !!f[flagKey];
+}
+
+function getGuildPrefix(guildId) {
+  const row = db.prepare("SELECT prefix FROM guild_config WHERE guild_id = ?").get(
+    guildId
+  );
+  if (!row || row.prefix == null || String(row.prefix).trim() === "") {
+    return "$";
+  }
+  return String(row.prefix);
+}
+
+function getDisabledCommands(guildId) {
+  const row = db
+    .prepare("SELECT commands_disabled FROM guild_config WHERE guild_id = ?")
+    .get(guildId);
+  if (!row?.commands_disabled) return [];
+  try {
+    const arr = JSON.parse(row.commands_disabled);
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function isCommandEnabled(guildId, commandName) {
+  return !getDisabledCommands(guildId).includes(commandName);
+}
+
+/** Payload unifié pour le dashboard */
+function getGuildDashboardPayload(guildId) {
+  ensureGuildLogRow(guildId);
+  return {
+    guild_id: guildId,
+    log_channel_id: getLogChannel(guildId),
+    feature_flags: getResolvedFeatureFlags(guildId),
+    prefix: getGuildPrefix(guildId),
+    logs_master_enabled: isLogsMasterEnabled(guildId),
+    commands_disabled: getDisabledCommands(guildId),
+  };
+}
+
+function isValidPrefix(p) {
+  if (typeof p !== "string") return false;
+  const t = p.trim();
+  if (t.length < 1 || t.length > 16) return false;
+  return /^[^\s]+$/.test(t);
+}
+
+/**
+ * Mise à jour partielle (dashboard). Seules les clés présentes sont appliquées.
+ */
+function applyGuildSettingsPatch(guildId, patch) {
+  if (!patch || typeof patch !== "object") return;
+
+  ensureGuildLogRow(guildId);
+
+  if (patch.feature_flags != null) {
+    if (typeof patch.feature_flags !== "object") {
+      throw new Error("feature_flags invalide");
+    }
+    const current = getResolvedFeatureFlags(guildId);
+    const merged = { ...current };
+    for (const k of ALL_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(patch.feature_flags, k)) {
+        merged[k] = !!patch.feature_flags[k];
+      }
+    }
+    saveFeatureFlags(guildId, merged);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, "log_channel_id")) {
+    const ch = patch.log_channel_id;
+    const empty = ch === null || ch === "";
+    const okId = typeof ch === "string" && /^\d{17,20}$/.test(ch.trim());
+    if (!empty && !okId) {
+      throw new Error(
+        "log_channel_id : ID Discord (17–20 chiffres) ou vide"
+      );
+    }
+    if (empty) {
+      setLogChannel(guildId, null);
+    } else {
+      setLogChannel(guildId, String(ch).trim());
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, "prefix")) {
+    const p = String(patch.prefix ?? "").trim();
+    if (!isValidPrefix(p)) {
+      throw new Error("Préfixe invalide : 1 à 16 caractères, sans espace");
+    }
+    db.prepare(
+      "UPDATE guild_config SET prefix = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+    ).run(p, guildId);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, "logs_master_enabled")) {
+    const v = !!patch.logs_master_enabled;
+    db.prepare(
+      "UPDATE guild_config SET logs_master_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+    ).run(v ? 1 : 0, guildId);
+  }
+
+  if (patch.commands_disabled != null) {
+    if (!Array.isArray(patch.commands_disabled)) {
+      throw new Error("commands_disabled doit être un tableau de noms de commandes");
+    }
+    const valid = new Set(ALL_COMMAND_IDS);
+    const filtered = [
+      ...new Set(
+        patch.commands_disabled.filter((x) => typeof x === "string")
+      ),
+    ].filter((id) => valid.has(id));
+    db.prepare(
+      "UPDATE guild_config SET commands_disabled = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+    ).run(JSON.stringify(filtered), guildId);
+  }
 }
 
 // Activer/désactiver un type de log (compat commandes /togglelog)
@@ -291,6 +445,13 @@ module.exports = {
   getResolvedFeatureFlags,
   saveFeatureFlags,
   isLogEnabled,
+  isLogsMasterEnabled,
+  getGuildPrefix,
+  getDisabledCommands,
+  isCommandEnabled,
+  getGuildDashboardPayload,
+  applyGuildSettingsPatch,
+  ensureGuildLogRow,
   cacheMessage,
   getCachedMessage,
   cleanOldMessages,
