@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 
 const LS_KEY = "wingbot_dashboard_token";
 const LS_API_ORIGIN = "wingbot_api_origin";
-const VIEWS = ["overview", "settings", "logs", "commands", "moderation"];
+const VIEWS = ["overview", "settings", "logs", "commands", "custom", "moderation"];
 
 let manifest = { groups: [] };
 let commandManifest = { groups: [], commands: [] };
@@ -20,7 +20,8 @@ let guildMeta = {};
  *   log_channel_id: string | null,
  *   prefix: string,
  *   logs_master_enabled: boolean,
- *   commands_disabled: string[]
+ *   commands_disabled: string[],
+ *   custom_commands: { id?: number, trigger: string, response: string }[]
  * } | null} */
 let guildState = null;
 
@@ -336,6 +337,18 @@ function renderCommands() {
     grid.className = "cmd-toggles";
 
     for (const c of cmds.filter((x) => x.category === g.id)) {
+      if (c.id === "help") {
+        const row = document.createElement("div");
+        row.className = "cmd-row cmd-row-immutable";
+        row.innerHTML = `
+        <input type="checkbox" checked disabled title="Toujours active" />
+        <span class="cmd-row-text">
+          <strong class="mono">${escapeHtml(c.label)}</strong>
+          <span class="muted tiny">${escapeHtml(c.description)} — toujours active</span>
+        </span>`;
+        grid.appendChild(row);
+        continue;
+      }
       const enabled = !guildState.commands_disabled.includes(c.id);
       const row = document.createElement("label");
       row.className = "cmd-row";
@@ -355,13 +368,61 @@ function renderCommands() {
   root.querySelectorAll("input[data-cmd]").forEach((inp) => {
     inp.addEventListener("change", () => {
       const id = inp.getAttribute("data-cmd");
+      if (id === "help") return;
       const dis = new Set(guildState.commands_disabled);
       if (inp.checked) dis.delete(id);
       else dis.add(id);
-      guildState.commands_disabled = [...dis];
+      guildState.commands_disabled = [...dis].filter((x) => x !== "help");
       setDirty(true);
       updateOverview();
     });
+  });
+}
+
+function renderCustomCommands() {
+  const root = $("custom-commands-root");
+  if (!root || !guildState) return;
+  root.innerHTML = "";
+  const list = guildState.custom_commands || [];
+  list.forEach((row, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "custom-cmd-row";
+
+    const trig = document.createElement("input");
+    trig.type = "text";
+    trig.className = "input-sm mono";
+    trig.placeholder = "declencheur";
+    trig.value = row.trigger || "";
+    trig.dataset.ccIdx = String(idx);
+    trig.addEventListener("input", () => {
+      guildState.custom_commands[idx].trigger = trig.value;
+      setDirty(true);
+    });
+
+    const ta = document.createElement("textarea");
+    ta.className = "input-sm custom-cmd-ta";
+    ta.rows = 2;
+    ta.placeholder = "Réponse (max 2000 car.)";
+    ta.value = row.response || "";
+    ta.addEventListener("input", () => {
+      guildState.custom_commands[idx].response = ta.value;
+      setDirty(true);
+    });
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn link";
+    del.textContent = "Retirer";
+    del.addEventListener("click", () => {
+      guildState.custom_commands.splice(idx, 1);
+      renderCustomCommands();
+      setDirty(true);
+    });
+
+    wrap.appendChild(trig);
+    wrap.appendChild(ta);
+    wrap.appendChild(del);
+    root.appendChild(wrap);
   });
 }
 
@@ -409,7 +470,7 @@ function syncSettingsInputs() {
 }
 
 function setViewsDisabled(noBot) {
-  const ids = ["view-settings", "view-logs", "view-commands"];
+  const ids = ["view-settings", "view-logs", "view-commands", "view-custom"];
   for (const id of ids) {
     const el = $(id);
     if (!el) continue;
@@ -436,6 +497,9 @@ async function refreshDiscordForGuild(guildId) {
 }
 
 async function applyGuildData(data) {
+  const dis = Array.isArray(data.commands_disabled)
+    ? [...data.commands_disabled]
+    : [];
   guildState = {
     guild_id: data.guild_id,
     feature_flags: { ...data.feature_flags },
@@ -443,8 +507,13 @@ async function applyGuildData(data) {
     prefix: data.prefix ?? "$",
     logs_master_enabled:
       data.logs_master_enabled !== undefined ? !!data.logs_master_enabled : true,
-    commands_disabled: Array.isArray(data.commands_disabled)
-      ? [...data.commands_disabled]
+    commands_disabled: dis.filter((id) => id !== "help"),
+    custom_commands: Array.isArray(data.custom_commands)
+      ? data.custom_commands.map((r) => ({
+          id: r.id,
+          trigger: r.trigger ?? "",
+          response: r.response ?? "",
+        }))
       : [],
   };
 
@@ -453,6 +522,7 @@ async function applyGuildData(data) {
   syncSettingsInputs();
   renderGroups();
   renderCommands();
+  renderCustomCommands();
   updateOverview();
 
   await refreshDiscordForGuild(data.guild_id);
@@ -482,6 +552,8 @@ async function clearGuildUiForNoBot() {
   guildState = null;
   $("groups-root").innerHTML = "";
   $("commands-root").innerHTML = "";
+  const ccr = $("custom-commands-root");
+  if (ccr) ccr.innerHTML = "";
   $("log-channel-select").innerHTML = "";
   $("ov-logs").textContent = "—";
   $("ov-prefix").textContent = "—";
@@ -704,12 +776,22 @@ async function save() {
   $("save").disabled = true;
   $("save-status").textContent = "Enregistrement…";
 
+  const customPayload = (guildState.custom_commands || [])
+    .map((r) => ({
+      trigger: String(r.trigger || "")
+        .trim()
+        .toLowerCase(),
+      response: String(r.response || "").trim(),
+    }))
+    .filter((r) => r.trigger && r.response);
+
   const body = {
     feature_flags: { ...guildState.feature_flags },
     log_channel_id: $("log-channel-select").value.trim() || null,
     prefix: ($("input-prefix").value || "").trim() || "$",
     logs_master_enabled: $("switch-logs-master").checked,
-    commands_disabled: [...guildState.commands_disabled],
+    commands_disabled: [...guildState.commands_disabled].filter((id) => id !== "help"),
+    custom_commands: customPayload,
   };
 
   try {
@@ -756,6 +838,14 @@ async function save() {
 $("load").addEventListener("click", loadData);
 $("save").addEventListener("click", save);
 $("guild-select").addEventListener("change", onGuildChange);
+
+$("btn-add-custom")?.addEventListener("click", () => {
+  if (!guildState) return;
+  if (!guildState.custom_commands) guildState.custom_commands = [];
+  guildState.custom_commands.push({ trigger: "", response: "" });
+  renderCustomCommands();
+  setDirty(true);
+});
 
 $("log-channel-select").addEventListener("change", () => {
   if (guildState) {

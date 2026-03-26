@@ -1,63 +1,56 @@
 const { SlashCommandBuilder } = require("discord.js");
 
+const PREFIX_BLOCK = `**📋 Infos**
+\`ping\` \`user\` \`userinfo\` \`server\` \`serverlogo\` \`botinfo\` \`roleinfo\` \`avatar\` \`messageinfo\`
+
+**🛡️ Modération**
+\`kick\` \`ban\` \`timeout\` \`untimeout\` \`warn\` \`slowmode\` \`clear\`
+
+**⚙️ Admin**
+\`setlogchannel\` \`togglelog\` \`logconfig\` \`logtest\` \`clearcache\`
+
+**Perso** — réponses configurées sur le dashboard (préfixe uniquement).`;
+
+const SLASH_BLOCK = `**📋 Infos**
+\`/ping\` \`/user\` \`/userinfo\` \`/server\` \`/serverlogo\` \`/botinfo\` \`/roleinfo\` \`/avatar\` \`/messageinfo\`
+
+**🛡️ Modération**
+\`/kick\` \`/ban\` \`/timeout\` \`/untimeout\` \`/warn\` \`/slowmode\` \`/clear\`
+
+**⚙️ Admin**
+\`/setlogchannel\` \`/togglelog\` \`/logconfig\` \`/logtest\` \`/clearcache\``;
+
+function buildEmbed() {
+  return {
+    color: 0x6366f1,
+    title: "Commandes Wingbot",
+    description:
+      "Préfixe configurable (défaut `$`) et commandes slash `/`. `help` reste toujours actif.",
+    fields: [
+      {
+        name: "Avec préfixe",
+        value: PREFIX_BLOCK,
+        inline: false,
+      },
+      {
+        name: "Slash",
+        value: SLASH_BLOCK,
+        inline: false,
+      },
+    ],
+    timestamp: new Date(),
+    footer: { text: "Wingbot" },
+  };
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("help")
     .setDescription("Affiche la liste des commandes disponibles."),
   async execute(interaction) {
-    const helpEmbed = {
-      color: 0x00ff00, // Couleur du pseudo Winga
-      title: "Commandes disponibles",
-      description:
-        "Voici les commandes disponibles en préfixe (`$`) et en slash (`/`) :",
-      fields: [
-        {
-          name: "Commandes avec préfixe ($)",
-          value:
-            "**📋 Informations**\n`$ping` - Répond avec Pong!\n`$user` - Informations sur l'utilisateur\n`$userinfo [@utilisateur]` - Infos détaillées sur un utilisateur\n`$server` - Informations sur le serveur\n`$serverlogo` - Affiche le logo du serveur\n`$botinfo` - Informations sur le bot\n`$roleinfo <@role>` - Informations sur un rôle\n`$avatar [@utilisateur]` - Affiche l'avatar d'un utilisateur\n`$messageinfo <message_id>` - Affiche un message depuis le cache (si supprimé)\n\n**🛡️ Modération**\n`$clear [nombre]` - Supprime des messages\n\n**⚙️ Configuration (Admin)**\n`$setlogchannel #salon` - Définir le salon de logs\n`$togglelog <type> <on/off>` - Activer/désactiver des logs\n`$logconfig` - Voir la configuration des logs\n`$logtest` - Test des logs\n`$clearcache` - Nettoie le cache des messages\n\n`$help` - Affiche cette aide",
-          inline: false,
-        },
-        {
-          name: "Commandes slash (/)",
-          value:
-            "**📋 Informations**\n`/ping` - Répond avec Pong!\n`/user` - Informations sur l'utilisateur\n`/userinfo [utilisateur]` - Infos détaillées sur un utilisateur\n`/server` - Informations sur le serveur\n`/serverlogo` - Affiche le logo du serveur\n`/botinfo` - Informations sur le bot\n`/roleinfo role` - Informations sur un rôle\n`/avatar [utilisateur]` - Affiche l'avatar d'un utilisateur\n`/messageinfo id` - Affiche un message depuis le cache (si supprimé)\n\n**🛡️ Modération**\n`/clear [nombre]` - Supprime des messages (optionnel)\n\n**⚙️ Configuration (Admin)**\n`/setlogchannel salon` - Définir le salon de logs\n`/togglelog type etat` - Activer/désactiver des logs\n`/logconfig` - Voir la configuration des logs\n`/logtest` - Test des logs\n`/clearcache` - Nettoie le cache des messages\n\n`/help` - Affiche cette aide",
-          inline: false,
-        },
-      ],
-      timestamp: new Date(),
-      footer: {
-        text: "Wingbot - Créé par Winga",
-      },
-    };
-
-    await interaction.reply({ embeds: [helpEmbed] });
+    await interaction.reply({ embeds: [buildEmbed()] });
   },
-  executeMessage(message, args) {
-    const helpEmbed = {
-      color: 0x00ff00, // Couleur du pseudo Winga
-      title: "Commandes disponibles",
-      description:
-        "Voici les commandes disponibles en préfixe (`$`) et en slash (`/`) :",
-      fields: [
-        {
-          name: "Commandes avec préfixe ($)",
-          value:
-            "**📋 Informations**\n`$ping` - Répond avec Pong!\n`$user` - Informations sur l'utilisateur\n`$userinfo [@utilisateur]` - Infos détaillées sur un utilisateur\n`$server` - Informations sur le serveur\n`$serverlogo` - Affiche le logo du serveur\n`$botinfo` - Informations sur le bot\n`$roleinfo <@role>` - Informations sur un rôle\n`$avatar [@utilisateur]` - Affiche l'avatar d'un utilisateur\n`$messageinfo <message_id>` - Affiche un message depuis le cache (si supprimé)\n\n**🛡️ Modération**\n`$clear [nombre]` - Supprime des messages\n\n**⚙️ Configuration (Admin)**\n`$setlogchannel #salon` - Définir le salon de logs\n`$togglelog <type> <on/off>` - Activer/désactiver des logs\n`$logconfig` - Voir la configuration des logs\n`$logtest` - Test des logs\n`$clearcache` - Nettoie le cache des messages\n\n`$help` - Affiche cette aide",
-          inline: false,
-        },
-        {
-          name: "Commandes slash (/)",
-          value:
-            "**📋 Informations**\n`/ping` - Répond avec Pong!\n`/user` - Informations sur l'utilisateur\n`/userinfo [utilisateur]` - Infos détaillées sur un utilisateur\n`/server` - Informations sur le serveur\n`/serverlogo` - Affiche le logo du serveur\n`/botinfo` - Informations sur le bot\n`/roleinfo role` - Informations sur un rôle\n`/avatar [utilisateur]` - Affiche l'avatar d'un utilisateur\n`/messageinfo id` - Affiche un message depuis le cache (si supprimé)\n\n**🛡️ Modération**\n`/clear [nombre]` - Supprime des messages (optionnel)\n\n**⚙️ Configuration (Admin)**\n`/setlogchannel salon` - Définir le salon de logs\n`/togglelog type etat` - Activer/désactiver des logs\n`/logconfig` - Voir la configuration des logs\n`/logtest` - Test des logs\n`/clearcache` - Nettoie le cache des messages\n\n`/help` - Affiche cette aide",
-          inline: false,
-        },
-      ],
-      timestamp: new Date(),
-      footer: {
-        text: "Wingbot - Créé par Winga",
-      },
-    };
-
-    message.reply({ embeds: [helpEmbed] });
+  executeMessage(message) {
+    message.reply({ embeds: [buildEmbed()] });
   },
 };

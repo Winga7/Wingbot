@@ -452,6 +452,65 @@ body {
   accent-color: var(--accent);
 }
 
+.cmd-row-immutable {
+  opacity: 0.92;
+}
+
+.custom-guide {
+  margin: 0.65rem 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0c0e14;
+}
+
+.custom-guide summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.custom-guide-body {
+  margin-top: 0.65rem;
+  line-height: 1.55;
+}
+
+.custom-guide-body ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.custom-guide-body code {
+  font-size: 0.78em;
+}
+
+.custom-commands-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin: 0.75rem 0;
+}
+
+.custom-cmd-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(200px, 2fr) auto;
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.custom-cmd-ta {
+  width: 100%;
+  resize: vertical;
+  min-height: 3rem;
+}
+
+.mod-doc-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  line-height: 1.65;
+}
+
 .cmd-row-text {
   display: flex;
   flex-direction: column;

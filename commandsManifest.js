@@ -1,6 +1,6 @@
 /**
  * Liste des commandes slash (même noms que préfixe) pour le dashboard.
- * category: admin | utility
+ * category: utility | admin | moderation
  */
 const COMMAND_GROUPS = [
   {
@@ -9,11 +9,19 @@ const COMMAND_GROUPS = [
     icon: "✨",
   },
   {
+    id: "moderation",
+    title: "Modération",
+    icon: "🛡️",
+  },
+  {
     id: "admin",
     title: "Administration",
     icon: "⚙️",
   },
 ];
+
+/** Ne peut pas être désactivé (toujours disponible) */
+const IMMUTABLE_COMMAND_IDS = ["help"];
 
 const COMMANDS = [
   {
@@ -71,8 +79,44 @@ const COMMANDS = [
     description: "Icône du serveur",
   },
   {
+    id: "kick",
+    category: "moderation",
+    label: "kick",
+    description: "Expulser un membre",
+  },
+  {
+    id: "ban",
+    category: "moderation",
+    label: "ban",
+    description: "Bannir un membre",
+  },
+  {
+    id: "timeout",
+    category: "moderation",
+    label: "timeout",
+    description: "Mettre un membre en sourdine (timeout)",
+  },
+  {
+    id: "untimeout",
+    category: "moderation",
+    label: "untimeout",
+    description: "Lever le timeout d’un membre",
+  },
+  {
+    id: "warn",
+    category: "moderation",
+    label: "warn",
+    description: "Avertir un membre",
+  },
+  {
+    id: "slowmode",
+    category: "moderation",
+    label: "slowmode",
+    description: "Régler le mode lent du salon",
+  },
+  {
     id: "clear",
-    category: "utility",
+    category: "moderation",
     label: "clear",
     description: "Supprimer des messages",
   },
@@ -117,5 +161,6 @@ const COMMANDS = [
 module.exports = {
   COMMAND_GROUPS,
   COMMANDS,
+  IMMUTABLE_COMMAND_IDS,
   ALL_COMMAND_IDS: COMMANDS.map((c) => c.id),
 };

@@ -36,6 +36,9 @@
           <a href="#commands" class="nav-link" data-view="commands">
             <span class="nav-ico">⌘</span> Commandes
           </a>
+          <a href="#custom" class="nav-link" data-view="custom">
+            <span class="nav-ico">✎</span> Commandes perso
+          </a>
           <a href="#moderation" class="nav-link" data-view="moderation">
             <span class="nav-ico">🛡</span> Modération
           </a>
@@ -180,20 +183,61 @@
           <section class="view" id="view-commands" hidden>
             <div class="view-head">
               <h2>Commandes</h2>
-              <p class="muted tiny">Désactive les commandes que tu ne veux pas sur ce serveur (slash + préfixe)</p>
+              <p class="muted tiny">Désactive les commandes que tu ne veux pas sur ce serveur (slash + préfixe). <strong>help</strong> reste toujours disponible.</p>
             </div>
             <div id="commands-root" class="commands-grid"></div>
+          </section>
+
+          <section class="view" id="view-custom" hidden>
+            <div class="view-head">
+              <h2>Commandes personnalisées</h2>
+              <p class="muted tiny">Réponses déclenchées par le préfixe (ex. <code>$règles</code>). Pas de slash Discord pour les perso.</p>
+            </div>
+            <div class="panel-block">
+              <p class="muted tiny">
+                <strong>Déclencheur :</strong> 1–32 caractères (lettres y compris accents, chiffres, <code>_</code>, <code>-</code>), nom différent d’une commande du bot. Il est enregistré en minuscules.
+              </p>
+              <details class="custom-guide">
+                <summary>Mini-guide — texte dynamique dans la réponse</summary>
+                <div class="custom-guide-body muted tiny">
+                  <p>Placeholders (copie-colle dans la zone réponse) :</p>
+                  <ul>
+                    <li><code>{{user}}</code> — mention de l’auteur de la commande</li>
+                    <li><code>{{username}}</code> — pseudo Discord (sans mention)</li>
+                    <li><code>{{user.tag}}</code> — pseudo#0000</li>
+                    <li><code>{{channel}}</code> — mention du salon actuel</li>
+                    <li><code>{{guild}}</code> — nom du serveur</li>
+                    <li><code>{{members}}</code> — nombre de membres (approximatif)</li>
+                    <li><code>{{reply}}</code> ou <code>{{reply.content}}</code> — texte du message auquel tu réponds (commande en réponse)</li>
+                    <li><code>{{reply.user}}</code> — mention de l’auteur du message répondu</li>
+                    <li><code>{{delete}}</code> — supprime le <strong>message de commande</strong> après envoi de la réponse (le bot doit avoir « Gérer les messages » dans ce salon)</li>
+                  </ul>
+                  <p class="hint-box">
+                    Exemple : <code>Bienvenue {{user}} sur {{guild}} ! {{delete}}</code>
+                  </p>
+                </div>
+              </details>
+              <div id="custom-commands-root" class="custom-commands-list"></div>
+              <button type="button" class="btn secondary" id="btn-add-custom">+ Ajouter une commande</button>
+            </div>
           </section>
 
           <section class="view" id="view-moderation" hidden>
             <div class="view-head">
               <h2>Modération</h2>
-              <p class="muted tiny">Extensions prévues</p>
+              <p class="muted tiny">Commandes slash et préfixe — permissions Discord requises</p>
             </div>
-            <div class="placeholder-card">
-              <p>
-                Ici pourront venir des règles d’auto-modération, rôles staff, filtres de mots,
-                etc. Les sanctions Discord (ban, timeout) sont déjà couvertes par les logs si tu les actives.
+            <div class="panel-block">
+              <ul class="mod-doc-list muted">
+                <li><strong class="mono">kick</strong> — Expulser (<code>KickMembers</code>)</li>
+                <li><strong class="mono">ban</strong> — Bannir, option jours de messages effacés (<code>BanMembers</code>)</li>
+                <li><strong class="mono">timeout</strong> / <strong class="mono">untimeout</strong> — Sourdine Discord (<code>ModerateMembers</code>)</li>
+                <li><strong class="mono">warn</strong> — Avertissement + MP si possible (<code>ModerateMembers</code>)</li>
+                <li><strong class="mono">slowmode</strong> — Mode lent du salon (<code>ManageChannels</code>)</li>
+                <li><strong class="mono">clear</strong> — Purge de messages (<code>ManageMessages</code>)</li>
+              </ul>
+              <p class="muted tiny">
+                Après mise à jour du code, redéploie les slash : <code>npm run deploy</code> (nécessite <code>GUILD_ID</code> dans <code>.env</code>).
               </p>
             </div>
           </section>

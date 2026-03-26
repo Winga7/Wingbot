@@ -7,7 +7,9 @@ const {
   cleanOldMessages,
   getGuildPrefix,
   isCommandEnabled,
+  getCustomCommandReply,
 } = require("./database");
+const { expandCustomTemplate } = require("./customCommandTemplates");
 
 // Initialiser la base de données
 initDatabase();
@@ -116,7 +118,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 // Événement pour les messages
-client.on(Events.MessageCreate, (message) => {
+client.on(Events.MessageCreate, async (message) => {
   // Ignorer les messages du bot lui-même
   if (message.author.bot) return;
 
@@ -130,34 +132,47 @@ client.on(Events.MessageCreate, (message) => {
   const args = message.content.slice(prefix.length).trim().split(/ +/);
   const commandName = args.shift().toLowerCase();
 
-  // Chercher la commande dans la collection
   const command = client.commands.get(commandName);
 
-  if (guildId && command && !isCommandEnabled(guildId, commandName)) {
-    return message.reply(
-      "Cette commande est désactivée sur ce serveur. Réactive-la depuis le dashboard."
-    );
-  }
-
-  if (!command) {
-    return message.reply(
-      `Commande \`${commandName}\` introuvable. Utilisez \`${prefix}help\` pour voir les commandes disponibles.`
-    );
-  }
-
-  try {
-    // Exécuter la commande avec le contexte de message
-    if (command.executeMessage) {
-      command.executeMessage(message, args);
-    } else {
-      message.reply("Cette commande n'est pas configurée pour les messages.");
+  if (command) {
+    if (guildId && !isCommandEnabled(guildId, commandName)) {
+      return message.reply(
+        "Cette commande est désactivée sur ce serveur. Réactive-la depuis le dashboard."
+      );
     }
-  } catch (error) {
-    console.error(error);
-    message.reply(
-      "Une erreur s'est produite lors de l'exécution de cette commande."
-    );
+    try {
+      if (command.executeMessage) {
+        command.executeMessage(message, args);
+      } else {
+        message.reply("Cette commande n'est pas configurée pour les messages.");
+      }
+    } catch (error) {
+      console.error(error);
+      message.reply(
+        "Une erreur s'est produite lors de l'exécution de cette commande."
+      );
+    }
+    return;
   }
+
+  const customReply = guildId && getCustomCommandReply(guildId, commandName);
+  if (customReply) {
+    const { content, deleteCmd, allowedMentions } = await expandCustomTemplate(
+      customReply,
+      message
+    );
+    if (content.trim()) {
+      await message.reply({ content, allowedMentions });
+    }
+    if (deleteCmd) {
+      await message.delete().catch(() => {});
+    }
+    return;
+  }
+
+  return message.reply(
+    `Commande \`${commandName}\` introuvable. Utilisez \`${prefix}help\` pour voir les commandes disponibles.`
+  );
 });
 
 // Accès aux variables d'environnement

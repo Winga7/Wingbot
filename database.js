@@ -6,7 +6,10 @@ const {
   LEGACY_MAP,
   TOGGLE_GROUP,
 } = require("./logFeatureDefinitions");
-const { ALL_COMMAND_IDS } = require("./commandsManifest");
+const {
+  ALL_COMMAND_IDS,
+  IMMUTABLE_COMMAND_IDS,
+} = require("./commandsManifest");
 
 // Créer ou ouvrir la base de données
 const db = new Database(path.join(__dirname, "wingbot.db"));
@@ -63,8 +66,26 @@ function initDatabase() {
 
   migrateLogSettingsFeatureFlags();
   migrateGuildConfigExtras();
+  migrateCustomCommandsTable();
 
   console.log("✅ Base de données initialisée");
+}
+
+function migrateCustomCommandsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS custom_commands (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      trigger TEXT NOT NULL,
+      response TEXT NOT NULL,
+      UNIQUE (guild_id, trigger)
+    )
+  `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_custom_commands_guild ON custom_commands(guild_id)`
+  ).run();
 }
 
 function migrateLogSettingsFeatureFlags() {
@@ -246,14 +267,89 @@ function getDisabledCommands(guildId) {
   if (!row?.commands_disabled) return [];
   try {
     const arr = JSON.parse(row.commands_disabled);
-    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+    const list = Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+    const immutable = new Set(IMMUTABLE_COMMAND_IDS);
+    return list.filter((id) => !immutable.has(id));
   } catch {
     return [];
   }
 }
 
 function isCommandEnabled(guildId, commandName) {
+  if (IMMUTABLE_COMMAND_IDS.includes(commandName)) return true;
   return !getDisabledCommands(guildId).includes(commandName);
+}
+
+/** Clé de déclencheur (minuscules, trim) — compatible caractères accentués */
+function normalizeCustomTrigger(raw) {
+  return String(raw || "").trim().toLowerCase();
+}
+
+function isValidCustomTrigger(tr) {
+  if (!tr || tr.length > 32) return false;
+  return /^[\p{L}\p{N}_-]{1,32}$/u.test(tr);
+}
+
+function getCustomCommands(guildId) {
+  const rows = db
+    .prepare(
+      `SELECT id, trigger, response FROM custom_commands WHERE guild_id = ? ORDER BY trigger ASC`
+    )
+    .all(guildId);
+  return rows.map((r) => ({
+    id: r.id,
+    trigger: r.trigger,
+    response: r.response,
+  }));
+}
+
+function getCustomCommandReply(guildId, triggerLower) {
+  const t = normalizeCustomTrigger(triggerLower);
+  if (!t) return null;
+  const row = db
+    .prepare(
+      `SELECT response FROM custom_commands WHERE guild_id = ? AND trigger = ?`
+    )
+    .get(guildId, t);
+  return row?.response ?? null;
+}
+
+function replaceCustomCommands(guildId, rows) {
+  if (!Array.isArray(rows)) {
+    throw new Error("custom_commands doit être un tableau");
+  }
+  const reserved = new Set(ALL_COMMAND_IDS);
+  const seen = new Set();
+  const insert = db.prepare(
+    `INSERT INTO custom_commands (guild_id, trigger, response) VALUES (?, ?, ?)`
+  );
+  const del = db.prepare(`DELETE FROM custom_commands WHERE guild_id = ?`);
+
+  const transaction = db.transaction(() => {
+    del.run(guildId);
+    for (const row of rows) {
+      const tr = normalizeCustomTrigger(row.trigger);
+      const resp = String(row.response ?? "").trim();
+      if (!tr || !resp) continue;
+      if (!isValidCustomTrigger(tr)) {
+        throw new Error(
+          `Déclencheur invalide « ${tr} » : 1–32 caractères (lettres y compris accents, chiffres, _ ou -)`
+        );
+      }
+      if (reserved.has(tr)) {
+        throw new Error(
+          `Le nom « ${tr} » est réservé pour une commande du bot`
+        );
+      }
+      if (resp.length > 2000) {
+        throw new Error("Réponse trop longue (max 2000 caractères)");
+      }
+      if (seen.has(tr)) continue;
+      seen.add(tr);
+      insert.run(guildId, tr, resp);
+    }
+  });
+  transaction();
 }
 
 /** Payload unifié pour le dashboard */
@@ -266,6 +362,7 @@ function getGuildDashboardPayload(guildId) {
     prefix: getGuildPrefix(guildId),
     logs_master_enabled: isLogsMasterEnabled(guildId),
     commands_disabled: getDisabledCommands(guildId),
+    custom_commands: getCustomCommands(guildId),
   };
 }
 
@@ -336,14 +433,19 @@ function applyGuildSettingsPatch(guildId, patch) {
       throw new Error("commands_disabled doit être un tableau de noms de commandes");
     }
     const valid = new Set(ALL_COMMAND_IDS);
+    const immutable = new Set(IMMUTABLE_COMMAND_IDS);
     const filtered = [
       ...new Set(
         patch.commands_disabled.filter((x) => typeof x === "string")
       ),
-    ].filter((id) => valid.has(id));
+    ].filter((id) => valid.has(id) && !immutable.has(id));
     db.prepare(
       "UPDATE guild_config SET commands_disabled = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
     ).run(JSON.stringify(filtered), guildId);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, "custom_commands")) {
+    replaceCustomCommands(guildId, patch.custom_commands);
   }
 }
 
@@ -449,6 +551,8 @@ module.exports = {
   getGuildPrefix,
   getDisabledCommands,
   isCommandEnabled,
+  getCustomCommands,
+  getCustomCommandReply,
   getGuildDashboardPayload,
   applyGuildSettingsPatch,
   ensureGuildLogRow,
