@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wingbot — Logs</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="side">
+        <div class="brand">
+          <span class="brand-mark">W</span>
+          <div>
+            <strong>Wingbot</strong>
+            <span class="muted tiny">Logs &amp; salon</span>
+          </div>
+        </div>
+
+        <details class="help-box">
+          <summary>À quoi sert l’URL du dashboard ?</summary>
+          <p class="help-text">
+            En temps normal, <strong>laisse ce champ vide</strong> : tu ouvres
+            la page fournie par <code>npm run dashboard</code> (ex.
+            <code>http://127.0.0.1:3847</code>), donc le navigateur et l’API
+            sont déjà au même endroit.
+          </p>
+          <p class="help-text">
+            Remplis l’URL <strong>uniquement</strong> si tu ouvres le HTML
+            depuis un autre outil (ex. Live Server sur un autre port) : indique
+            alors l’adresse complète du serveur Node qui tourne le dashboard,
+            sans <code>/</code> à la fin.
+          </p>
+        </details>
+
+        <label class="field">
+          <span class="field-label">URL du dashboard API (optionnel)</span>
+          <input
+            type="url"
+            id="api-origin"
+            placeholder="ex. http://127.0.0.1:3847"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">Token <code>DASHBOARD_TOKEN</code></span>
+          <input
+            type="password"
+            id="token"
+            placeholder="Secret du .env"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+        <button type="button" class="btn primary full" id="load">
+          Charger
+        </button>
+        <p id="error" class="error" hidden></p>
+
+        <div class="stats" id="stats-section" hidden>
+          <div class="stat-pill">
+            <span class="stat-val" id="stat-guilds">—</span>
+            <span class="stat-lbl">serveurs</span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-val" id="stat-cache">—</span>
+            <span class="stat-lbl">msg cache</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="panel card" id="main-panel" hidden>
+          <div class="panel-top">
+            <img
+              class="guild-icon"
+              id="guild-icon"
+              width="40"
+              height="40"
+              alt=""
+              hidden
+            />
+            <div class="panel-top-text">
+              <h1 class="panel-title" id="panel-title">Logs</h1>
+              <p class="muted tiny panel-sub" id="panel-sub">
+                Coche les événements puis enregistre ·
+                <code>wingbot.db</code>
+              </p>
+            </div>
+          </div>
+
+          <div class="panel-controls">
+            <label class="field compact-field">
+              <span class="field-label">Serveur</span>
+              <select id="guild-select"></select>
+            </label>
+            <label class="field compact-field grow">
+              <span class="field-label">Salon des logs</span>
+              <select id="log-channel-select"></select>
+            </label>
+          </div>
+          <p class="discord-warn muted tiny" id="discord-warn-meta" hidden></p>
+          <p class="discord-warn muted tiny" id="discord-warn-channels" hidden></p>
+
+          <div id="groups-root" class="groups-inner"></div>
+
+          <div class="save-bar">
+            <div class="save-hint muted tiny" id="dirty-hint" hidden>
+              Modifications non enregistrées
+            </div>
+            <button type="button" class="btn primary" id="save" disabled>
+              Enregistrer
+            </button>
+            <span class="save-status" id="save-status" aria-live="polite"></span>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <footer class="foot muted tiny">
+      API Bearer · le bot utilise <code>TOKEN</code> du <code>.env</code> pour
+      afficher noms et salons via Discord
+    </footer>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

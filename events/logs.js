@@ -1,7 +1,7 @@
 const { Events, AuditLogEvent, EmbedBuilder } = require("discord.js");
 const {
   getLogChannel,
-  getLogSettings,
+  isLogEnabled,
   cacheMessage,
   getCachedMessage,
 } = require("../database");
@@ -22,6 +22,12 @@ module.exports = (client) => {
     } catch (error) {
       console.error("Erreur lors de l'envoi du log:", error);
     }
+  }
+
+  function formatOverwriteTarget(guild, overwriteId) {
+    if (!guild || !overwriteId) return `\`${overwriteId}\``;
+    if (guild.roles.cache.has(overwriteId)) return `<@&${overwriteId}>`;
+    return `<@${overwriteId}>`;
   }
 
   // Helper: Récupérer l'auteur d'une action depuis l'audit log
@@ -54,6 +60,7 @@ module.exports = (client) => {
   client.on(Events.MessageCreate, (message) => {
     if (message.author.bot) return;
     if (!message.guild) return;
+    if (!isLogEnabled(message.guild.id, "msg_cache")) return;
 
     cacheMessage(message);
   });
@@ -62,8 +69,7 @@ module.exports = (client) => {
   client.on(Events.MessageDelete, async (message) => {
     if (!message.guild) return;
 
-    const settings = getLogSettings(message.guild.id);
-    if (!settings.log_messages) return;
+    if (!isLogEnabled(message.guild.id, "msg_delete")) return;
 
     // Récupérer le message du cache si partial
     let cachedData = null;
@@ -112,8 +118,7 @@ module.exports = (client) => {
     if (newMessage.author?.bot) return;
     if (oldMessage.content === newMessage.content) return; // Ignore si pas de changement de contenu
 
-    const settings = getLogSettings(newMessage.guild.id);
-    if (!settings.log_messages) return;
+    if (!isLogEnabled(newMessage.guild.id, "msg_edit")) return;
 
     const oldContent =
       oldMessage.content || "*[Contenu original non disponible]*";
@@ -139,8 +144,7 @@ module.exports = (client) => {
 
   // Membre rejoint
   client.on(Events.GuildMemberAdd, async (member) => {
-    const settings = getLogSettings(member.guild.id);
-    if (!settings.log_members) return;
+    if (!isLogEnabled(member.guild.id, "mem_join")) return;
 
     const accountAge = Math.floor(
       (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24)
@@ -172,52 +176,56 @@ module.exports = (client) => {
 
   // Membre parti/kické/banni
   client.on(Events.GuildMemberRemove, async (member) => {
-    const settings = getLogSettings(member.guild.id);
-    const logMembersEnabled = !!settings.log_members;
-    const logModerationEnabled = !!settings.log_moderation;
+    const gid = member.guild.id;
 
-    if (!logMembersEnabled && !logModerationEnabled) return;
+    const kickExecutor = await getAuditLogExecutor(
+      member.guild,
+      AuditLogEvent.MemberKick,
+      member.user.id
+    );
 
-    // Vérifier si c'est un kick ou ban
-    const kickExecutor = logModerationEnabled
-      ? await getAuditLogExecutor(
-          member.guild,
-          AuditLogEvent.MemberKick,
-          member.user.id
-        )
-      : null;
+    const banExecutor = await getAuditLogExecutor(
+      member.guild,
+      AuditLogEvent.MemberBanAdd,
+      member.user.id
+    );
 
-    const banExecutor = logModerationEnabled
-      ? await getAuditLogExecutor(
-          member.guild,
-          AuditLogEvent.MemberBanAdd,
-          member.user.id
-        )
-      : null;
-
-    let reason = "A quitté le serveur";
-    let color = 0xff9900;
-    let title = "👋 Membre Parti";
-
+    // Ban : détail dans GuildBanAdd (évite doublon)
     if (banExecutor) {
-      reason = `Banni par ${banExecutor.tag}`;
-      color = 0xff0000;
-      title = "🔨 Banni";
-    } else if (kickExecutor) {
-      reason = `Expulsé par ${kickExecutor.tag}`;
-      color = 0xff6600;
-      title = "👢 Expulsé";
-    } else {
-      // Membre parti (pas kick/ban)
-      if (!logMembersEnabled) return;
-    }
-
-    if (!banExecutor && !kickExecutor && logModerationEnabled === false) {
-      // Rien à faire (garde-fou)
       return;
     }
 
-    if ((banExecutor || kickExecutor) && !logModerationEnabled) return;
+    if (kickExecutor) {
+      if (!isLogEnabled(gid, "mem_kick")) return;
+
+      const rolesKick =
+        member.roles.cache
+          .filter((role) => role.id !== member.guild.id)
+          .map((role) => role.name)
+          .join(", ") || "Aucun rôle";
+
+      const embedKick = new EmbedBuilder()
+        .setColor(0xff6600)
+        .setTitle("👢 Expulsé")
+        .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
+        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+        .addFields(
+          { name: "Raison", value: `Expulsé par ${kickExecutor.tag}` },
+          { name: "Rôles", value: rolesKick.substring(0, 1024) },
+          {
+            name: "Nombre de membres",
+            value: member.guild.memberCount.toString(),
+            inline: true,
+          }
+        )
+        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+        .setTimestamp();
+
+      await sendLog(member.guild, embedKick);
+      return;
+    }
+
+    if (!isLogEnabled(gid, "mem_leave")) return;
 
     const roles =
       member.roles.cache
@@ -226,12 +234,12 @@ module.exports = (client) => {
         .join(", ") || "Aucun rôle";
 
     const embed = new EmbedBuilder()
-      .setColor(color)
-      .setTitle(title)
+      .setColor(0xff9900)
+      .setTitle("👋 Membre Parti")
       .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
       .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
       .addFields(
-        { name: "Raison", value: reason },
+        { name: "Raison", value: "A quitté le serveur" },
         { name: "Rôles", value: roles.substring(0, 1024) },
         {
           name: "Nombre de membres",
@@ -249,41 +257,43 @@ module.exports = (client) => {
 
   // Changements d'état vocal
   client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
-    const settings = getLogSettings(newState.guild.id);
-    if (!settings.log_voice) return;
-
+    const gid = newState.guild.id;
     const member = newState.member;
 
     // Rejoint un salon vocal
     if (!oldState.channel && newState.channel) {
-      const embed = new EmbedBuilder()
-        .setColor(0x00ff00)
-        .setTitle("🔊 Rejoint un Salon Vocal")
-        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-        .addFields({
-          name: "Salon",
-          value: `<#${newState.channel.id}>`,
-        })
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
-        .setTimestamp();
+      if (isLogEnabled(gid, "voc_join")) {
+        const embed = new EmbedBuilder()
+          .setColor(0x00ff00)
+          .setTitle("🔊 Rejoint un Salon Vocal")
+          .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+          .addFields({
+            name: "Salon",
+            value: `<#${newState.channel.id}>`,
+          })
+          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .setTimestamp();
 
-      await sendLog(newState.guild, embed);
+        await sendLog(newState.guild, embed);
+      }
     }
 
     // Quitté un salon vocal
     else if (oldState.channel && !newState.channel) {
-      const embed = new EmbedBuilder()
-        .setColor(0xff0000)
-        .setTitle("🔇 Quitté un Salon Vocal")
-        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-        .addFields({
-          name: "Salon",
-          value: `<#${oldState.channel.id}>`,
-        })
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
-        .setTimestamp();
+      if (isLogEnabled(gid, "voc_leave")) {
+        const embed = new EmbedBuilder()
+          .setColor(0xff0000)
+          .setTitle("🔇 Quitté un Salon Vocal")
+          .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+          .addFields({
+            name: "Salon",
+            value: `<#${oldState.channel.id}>`,
+          })
+          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .setTimestamp();
 
-      await sendLog(newState.guild, embed);
+        await sendLog(newState.guild, embed);
+      }
     }
 
     // Déplacé vers un autre salon
@@ -292,246 +302,116 @@ module.exports = (client) => {
       newState.channel &&
       oldState.channel.id !== newState.channel.id
     ) {
-      // Vérifier si c'est une action de modération
-      const moveExecutor = await getAuditLogExecutor(
-        newState.guild,
-        AuditLogEvent.MemberMove,
-        member.user.id
-      );
+      if (isLogEnabled(gid, "voc_move")) {
+        const moveExecutor = await getAuditLogExecutor(
+          newState.guild,
+          AuditLogEvent.MemberMove,
+          member.user.id
+        );
 
-      const embed = new EmbedBuilder()
-        .setColor(0xffa500)
-        .setTitle("🔀 Déplacé Entre Salons Vocaux")
-        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-        .addFields(
-          { name: "De", value: `<#${oldState.channel.id}>`, inline: true },
-          { name: "Vers", value: `<#${newState.channel.id}>`, inline: true },
-          {
-            name: "Action",
-            value: moveExecutor
-              ? `Déplacé par ${moveExecutor.tag}`
-              : "Déplacement manuel",
-          }
-        )
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
-        .setTimestamp();
+        const embed = new EmbedBuilder()
+          .setColor(0xffa500)
+          .setTitle("🔀 Déplacé Entre Salons Vocaux")
+          .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+          .addFields(
+            { name: "De", value: `<#${oldState.channel.id}>`, inline: true },
+            { name: "Vers", value: `<#${newState.channel.id}>`, inline: true },
+            {
+              name: "Action",
+              value: moveExecutor
+                ? `Déplacé par ${moveExecutor.tag}`
+                : "Déplacement manuel",
+            }
+          )
+          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .setTimestamp();
 
-      await sendLog(newState.guild, embed);
+        await sendLog(newState.guild, embed);
+      }
     }
 
     // Server Mute/Unmute
     if (oldState.serverMute !== newState.serverMute) {
-      const muteExecutor = await getAuditLogExecutor(
-        newState.guild,
-        AuditLogEvent.MemberUpdate,
-        member.user.id
-      );
+      if (isLogEnabled(gid, "voc_srv_mute")) {
+        const muteExecutor = await getAuditLogExecutor(
+          newState.guild,
+          AuditLogEvent.MemberUpdate,
+          member.user.id
+        );
 
-      const embed = new EmbedBuilder()
-        .setColor(newState.serverMute ? 0xff0000 : 0x00ff00)
-        .setTitle(newState.serverMute ? "🔇 Server Mute" : "🔊 Server Unmute")
-        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-        .addFields({
-          name: "Par",
-          value: muteExecutor ? muteExecutor.tag : "Système",
-        })
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
-        .setTimestamp();
+        const embed = new EmbedBuilder()
+          .setColor(newState.serverMute ? 0xff0000 : 0x00ff00)
+          .setTitle(newState.serverMute ? "🔇 Server Mute" : "🔊 Server Unmute")
+          .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+          .addFields({
+            name: "Par",
+            value: muteExecutor ? muteExecutor.tag : "Système",
+          })
+          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .setTimestamp();
 
-      await sendLog(newState.guild, embed);
+        await sendLog(newState.guild, embed);
+      }
     }
 
     // Server Deafen/Undeafen
     if (oldState.serverDeaf !== newState.serverDeaf) {
-      const deafenExecutor = await getAuditLogExecutor(
-        newState.guild,
-        AuditLogEvent.MemberUpdate,
-        member.user.id
-      );
+      if (isLogEnabled(gid, "voc_srv_deaf")) {
+        const deafenExecutor = await getAuditLogExecutor(
+          newState.guild,
+          AuditLogEvent.MemberUpdate,
+          member.user.id
+        );
 
-      const embed = new EmbedBuilder()
-        .setColor(newState.serverDeaf ? 0xff0000 : 0x00ff00)
-        .setTitle(
-          newState.serverDeaf ? "🔇 Server Deafen" : "🔊 Server Undeafen"
-        )
-        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-        .addFields({
-          name: "Par",
-          value: deafenExecutor ? deafenExecutor.tag : "Système",
-        })
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
-        .setTimestamp();
+        const embed = new EmbedBuilder()
+          .setColor(newState.serverDeaf ? 0xff0000 : 0x00ff00)
+          .setTitle(
+            newState.serverDeaf ? "🔇 Server Deafen" : "🔊 Server Undeafen"
+          )
+          .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+          .addFields({
+            name: "Par",
+            value: deafenExecutor ? deafenExecutor.tag : "Système",
+          })
+          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .setTimestamp();
 
-      await sendLog(newState.guild, embed);
+        await sendLog(newState.guild, embed);
+      }
     }
 
-    // Self mute/deaf/video/stream (actions de l'utilisateur sur lui-même)
-    if (oldState.selfMute !== newState.selfMute) {
-      const embed = new EmbedBuilder()
-        .setColor(newState.selfMute ? 0xff0000 : 0x00ff00)
-        .setTitle(newState.selfMute ? "🔇 Self Mute" : "🔊 Self Unmute")
-        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-        .addFields({
-          name: "Salon vocal",
-          value: newState.channel ? `<#${newState.channel.id}>` : "Hors vocal",
-          inline: true,
-        })
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
-        .setTimestamp();
-
-      await sendLog(newState.guild, embed);
-    }
-
-    if (oldState.selfDeaf !== newState.selfDeaf) {
-      const embed = new EmbedBuilder()
-        .setColor(newState.selfDeaf ? 0xff0000 : 0x00ff00)
-        .setTitle(newState.selfDeaf ? "🔇 Self Deaf" : "🔊 Self Undeaf")
-        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-        .addFields({
-          name: "Salon vocal",
-          value: newState.channel ? `<#${newState.channel.id}>` : "Hors vocal",
-          inline: true,
-        })
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
-        .setTimestamp();
-
-      await sendLog(newState.guild, embed);
-    }
-
-    if (oldState.selfVideo !== newState.selfVideo) {
-      const embed = new EmbedBuilder()
-        .setColor(newState.selfVideo ? 0x00ff00 : 0xffa500)
-        .setTitle(newState.selfVideo ? "📹 Self Video Activée" : "🛑 Self Video Désactivée")
-        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-        .addFields({
-          name: "Salon vocal",
-          value: newState.channel ? `<#${newState.channel.id}>` : "Hors vocal",
-          inline: true,
-        })
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
-        .setTimestamp();
-
-      await sendLog(newState.guild, embed);
-    }
-
-    // selfStream n'est dispo que pour certains clients/versions
-    if (typeof oldState.selfStream === "boolean" && oldState.selfStream !== newState.selfStream) {
-      const embed = new EmbedBuilder()
-        .setColor(newState.selfStream ? 0x00ff00 : 0xffa500)
-        .setTitle(newState.selfStream ? "🎥 Self Stream Démarré" : "🛑 Self Stream Arrêté")
-        .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-        .addFields({
-          name: "Salon vocal",
-          value: newState.channel ? `<#${newState.channel.id}>` : "Hors vocal",
-          inline: true,
-        })
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
-        .setTimestamp();
-
-      await sendLog(newState.guild, embed);
-    }
+    // Self mute/deaf/video/stream volontairement désactivé :
+    // c'est trop bruit et peu utile en pratique.
   });
 
   // === LOGS DE RÔLES ===
 
   // Changement de rôles
   client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
-    const settings = getLogSettings(newMember.guild.id);
-    const logRolesEnabled = !!settings.log_roles;
-    const logModerationEnabled = !!settings.log_moderation;
+    const gid = newMember.guild.id;
+    const oldRoles = oldMember.roles.cache;
+    const newRoles = newMember.roles.cache;
 
-    if (!logRolesEnabled && !logModerationEnabled) return;
+    // Rôle ajouté
+    const addedRoles = newRoles.filter((role) => !oldRoles.has(role.id));
+    if (addedRoles.size > 0 && isLogEnabled(gid, "role_add")) {
+      const roleExecutor = await getAuditLogExecutor(
+        newMember.guild,
+        AuditLogEvent.MemberRoleUpdate,
+        newMember.user.id
+      );
 
-    if (logRolesEnabled) {
-      const oldRoles = oldMember.roles.cache;
-      const newRoles = newMember.roles.cache;
-
-      // Rôle ajouté
-      const addedRoles = newRoles.filter((role) => !oldRoles.has(role.id));
-      if (addedRoles.size > 0) {
-        const roleExecutor = await getAuditLogExecutor(
-          newMember.guild,
-          AuditLogEvent.MemberRoleUpdate,
-          newMember.user.id
-        );
-
-        for (const [, role] of addedRoles) {
-          const embed = new EmbedBuilder()
-            .setColor(0x00ff00)
-            .setTitle("➕ Rôle Ajouté")
-            .setDescription(`${newMember.user.tag} (<@${newMember.user.id}>)`)
-            .addFields(
-              { name: "Rôle", value: role.toString(), inline: true },
-              {
-                name: "Par",
-                value: roleExecutor ? roleExecutor.tag : "Système",
-                inline: true,
-              }
-            )
-            .setFooter({ text: `ID Utilisateur: ${newMember.user.id}` })
-            .setTimestamp();
-
-          await sendLog(newMember.guild, embed);
-        }
-      }
-
-      // Rôle retiré
-      const removedRoles = oldRoles.filter((role) => !newRoles.has(role.id));
-      if (removedRoles.size > 0) {
-        const roleExecutor = await getAuditLogExecutor(
-          newMember.guild,
-          AuditLogEvent.MemberRoleUpdate,
-          newMember.user.id
-        );
-
-        for (const [, role] of removedRoles) {
-          const embed = new EmbedBuilder()
-            .setColor(0xff0000)
-            .setTitle("➖ Rôle Retiré")
-            .setDescription(`${newMember.user.tag} (<@${newMember.user.id}>)`)
-            .addFields(
-              { name: "Rôle", value: role.toString(), inline: true },
-              {
-                name: "Par",
-                value: roleExecutor ? roleExecutor.tag : "Système",
-                inline: true,
-              }
-            )
-            .setFooter({ text: `ID Utilisateur: ${newMember.user.id}` })
-            .setTimestamp();
-
-          await sendLog(newMember.guild, embed);
-        }
-      }
-
-      // Changement de surnom
-      if (oldMember.nickname !== newMember.nickname) {
-        const nicknameExecutor = await getAuditLogExecutor(
-          newMember.guild,
-          AuditLogEvent.MemberUpdate,
-          newMember.user.id
-        );
-
+      for (const [, role] of addedRoles) {
         const embed = new EmbedBuilder()
-          .setColor(0xffa500)
-          .setTitle("✏️ Surnom Modifié")
+          .setColor(0x00ff00)
+          .setTitle("➕ Rôle Ajouté")
           .setDescription(`${newMember.user.tag} (<@${newMember.user.id}>)`)
           .addFields(
-            {
-              name: "Ancien surnom",
-              value: oldMember.nickname || "*Aucun*",
-              inline: true,
-            },
-            {
-              name: "Nouveau surnom",
-              value: newMember.nickname || "*Aucun*",
-              inline: true,
-            },
+            { name: "Rôle", value: role.toString(), inline: true },
             {
               name: "Par",
-              value: nicknameExecutor
-                ? nicknameExecutor.tag
-                : newMember.user.tag + " (lui-même)",
+              value: roleExecutor ? roleExecutor.tag : "Système",
+              inline: true,
             }
           )
           .setFooter({ text: `ID Utilisateur: ${newMember.user.id}` })
@@ -541,8 +421,76 @@ module.exports = (client) => {
       }
     }
 
+    // Rôle retiré
+    const removedRoles = oldRoles.filter((role) => !newRoles.has(role.id));
+    if (removedRoles.size > 0 && isLogEnabled(gid, "role_remove")) {
+      const roleExecutor = await getAuditLogExecutor(
+        newMember.guild,
+        AuditLogEvent.MemberRoleUpdate,
+        newMember.user.id
+      );
+
+      for (const [, role] of removedRoles) {
+        const embed = new EmbedBuilder()
+          .setColor(0xff0000)
+          .setTitle("➖ Rôle Retiré")
+          .setDescription(`${newMember.user.tag} (<@${newMember.user.id}>)`)
+          .addFields(
+            { name: "Rôle", value: role.toString(), inline: true },
+            {
+              name: "Par",
+              value: roleExecutor ? roleExecutor.tag : "Système",
+              inline: true,
+            }
+          )
+          .setFooter({ text: `ID Utilisateur: ${newMember.user.id}` })
+          .setTimestamp();
+
+        await sendLog(newMember.guild, embed);
+      }
+    }
+
+    // Changement de surnom
+    if (
+      oldMember.nickname !== newMember.nickname &&
+      isLogEnabled(gid, "nick_change")
+    ) {
+      const nicknameExecutor = await getAuditLogExecutor(
+        newMember.guild,
+        AuditLogEvent.MemberUpdate,
+        newMember.user.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle("✏️ Surnom Modifié")
+        .setDescription(`${newMember.user.tag} (<@${newMember.user.id}>)`)
+        .addFields(
+          {
+            name: "Ancien surnom",
+            value: oldMember.nickname || "*Aucun*",
+            inline: true,
+          },
+          {
+            name: "Nouveau surnom",
+            value: newMember.nickname || "*Aucun*",
+            inline: true,
+          },
+          {
+            name: "Par",
+            value: nicknameExecutor
+              ? nicknameExecutor.tag
+              : newMember.user.tag + " (lui-même)",
+          }
+        )
+        .setFooter({ text: `ID Utilisateur: ${newMember.user.id}` })
+        .setTimestamp();
+
+      await sendLog(newMember.guild, embed);
+    }
+
     // === TIMEOUT (Modération) ===
-    if (logModerationEnabled) {
+    if (isLogEnabled(gid, "mod_timeout")) {
       const oldTimeout = oldMember.communicationDisabledUntil || null;
       const newTimeout = newMember.communicationDisabledUntil || null;
 
@@ -557,7 +505,6 @@ module.exports = (client) => {
         );
 
         const embed = new EmbedBuilder();
-        const isEnabled = newTimeout !== null;
         const isDisabled = oldTimeout !== null && newTimeout === null;
 
         if (!oldTimeout && newTimeout) {
@@ -606,8 +553,7 @@ module.exports = (client) => {
   client.on(Events.ChannelCreate, async (channel) => {
     const guild = channel?.guild;
     if (!guild) return;
-    const settings = getLogSettings(guild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(guild.id, "srv_channel")) return;
 
     const executor = await getAuditLogExecutor(
       guild,
@@ -636,8 +582,7 @@ module.exports = (client) => {
   client.on(Events.ChannelDelete, async (channel) => {
     const guild = channel?.guild;
     if (!guild) return;
-    const settings = getLogSettings(guild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(guild.id, "srv_channel")) return;
 
     const executor = await getAuditLogExecutor(
       guild,
@@ -666,8 +611,7 @@ module.exports = (client) => {
   client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
     const guild = newChannel?.guild || oldChannel?.guild;
     if (!guild) return;
-    const settings = getLogSettings(guild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(guild.id, "srv_channel")) return;
 
     const changes = [];
     if (oldChannel.name !== newChannel.name) {
@@ -722,6 +666,35 @@ module.exports = (client) => {
       }
     }
 
+    // Overwrites (permissions rôle / membre sur le salon)
+    try {
+      const oldOw = oldChannel.permissionOverwrites?.cache;
+      const newOw = newChannel.permissionOverwrites?.cache;
+      if (oldOw && newOw) {
+        const allIds = new Set([...oldOw.keys(), ...newOw.keys()]);
+        for (const id of allIds) {
+          const o = oldOw.get(id);
+          const n = newOw.get(id);
+          const label = formatOverwriteTarget(guild, id);
+          if (!o && n) {
+            changes.push(`Permission ajoutée: ${label}`);
+          } else if (o && !n) {
+            changes.push(`Permission supprimée: ${label}`);
+          } else if (o && n) {
+            const oA = String(o.allow?.bitfield ?? o.allow);
+            const nA = String(n.allow?.bitfield ?? n.allow);
+            const oD = String(o.deny?.bitfield ?? o.deny);
+            const nD = String(n.deny?.bitfield ?? n.deny);
+            if (oA !== nA || oD !== nD) {
+              changes.push(`Permissions modifiées: ${label}`);
+            }
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     if (changes.length === 0) return;
 
     const executor = await getAuditLogExecutor(
@@ -751,8 +724,7 @@ module.exports = (client) => {
   client.on(Events.ThreadCreate, async (thread) => {
     const guild = thread?.guild;
     if (!guild) return;
-    const settings = getLogSettings(guild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(guild.id, "srv_thread")) return;
 
     const executor = await getAuditLogExecutor(
       guild,
@@ -781,8 +753,7 @@ module.exports = (client) => {
   client.on(Events.ThreadDelete, async (thread) => {
     const guild = thread?.guild;
     if (!guild) return;
-    const settings = getLogSettings(guild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(guild.id, "srv_thread")) return;
 
     const executor = await getAuditLogExecutor(
       guild,
@@ -806,8 +777,7 @@ module.exports = (client) => {
   client.on(Events.ThreadUpdate, async (oldThread, newThread) => {
     const guild = newThread?.guild || oldThread?.guild;
     if (!guild) return;
-    const settings = getLogSettings(guild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(guild.id, "srv_thread")) return;
 
     const changes = [];
     if (oldThread.name !== newThread.name) {
@@ -849,8 +819,7 @@ module.exports = (client) => {
   client.on(Events.GuildEmojiCreate, async (emoji) => {
     const guild = emoji?.guild;
     if (!guild) return;
-    const settings = getLogSettings(guild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(guild.id, "srv_emoji")) return;
 
     const executor = await getAuditLogExecutor(
       guild,
@@ -875,8 +844,7 @@ module.exports = (client) => {
   client.on(Events.GuildEmojiDelete, async (emoji) => {
     const guild = emoji?.guild;
     if (!guild) return;
-    const settings = getLogSettings(guild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(guild.id, "srv_emoji")) return;
 
     const executor = await getAuditLogExecutor(
       guild,
@@ -900,8 +868,7 @@ module.exports = (client) => {
   client.on(Events.GuildEmojiUpdate, async (oldEmoji, newEmoji) => {
     const guild = newEmoji?.guild || oldEmoji?.guild;
     if (!guild) return;
-    const settings = getLogSettings(guild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(guild.id, "srv_emoji")) return;
 
     const changes = [];
     if (oldEmoji.name !== newEmoji.name) {
@@ -960,8 +927,7 @@ module.exports = (client) => {
       const guild = message?.guild;
       if (!guild) return;
 
-      const settings = getLogSettings(guild.id);
-      if (!settings.log_messages) return;
+      if (!isLogEnabled(guild.id, "msg_reaction")) return;
 
       const emojiStr = reaction.emoji?.toString?.() || "Émoji";
       const emojiName =
@@ -1013,8 +979,7 @@ module.exports = (client) => {
       const guild = message?.guild;
       if (!guild) return;
 
-      const settings = getLogSettings(guild.id);
-      if (!settings.log_messages) return;
+      if (!isLogEnabled(guild.id, "msg_reaction")) return;
 
       const emojiStr = reaction.emoji?.toString?.() || "Émoji";
       const emojiName =
@@ -1057,8 +1022,7 @@ module.exports = (client) => {
       const guild = first?.guild;
       if (!guild) return;
 
-      const settings = getLogSettings(guild.id);
-      if (!settings.log_messages) return;
+      if (!isLogEnabled(guild.id, "msg_bulk")) return;
 
       const deletedCount = messages?.size ?? 0;
 
@@ -1090,8 +1054,7 @@ module.exports = (client) => {
 
   // === LOGS SERVER (mise à jour du serveur) ===
   client.on(Events.GuildUpdate, async (oldGuild, newGuild) => {
-    const settings = getLogSettings(newGuild.id);
-    if (!settings.log_server) return;
+    if (!isLogEnabled(newGuild.id, "srv_guild_meta")) return;
 
     const changes = [];
     if (oldGuild.name !== newGuild.name) {
@@ -1131,8 +1094,7 @@ module.exports = (client) => {
     try {
       const guild = invite?.guild;
       if (!guild) return;
-      const settings = getLogSettings(guild.id);
-      if (!settings.log_server) return;
+      if (!isLogEnabled(guild.id, "srv_invite")) return;
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
@@ -1160,8 +1122,7 @@ module.exports = (client) => {
     try {
       const guild = invite?.guild;
       if (!guild) return;
-      const settings = getLogSettings(guild.id);
-      if (!settings.log_server) return;
+      if (!isLogEnabled(guild.id, "srv_invite")) return;
 
       const embed = new EmbedBuilder()
         .setColor(0xff0000)
@@ -1185,8 +1146,7 @@ module.exports = (client) => {
     try {
       const guild = ban?.guild;
       if (!guild) return;
-      const settings = getLogSettings(guild.id);
-      if (!settings.log_moderation) return;
+      if (!isLogEnabled(guild.id, "mod_unban")) return;
 
       const executor = await getAuditLogExecutor(
         guild,
@@ -1208,6 +1168,575 @@ module.exports = (client) => {
       await sendLog(guild, embed);
     } catch (err) {
       console.error("Erreur logs GuildBanRemove:", err);
+    }
+  });
+
+  // Ban explicite (détail + raison Discord)
+  client.on(Events.GuildBanAdd, async (ban) => {
+    try {
+      const guild = ban?.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "mod_ban")) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.MemberBanAdd,
+        ban.user.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xff0000)
+        .setTitle("🔨 Banni")
+        .setDescription(`${ban.user.tag} (<@${ban.user.id}>)`)
+        .setThumbnail(ban.user.displayAvatarURL({ dynamic: true, size: 256 }))
+        .addFields(
+          { name: "Raison", value: ban.reason || "Non spécifiée", inline: false },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: true },
+          { name: "ID", value: ban.user.id, inline: true }
+        )
+        .setFooter({ text: `ID Serveur: ${guild.id}` })
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildBanAdd:", err);
+    }
+  });
+
+  // Épingles (pin / unpin détecté via audit quand possible)
+  client.on(Events.ChannelPinsUpdate, async (channel) => {
+    try {
+      const guild = channel?.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "msg_pin")) return;
+
+      let title = "📌 Épingles mises à jour";
+      let extra = "";
+      try {
+        const pinLogs = await guild.fetchAuditLogs({
+          limit: 1,
+          type: AuditLogEvent.MessagePin,
+        });
+        const unpinLogs = await guild.fetchAuditLogs({
+          limit: 1,
+          type: AuditLogEvent.MessageUnpin,
+        });
+        const pinEntry = pinLogs.entries.first();
+        const unpinEntry = unpinLogs.entries.first();
+        const now = Date.now();
+        const pinOk = pinEntry && now - pinEntry.createdTimestamp < 5000;
+        const unpinOk = unpinEntry && now - unpinEntry.createdTimestamp < 5000;
+        if (
+          pinOk &&
+          (!unpinOk || pinEntry.createdTimestamp > unpinEntry.createdTimestamp)
+        ) {
+          title = "📌 Message épinglé";
+          extra = pinEntry.executor ? `Par ${pinEntry.executor.tag}` : "";
+        } else if (unpinOk) {
+          title = "📌 Message désépinglé";
+          extra = unpinEntry.executor
+            ? `Par ${unpinEntry.executor.tag}`
+            : "";
+        }
+      } catch {
+        /* ignore */
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle(title)
+        .setDescription(
+          channel.isTextBased?.()
+            ? `Salon: <#${channel.id}>`
+            : String(channel.name || channel.id)
+        );
+      if (extra) {
+        embed.addFields({ name: "Audit", value: extra, inline: false });
+      }
+      embed.setFooter({ text: `ID Salon: ${channel.id}` }).setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs ChannelPinsUpdate:", err);
+    }
+  });
+
+  // Rôles serveur (création / suppression / modification)
+  client.on(Events.GuildRoleCreate, async (role) => {
+    try {
+      const guild = role.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_role")) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.RoleCreate,
+        role.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle("🎭 Rôle créé")
+        .setDescription(`${role.name} (${role})`)
+        .addFields(
+          { name: "ID", value: role.id, inline: true },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: true }
+        )
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildRoleCreate:", err);
+    }
+  });
+
+  client.on(Events.GuildRoleDelete, async (role) => {
+    try {
+      const guild = role.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_role")) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.RoleDelete,
+        role.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xff0000)
+        .setTitle("🗑️ Rôle supprimé")
+        .setDescription(`\`${role.name}\``)
+        .addFields(
+          { name: "ID", value: role.id, inline: true },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: true }
+        )
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildRoleDelete:", err);
+    }
+  });
+
+  client.on(Events.GuildRoleUpdate, async (oldRole, newRole) => {
+    try {
+      const guild = newRole.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_role")) return;
+
+      const changes = [];
+      if (oldRole.name !== newRole.name) {
+        changes.push(`Nom: \`${oldRole.name}\` -> \`${newRole.name}\``);
+      }
+      if (oldRole.color !== newRole.color) {
+        changes.push("Couleur modifiée");
+      }
+      if (oldRole.hoist !== newRole.hoist) {
+        changes.push(`Affichage séparé: \`${oldRole.hoist}\` -> \`${newRole.hoist}\``);
+      }
+      if (oldRole.mentionable !== newRole.mentionable) {
+        changes.push(`Mentionnable: \`${oldRole.mentionable}\` -> \`${newRole.mentionable}\``);
+      }
+      if (oldRole.permissions.bitfield !== newRole.permissions.bitfield) {
+        changes.push("Permissions modifiées");
+      }
+
+      if (changes.length === 0) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.RoleUpdate,
+        newRole.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle("🛠️ Rôle modifié")
+        .setDescription(`${newRole.name} (${newRole})`)
+        .addFields(
+          {
+            name: "Changements",
+            value: changes.join("\n").substring(0, 1024),
+            inline: false,
+          },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: false }
+        )
+        .setFooter({ text: `ID Rôle: ${newRole.id}` })
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildRoleUpdate:", err);
+    }
+  });
+
+  // Événements planifiés (serveur)
+  client.on(Events.GuildScheduledEventCreate, async (evt) => {
+    try {
+      const guild = evt.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_event")) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.GuildScheduledEventCreate,
+        evt.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle("📅 Événement créé")
+        .setDescription(evt.name || "Sans nom")
+        .addFields(
+          { name: "ID", value: evt.id, inline: true },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: true }
+        )
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildScheduledEventCreate:", err);
+    }
+  });
+
+  client.on(Events.GuildScheduledEventUpdate, async (oldEvt, newEvt) => {
+    try {
+      const guild = newEvt.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_event")) return;
+
+      const changes = [];
+      if (oldEvt.name !== newEvt.name) {
+        changes.push(`Nom: \`${oldEvt.name}\` -> \`${newEvt.name}\``);
+      }
+      if (oldEvt.status !== newEvt.status) {
+        changes.push(`Statut: \`${oldEvt.status}\` -> \`${newEvt.status}\``);
+      }
+      if (changes.length === 0) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.GuildScheduledEventUpdate,
+        newEvt.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle("🛠️ Événement modifié")
+        .setDescription(newEvt.name || "Sans nom")
+        .addFields(
+          {
+            name: "Changements",
+            value: changes.join("\n").substring(0, 1024),
+            inline: false,
+          },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: false }
+        )
+        .setFooter({ text: `ID: ${newEvt.id}` })
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildScheduledEventUpdate:", err);
+    }
+  });
+
+  client.on(Events.GuildScheduledEventDelete, async (evt) => {
+    try {
+      const guild = evt.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_event")) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.GuildScheduledEventDelete,
+        evt.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xff0000)
+        .setTitle("🗑️ Événement supprimé")
+        .setDescription(evt.name || "Sans nom")
+        .addFields(
+          { name: "ID", value: evt.id, inline: true },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: true }
+        )
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildScheduledEventDelete:", err);
+    }
+  });
+
+  client.on(Events.GuildScheduledEventUserAdd, async (scheduledEvent, user) => {
+    try {
+      const guild = scheduledEvent.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_event_user")) return;
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle("✅ Inscription événement")
+        .setDescription(`${user.tag} (<@${user.id}>)`)
+        .addFields({ name: "Événement", value: scheduledEvent.name || scheduledEvent.id })
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildScheduledEventUserAdd:", err);
+    }
+  });
+
+  client.on(Events.GuildScheduledEventUserRemove, async (scheduledEvent, user) => {
+    try {
+      const guild = scheduledEvent.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_event_user")) return;
+
+      const embed = new EmbedBuilder()
+        .setColor(0xff9900)
+        .setTitle("❌ Désinscription événement")
+        .setDescription(`${user.tag} (<@${user.id}>)`)
+        .addFields({ name: "Événement", value: scheduledEvent.name || scheduledEvent.id })
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildScheduledEventUserRemove:", err);
+    }
+  });
+
+  // Stickers serveur
+  client.on(Events.GuildStickerCreate, async (sticker) => {
+    try {
+      const guild = sticker.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_sticker")) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.StickerCreate,
+        sticker.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle("🏷️ Sticker créé")
+        .setDescription(`\`${sticker.name}\``)
+        .addFields(
+          { name: "ID", value: sticker.id, inline: true },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: true }
+        )
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildStickerCreate:", err);
+    }
+  });
+
+  client.on(Events.GuildStickerDelete, async (sticker) => {
+    try {
+      const guild = sticker.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_sticker")) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.StickerDelete,
+        sticker.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xff0000)
+        .setTitle("🗑️ Sticker supprimé")
+        .setDescription(`\`${sticker.name}\``)
+        .addFields(
+          { name: "ID", value: sticker.id, inline: true },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: true }
+        )
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildStickerDelete:", err);
+    }
+  });
+
+  client.on(Events.GuildStickerUpdate, async (oldSticker, newSticker) => {
+    try {
+      const guild = newSticker.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_sticker")) return;
+
+      const changes = [];
+      if (oldSticker.name !== newSticker.name) {
+        changes.push(`Nom: \`${oldSticker.name}\` -> \`${newSticker.name}\``);
+      }
+      if (oldSticker.description !== newSticker.description) {
+        changes.push("Description modifiée");
+      }
+      if (changes.length === 0) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.StickerUpdate,
+        newSticker.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle("🛠️ Sticker modifié")
+        .setDescription(`\`${newSticker.name}\``)
+        .addFields(
+          {
+            name: "Changements",
+            value: changes.join("\n").substring(0, 1024),
+            inline: false,
+          },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: false }
+        )
+        .setFooter({ text: `ID: ${newSticker.id}` })
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs GuildStickerUpdate:", err);
+    }
+  });
+
+  // Scène (stage)
+  client.on(Events.StageInstanceCreate, async (instance) => {
+    try {
+      const guild = instance.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_stage")) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.StageInstanceCreate,
+        instance.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle("🎭 Scène créée")
+        .setDescription(instance.topic || "Sans titre")
+        .addFields(
+          {
+            name: "Salon",
+            value: instance.channelId ? `<#${instance.channelId}>` : "Inconnu",
+            inline: false,
+          },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: false }
+        )
+        .setFooter({ text: `ID: ${instance.id}` })
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs StageInstanceCreate:", err);
+    }
+  });
+
+  client.on(Events.StageInstanceDelete, async (instance) => {
+    try {
+      const guild = instance.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_stage")) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.StageInstanceDelete,
+        instance.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xff0000)
+        .setTitle("🗑️ Scène supprimée")
+        .setDescription(instance.topic || "Sans titre")
+        .addFields(
+          {
+            name: "Salon",
+            value: instance.channelId ? `<#${instance.channelId}>` : "Inconnu",
+            inline: false,
+          },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: false }
+        )
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs StageInstanceDelete:", err);
+    }
+  });
+
+  client.on(Events.StageInstanceUpdate, async (oldInst, newInst) => {
+    try {
+      const guild = newInst.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_stage")) return;
+
+      const changes = [];
+      if (oldInst.topic !== newInst.topic) {
+        changes.push(
+          `Titre: \`${(oldInst.topic || "").substring(0, 80)}\` -> \`${(newInst.topic || "").substring(0, 80)}\``
+        );
+      }
+      if (changes.length === 0) return;
+
+      const executor = await getAuditLogExecutor(
+        guild,
+        AuditLogEvent.StageInstanceUpdate,
+        newInst.id
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle("🛠️ Scène modifiée")
+        .setDescription(newInst.topic || "Sans titre")
+        .addFields(
+          {
+            name: "Changements",
+            value: changes.join("\n").substring(0, 1024),
+            inline: false,
+          },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: false }
+        )
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs StageInstanceUpdate:", err);
+    }
+  });
+
+  // Webhooks du salon
+  client.on(Events.WebhooksUpdate, async (channel) => {
+    try {
+      const guild = channel?.guild;
+      if (!guild) return;
+      if (!isLogEnabled(guild.id, "srv_webhook")) return;
+
+      const hooks = await channel.fetchWebhooks().catch(() => null);
+      const names = hooks
+        ? hooks.map((w) => w.name).slice(0, 8).join(", ")
+        : "—";
+
+      const embed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle("🔗 Webhooks mis à jour")
+        .setDescription(channel.isTextBased?.() ? `<#${channel.id}>` : String(channel.id))
+        .addFields(
+          { name: "Webhooks (aperçu)", value: names.substring(0, 1024) || "—" },
+          { name: "Nombre", value: `${hooks ? hooks.size : 0}`, inline: true }
+        )
+        .setTimestamp();
+
+      await sendLog(guild, embed);
+    } catch (err) {
+      console.error("Erreur logs WebhooksUpdate:", err);
     }
   });
 
