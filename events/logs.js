@@ -7,6 +7,75 @@ const {
 } = require("../database");
 
 module.exports = (client) => {
+  if (client.__wingbotLogsAttached) {
+    console.warn(
+      "[logs] Initialisation ignorée : les écouteurs sont déjà enregistrés (évite les doublons)."
+    );
+    return;
+  }
+  client.__wingbotLogsAttached = true;
+
+  /** Évite les doubles « rejoint le vocal » (Discord envoie parfois 2 mises à jour rapprochées). */
+  const voiceJoinDedup = new Map();
+
+  function shouldEmitVoiceJoin(guildId, userId, channelId) {
+    const key = `${String(guildId)}:${String(userId)}:${String(channelId)}`;
+    const now = Date.now();
+    const prev = voiceJoinDedup.get(key);
+    if (prev != null && now - prev < 3200) return false;
+    voiceJoinDedup.set(key, now);
+    if (voiceJoinDedup.size > 400) {
+      const cutoff = now - 15000;
+      for (const [k, t] of voiceJoinDedup) {
+        if (t < cutoff) voiceJoinDedup.delete(k);
+      }
+    }
+    return true;
+  }
+
+  const voiceLeaveDedup = new Map();
+
+  function shouldEmitVoiceLeave(guildId, userId, channelId) {
+    const key = `${String(guildId)}:${String(userId)}:${String(channelId)}`;
+    const now = Date.now();
+    const prev = voiceLeaveDedup.get(key);
+    if (prev != null && now - prev < 3200) return false;
+    voiceLeaveDedup.set(key, now);
+    if (voiceLeaveDedup.size > 400) {
+      const cutoff = now - 15000;
+      for (const [k, t] of voiceLeaveDedup) {
+        if (t < cutoff) voiceLeaveDedup.delete(k);
+      }
+    }
+    return true;
+  }
+
+  const voiceMoveDedup = new Map();
+
+  /** Même changement de salon (switch) peut arriver 2× en < 1 s ; clés normalisées en string (évite doublons Map). */
+  function shouldEmitVoiceMove(guildId, userId, fromId, toId) {
+    const key = `${String(guildId)}:${String(userId)}:${String(fromId)}:${String(toId)}`;
+    const now = Date.now();
+    const prev = voiceMoveDedup.get(key);
+    if (prev != null && now - prev < 8500) return false;
+    voiceMoveDedup.set(key, now);
+    if (voiceMoveDedup.size > 400) {
+      const cutoff = now - 25000;
+      for (const [k, t] of voiceMoveDedup) {
+        if (t < cutoff) voiceMoveDedup.delete(k);
+      }
+    }
+    return true;
+  }
+
+  /** Dernier filet : même embed vocal parti 2× (Discord, shard, ou listener dupliqué). */
+  const VOICE_LOG_TITLES_DEDUPE = new Set([
+    "🔀 Déplacé entre salons vocaux",
+    "🔊 A rejoint un salon vocal",
+    "🔇 A quitté le salon vocal",
+  ]);
+  const vocalLogSendDedup = new Map();
+
   // Helper: Envoyer un log
   async function sendLog(guild, embed) {
     const logChannelId = getLogChannel(guild.id);
@@ -18,6 +87,30 @@ module.exports = (client) => {
     if (!logChannel || !logChannel.isTextBased?.()) return;
 
     try {
+      if (embed instanceof EmbedBuilder && guild?.id) {
+        const fields = embed.data.fields ?? [];
+        if (!fields.some((f) => f.name === "IDs")) {
+          embed.spliceFields(0, 0, logIdsField(idGuild(guild)));
+        }
+        const title = embed.data.title;
+        if (title && VOICE_LOG_TITLES_DEDUPE.has(title)) {
+          const idsVal =
+            (embed.data.fields ?? []).find((f) => f.name === "IDs")?.value ?? "";
+          const dedupeKey = `${guild.id}:${title}:${idsVal.slice(0, 320)}`;
+          const now = Date.now();
+          const prev = vocalLogSendDedup.get(dedupeKey);
+          if (prev != null && now - prev < 12000) {
+            return;
+          }
+          vocalLogSendDedup.set(dedupeKey, now);
+          if (vocalLogSendDedup.size > 300) {
+            const cutoff = now - 30000;
+            for (const [k, t] of vocalLogSendDedup) {
+              if (t < cutoff) vocalLogSendDedup.delete(k);
+            }
+          }
+        }
+      }
       await logChannel.send({ embeds: [embed] });
     } catch (error) {
       console.error("Erreur lors de l'envoi du log:", error);
@@ -28,6 +121,89 @@ module.exports = (client) => {
     if (!guild || !overwriteId) return `\`${overwriteId}\``;
     if (guild.roles.cache.has(overwriteId)) return `<@&${overwriteId}>`;
     return `<@${overwriteId}>`;
+  }
+
+  /** Horodatage création message (API ou ligne cache SQLite). */
+  function getMessageCreatedMs(message, cachedRow) {
+    if (message.createdTimestamp) return message.createdTimestamp;
+    if (cachedRow?.created_at) {
+      const t = new Date(cachedRow.created_at).getTime();
+      if (!Number.isNaN(t)) return t;
+    }
+    return null;
+  }
+
+  /** Date lisible + relatif (style clients Discord). */
+  function formatLogMessageDate(ms) {
+    if (ms == null || Number.isNaN(ms)) return "*Date inconnue*";
+    const sec = Math.floor(ms / 1000);
+    return `<t:${sec}:F> (<t:${sec}:R>)`;
+  }
+
+  /** Style captures : espaces autour de l’ID entre parenthèses. */
+  function parenId(snowflake) {
+    if (snowflake == null || snowflake === "") return " ( `—` )";
+    return ` ( \`${String(snowflake)}\` )`;
+  }
+
+  /** Bloc IDs messages : message, salon, auteur (sans serveur — idGuild est ajouté à part). */
+  function formatLogIdsBlock(messageId, channelId, userId) {
+    const lines = [
+      `Message${parenId(messageId)}`,
+      `Salon <#${channelId}>${parenId(channelId)}`,
+    ];
+    if (userId) {
+      lines.push(`Auteur <@${userId}>${parenId(userId)}`);
+    } else {
+      lines.push("*Auteur — ID inconnu*");
+    }
+    return lines.join("\n");
+  }
+
+  /** Champ « IDs » unique pour tous les logs (lignes concaténées, max 1024). */
+  function logIdsField(...parts) {
+    const text = parts
+      .flat()
+      .filter((x) => x != null && String(x).trim() !== "")
+      .join("\n");
+    const v =
+      text.length > 1024 ? text.slice(0, 1021).replace(/\n$/, "") + "…" : text;
+    return { name: "IDs", value: v || "`—`", inline: false };
+  }
+
+  function idGuild(guild) {
+    if (!guild?.id) return null;
+    return `${guild.name || "Serveur"}${parenId(guild.id)}`;
+  }
+
+  function idMember(userId, label = "Membre") {
+    if (!userId) return null;
+    return `${label} <@${userId}>${parenId(userId)}`;
+  }
+
+  function idExecutor(executor) {
+    if (!executor?.id) return null;
+    return `Modérateur <@${executor.id}>${parenId(executor.id)}`;
+  }
+
+  function idChannel(chId, label = "Salon") {
+    if (!chId) return null;
+    return `${label} <#${chId}>${parenId(chId)}`;
+  }
+
+  function idRole(roleId) {
+    if (!roleId) return null;
+    return `Rôle <@&${roleId}>${parenId(roleId)}`;
+  }
+
+  function idMessage(msgId) {
+    if (!msgId) return null;
+    return `Message${parenId(msgId)}`;
+  }
+
+  function idSnowflake(label, snowflake) {
+    if (!snowflake) return null;
+    return `${label}${parenId(snowflake)}`;
   }
 
   // Helper: Récupérer l'auteur d'une action depuis l'audit log
@@ -83,6 +259,7 @@ module.exports = (client) => {
       tag: cachedData?.author_tag || "Inconnu",
       id: cachedData?.author_id,
     };
+    const authorId = author.id || cachedData?.author_id || null;
 
     const attachments =
       message.attachments?.size > 0
@@ -93,20 +270,34 @@ module.exports = (client) => {
             .join("\n")
         : "Aucune";
 
+    const createdMs = getMessageCreatedMs(message, cachedData) ?? Date.now();
+    const idsValue = [
+      idGuild(message.guild),
+      formatLogIdsBlock(message.id, message.channel.id, authorId),
+    ]
+      .filter(Boolean)
+      .join("\n");
+
     const embed = new EmbedBuilder()
       .setColor(0xff0000)
-      .setTitle("🗑️ Message Supprimé")
+      .setTitle("🗑️ Message supprimé")
       .setDescription(
-        `**Auteur:** ${author.tag} (<@${author.id}>)\n**Salon:** <#${message.channel.id}>`
+        (content || "*[Vide]*").substring(0, 4096)
       )
       .addFields(
-        { name: "Contenu", value: content.substring(0, 1024) || "*Vide*" },
+        { name: "IDs", value: idsValue.substring(0, 1024), inline: false },
+        {
+          name: "Date du message",
+          value: formatLogMessageDate(createdMs),
+          inline: false,
+        },
         {
           name: "Pièces jointes",
           value: attachments.substring(0, 1024) || "Aucune",
+          inline: false,
         }
       )
-      .setFooter({ text: `ID Message: ${message.id}` })
+      .setFooter({ text: author.tag })
       .setTimestamp();
 
     await sendLog(message.guild, embed);
@@ -124,17 +315,36 @@ module.exports = (client) => {
       oldMessage.content || "*[Contenu original non disponible]*";
     const newContent = newMessage.content || "*[Contenu vide]*";
 
+    const createdMs =
+      getMessageCreatedMs(newMessage, null) ??
+      getMessageCreatedMs(oldMessage, null) ??
+      Date.now();
+    const idsValue = [
+      idGuild(newMessage.guild),
+      formatLogIdsBlock(
+        newMessage.id,
+        newMessage.channel.id,
+        newMessage.author?.id ?? null
+      ),
+    ]
+      .filter(Boolean)
+      .join("\n");
+
     const embed = new EmbedBuilder()
       .setColor(0xffa500)
-      .setTitle("✏️ Message Modifié")
-      .setDescription(
-        `**Auteur:** ${newMessage.author.tag} (<@${newMessage.author.id}>)\n**Salon:** <#${newMessage.channel.id}>\n**[Aller au message](${newMessage.url})**`
-      )
+      .setTitle("✏️ Message modifié")
+      .setDescription(`**[Aller au message](${newMessage.url})**`)
       .addFields(
+        { name: "IDs", value: idsValue.substring(0, 1024), inline: false },
+        {
+          name: "Date du message",
+          value: formatLogMessageDate(createdMs),
+          inline: false,
+        },
         { name: "📜 Ancien message", value: oldContent.substring(0, 1024) },
         { name: "📝 Nouveau message", value: newContent.substring(0, 1024) }
       )
-      .setFooter({ text: `ID Message: ${newMessage.id}` })
+      .setFooter({ text: newMessage.author?.tag || "Message modifié" })
       .setTimestamp();
 
     await sendLog(newMessage.guild, embed);
@@ -156,7 +366,7 @@ module.exports = (client) => {
       .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
       .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
       .addFields(
-        { name: "ID", value: member.user.id, inline: true },
+        logIdsField(idGuild(member.guild), idMember(member.user.id)),
         {
           name: "Compte créé",
           value: `Il y a ${accountAge} jours`,
@@ -168,7 +378,7 @@ module.exports = (client) => {
           inline: true,
         }
       )
-      .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+      .setFooter({ text: member.user.tag })
       .setTimestamp();
 
     await sendLog(member.guild, embed);
@@ -210,6 +420,11 @@ module.exports = (client) => {
         .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
         .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
         .addFields(
+          logIdsField(
+            idGuild(member.guild),
+            idMember(member.user.id),
+            idExecutor(kickExecutor)
+          ),
           { name: "Raison", value: `Expulsé par ${kickExecutor.tag}` },
           { name: "Rôles", value: rolesKick.substring(0, 1024) },
           {
@@ -218,7 +433,7 @@ module.exports = (client) => {
             inline: true,
           }
         )
-        .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+        .setFooter({ text: member.user.tag })
         .setTimestamp();
 
       await sendLog(member.guild, embedKick);
@@ -239,6 +454,7 @@ module.exports = (client) => {
       .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
       .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
       .addFields(
+        logIdsField(idGuild(member.guild), idMember(member.user.id)),
         { name: "Raison", value: "A quitté le serveur" },
         { name: "Rôles", value: roles.substring(0, 1024) },
         {
@@ -247,7 +463,7 @@ module.exports = (client) => {
           inline: true,
         }
       )
-      .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+      .setFooter({ text: member.user.tag })
       .setTimestamp();
 
     await sendLog(member.guild, embed);
@@ -255,23 +471,47 @@ module.exports = (client) => {
 
   // === LOGS VOCAUX ===
 
-  // Changements d'état vocal
-  client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  // Changements d'état vocal (listener nommé : évite double enregistrement si rechargement du module)
+  async function wingbotVoiceStateUpdate(oldState, newState) {
+    if (newState.id === client.user.id) return;
+
     const gid = newState.guild.id;
-    const member = newState.member;
+    let member = newState.member;
+    if (!member) {
+      member = await newState.guild.members
+        .fetch(newState.id)
+        .catch(() => null);
+    }
+    if (!member?.user) return;
+
+    const isJoin = !oldState.channelId && !!newState.channelId;
+    const isLeave = !!oldState.channelId && !newState.channelId;
+    /** Discord remet souvent sourdine/casque « serveur » à jour au même moment qu’une entrée/sortie : faux logs en double. */
+    const suppressServerVoiceFlags = isJoin || isLeave;
+
+    const sameVoiceChannel =
+      oldState.channelId &&
+      newState.channelId &&
+      oldState.channelId === newState.channelId;
 
     // Rejoint un salon vocal
-    if (!oldState.channel && newState.channel) {
-      if (isLogEnabled(gid, "voc_join")) {
+    if (isJoin) {
+      if (
+        isLogEnabled(gid, "voc_join") &&
+        shouldEmitVoiceJoin(gid, member.user.id, newState.channelId)
+      ) {
         const embed = new EmbedBuilder()
           .setColor(0x00ff00)
-          .setTitle("🔊 Rejoint un Salon Vocal")
+          .setTitle("🔊 A rejoint un salon vocal")
           .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-          .addFields({
-            name: "Salon",
-            value: `<#${newState.channel.id}>`,
-          })
-          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .addFields(
+            logIdsField(
+              idGuild(newState.guild),
+              idMember(member.user.id),
+              idChannel(String(newState.channelId), "Salon vocal")
+            )
+          )
+          .setFooter({ text: member.user.tag })
           .setTimestamp();
 
         await sendLog(newState.guild, embed);
@@ -279,30 +519,41 @@ module.exports = (client) => {
     }
 
     // Quitté un salon vocal
-    else if (oldState.channel && !newState.channel) {
-      if (isLogEnabled(gid, "voc_leave")) {
+    else if (isLeave) {
+      if (
+        isLogEnabled(gid, "voc_leave") &&
+        shouldEmitVoiceLeave(gid, member.user.id, oldState.channelId)
+      ) {
         const embed = new EmbedBuilder()
           .setColor(0xff0000)
-          .setTitle("🔇 Quitté un Salon Vocal")
+          .setTitle("🔇 A quitté le salon vocal")
           .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-          .addFields({
-            name: "Salon",
-            value: `<#${oldState.channel.id}>`,
-          })
-          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .addFields(
+            logIdsField(
+              idGuild(newState.guild),
+              idMember(member.user.id),
+              idChannel(String(oldState.channelId), "Salon vocal")
+            )
+          )
+          .setFooter({ text: member.user.tag })
           .setTimestamp();
 
         await sendLog(newState.guild, embed);
       }
     }
 
-    // Déplacé vers un autre salon
+    // Déplacé vers un autre salon (basé sur channelId : fiable même si l’objet GuildChannel n’est pas encore en cache)
     else if (
-      oldState.channel &&
-      newState.channel &&
-      oldState.channel.id !== newState.channel.id
+      oldState.channelId &&
+      newState.channelId &&
+      oldState.channelId !== newState.channelId
     ) {
-      if (isLogEnabled(gid, "voc_move")) {
+      const fromCh = String(oldState.channelId);
+      const toCh = String(newState.channelId);
+      if (
+        isLogEnabled(gid, "voc_move") &&
+        shouldEmitVoiceMove(gid, member.user.id, fromCh, toCh)
+      ) {
         const moveExecutor = await getAuditLogExecutor(
           newState.guild,
           AuditLogEvent.MemberMove,
@@ -311,11 +562,16 @@ module.exports = (client) => {
 
         const embed = new EmbedBuilder()
           .setColor(0xffa500)
-          .setTitle("🔀 Déplacé Entre Salons Vocaux")
+          .setTitle("🔀 Déplacé entre salons vocaux")
           .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
           .addFields(
-            { name: "De", value: `<#${oldState.channel.id}>`, inline: true },
-            { name: "Vers", value: `<#${newState.channel.id}>`, inline: true },
+            logIdsField(
+              idGuild(newState.guild),
+              idMember(member.user.id),
+              idChannel(fromCh, "De"),
+              idChannel(toCh, "Vers"),
+              idExecutor(moveExecutor)
+            ),
             {
               name: "Action",
               value: moveExecutor
@@ -323,15 +579,18 @@ module.exports = (client) => {
                 : "Déplacement manuel",
             }
           )
-          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .setFooter({ text: member.user.tag })
           .setTimestamp();
 
         await sendLog(newState.guild, embed);
       }
     }
 
-    // Server Mute/Unmute
-    if (oldState.serverMute !== newState.serverMute) {
+    // Sourdine forcée par le serveur (hors entrée/sortie du vocal — évite les doublons)
+    if (
+      !suppressServerVoiceFlags &&
+      oldState.serverMute !== newState.serverMute
+    ) {
       if (isLogEnabled(gid, "voc_srv_mute")) {
         const muteExecutor = await getAuditLogExecutor(
           newState.guild,
@@ -341,21 +600,38 @@ module.exports = (client) => {
 
         const embed = new EmbedBuilder()
           .setColor(newState.serverMute ? 0xff0000 : 0x00ff00)
-          .setTitle(newState.serverMute ? "🔇 Server Mute" : "🔊 Server Unmute")
+          .setTitle(
+            newState.serverMute
+              ? "🔇 Micro coupé par le serveur"
+              : "🔊 Micro serveur réactivé"
+          )
           .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-          .addFields({
-            name: "Par",
-            value: muteExecutor ? muteExecutor.tag : "Système",
-          })
-          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .addFields(
+            logIdsField(
+              idGuild(newState.guild),
+              idMember(member.user.id),
+              newState.channelId
+                ? idChannel(String(newState.channelId), "Salon vocal")
+                : null,
+              idExecutor(muteExecutor)
+            ),
+            {
+              name: "Par",
+              value: muteExecutor ? muteExecutor.tag : "Système",
+            }
+          )
+          .setFooter({ text: member.user.tag })
           .setTimestamp();
 
         await sendLog(newState.guild, embed);
       }
     }
 
-    // Server Deafen/Undeafen
-    if (oldState.serverDeaf !== newState.serverDeaf) {
+    // Casque forcé par le serveur (hors entrée/sortie du vocal)
+    if (
+      !suppressServerVoiceFlags &&
+      oldState.serverDeaf !== newState.serverDeaf
+    ) {
       if (isLogEnabled(gid, "voc_srv_deaf")) {
         const deafenExecutor = await getAuditLogExecutor(
           newState.guild,
@@ -366,23 +642,145 @@ module.exports = (client) => {
         const embed = new EmbedBuilder()
           .setColor(newState.serverDeaf ? 0xff0000 : 0x00ff00)
           .setTitle(
-            newState.serverDeaf ? "🔇 Server Deafen" : "🔊 Server Undeafen"
+            newState.serverDeaf
+              ? "🔇 Casque coupé par le serveur"
+              : "🔊 Casque serveur réactivé"
           )
           .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
-          .addFields({
-            name: "Par",
-            value: deafenExecutor ? deafenExecutor.tag : "Système",
-          })
-          .setFooter({ text: `ID Utilisateur: ${member.user.id}` })
+          .addFields(
+            logIdsField(
+              idGuild(newState.guild),
+              idMember(member.user.id),
+              newState.channelId
+                ? idChannel(String(newState.channelId), "Salon vocal")
+                : null,
+              idExecutor(deafenExecutor)
+            ),
+            {
+              name: "Par",
+              value: deafenExecutor ? deafenExecutor.tag : "Système",
+            }
+          )
+          .setFooter({ text: member.user.tag })
           .setTimestamp();
 
         await sendLog(newState.guild, embed);
       }
     }
 
-    // Self mute/deaf/video/stream volontairement désactivé :
-    // c'est trop bruit et peu utile en pratique.
-  });
+    // Micro / casque : actions du membre (hors server mute/deaf — déjà loggés plus haut)
+    if (
+      sameVoiceChannel &&
+      oldState.serverMute === newState.serverMute &&
+      oldState.mute !== newState.mute
+    ) {
+      if (isLogEnabled(gid, "voc_self_mute")) {
+        const embed = new EmbedBuilder()
+          .setColor(newState.mute ? 0xff6600 : 0x00cc66)
+          .setTitle(
+            newState.mute ? "🔇 Micro coupé (membre)" : "🔊 Micro réactivé (membre)"
+          )
+          .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+          .addFields(
+            logIdsField(
+              idGuild(newState.guild),
+              idMember(member.user.id),
+              idChannel(String(newState.channelId), "Salon vocal")
+            )
+          )
+          .setFooter({ text: member.user.tag })
+          .setTimestamp();
+
+        await sendLog(newState.guild, embed);
+      }
+    }
+
+    if (
+      sameVoiceChannel &&
+      oldState.serverDeaf === newState.serverDeaf &&
+      oldState.deaf !== newState.deaf
+    ) {
+      if (isLogEnabled(gid, "voc_self_deaf")) {
+        const embed = new EmbedBuilder()
+          .setColor(newState.deaf ? 0xff6600 : 0x00cc66)
+          .setTitle(
+            newState.deaf
+              ? "🔇 Casque coupé (membre)"
+              : "🔊 Casque réactivé (membre)"
+          )
+          .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+          .addFields(
+            logIdsField(
+              idGuild(newState.guild),
+              idMember(member.user.id),
+              idChannel(String(newState.channelId), "Salon vocal")
+            )
+          )
+          .setFooter({ text: member.user.tag })
+          .setTimestamp();
+
+        await sendLog(newState.guild, embed);
+      }
+    }
+
+    if (
+      newState.channel &&
+      oldState.channelId === newState.channelId &&
+      oldState.streaming !== newState.streaming
+    ) {
+      if (isLogEnabled(gid, "voc_stream")) {
+        const embed = new EmbedBuilder()
+          .setColor(newState.streaming ? 0x5865f2 : 0x99aab5)
+          .setTitle(
+            newState.streaming
+              ? "📡 Diffusion en direct activée"
+              : "📡 Diffusion en direct arrêtée"
+          )
+          .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+          .addFields(
+            logIdsField(
+              idGuild(newState.guild),
+              idMember(member.user.id),
+              idChannel(String(newState.channelId), "Salon vocal")
+            )
+          )
+          .setFooter({ text: member.user.tag })
+          .setTimestamp();
+
+        await sendLog(newState.guild, embed);
+      }
+    }
+
+    if (
+      newState.channel &&
+      oldState.channelId === newState.channelId &&
+      oldState.selfVideo !== newState.selfVideo
+    ) {
+      if (isLogEnabled(gid, "voc_video")) {
+        const embed = new EmbedBuilder()
+          .setColor(newState.selfVideo ? 0x57f287 : 0x99aab5)
+          .setTitle(
+            newState.selfVideo ? "📹 Caméra activée" : "📹 Caméra désactivée"
+          )
+          .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
+          .addFields(
+            logIdsField(
+              idGuild(newState.guild),
+              idMember(member.user.id),
+              idChannel(String(newState.channelId), "Salon vocal")
+            )
+          )
+          .setFooter({ text: member.user.tag })
+          .setTimestamp();
+
+        await sendLog(newState.guild, embed);
+      }
+    }
+  }
+
+  client.removeAllListeners(Events.VoiceStateUpdate);
+  client._wingbotVoiceStateListener = wingbotVoiceStateUpdate;
+  client.on(Events.VoiceStateUpdate, wingbotVoiceStateUpdate);
 
   // === LOGS DE RÔLES ===
 
@@ -407,6 +805,12 @@ module.exports = (client) => {
           .setTitle("➕ Rôle Ajouté")
           .setDescription(`${newMember.user.tag} (<@${newMember.user.id}>)`)
           .addFields(
+            logIdsField(
+              idGuild(newMember.guild),
+              idMember(newMember.user.id),
+              idRole(role.id),
+              idExecutor(roleExecutor)
+            ),
             { name: "Rôle", value: role.toString(), inline: true },
             {
               name: "Par",
@@ -414,7 +818,7 @@ module.exports = (client) => {
               inline: true,
             }
           )
-          .setFooter({ text: `ID Utilisateur: ${newMember.user.id}` })
+          .setFooter({ text: newMember.user.tag })
           .setTimestamp();
 
         await sendLog(newMember.guild, embed);
@@ -436,6 +840,12 @@ module.exports = (client) => {
           .setTitle("➖ Rôle Retiré")
           .setDescription(`${newMember.user.tag} (<@${newMember.user.id}>)`)
           .addFields(
+            logIdsField(
+              idGuild(newMember.guild),
+              idMember(newMember.user.id),
+              idRole(role.id),
+              idExecutor(roleExecutor)
+            ),
             { name: "Rôle", value: role.toString(), inline: true },
             {
               name: "Par",
@@ -443,7 +853,7 @@ module.exports = (client) => {
               inline: true,
             }
           )
-          .setFooter({ text: `ID Utilisateur: ${newMember.user.id}` })
+          .setFooter({ text: newMember.user.tag })
           .setTimestamp();
 
         await sendLog(newMember.guild, embed);
@@ -466,6 +876,11 @@ module.exports = (client) => {
         .setTitle("✏️ Surnom Modifié")
         .setDescription(`${newMember.user.tag} (<@${newMember.user.id}>)`)
         .addFields(
+          logIdsField(
+            idGuild(newMember.guild),
+            idMember(newMember.user.id),
+            idExecutor(nicknameExecutor)
+          ),
           {
             name: "Ancien surnom",
             value: oldMember.nickname || "*Aucun*",
@@ -483,7 +898,7 @@ module.exports = (client) => {
               : newMember.user.tag + " (lui-même)",
           }
         )
-        .setFooter({ text: `ID Utilisateur: ${newMember.user.id}` })
+        .setFooter({ text: newMember.user.tag })
         .setTimestamp();
 
       await sendLog(newMember.guild, embed);
@@ -519,9 +934,14 @@ module.exports = (client) => {
           .setDescription(
             `${newMember.user.tag} (<@${newMember.user.id}>)`
           )
-          .setFooter({ text: `ID Utilisateur: ${newMember.user.id}` })
+          .setFooter({ text: newMember.user.tag })
           .setTimestamp()
           .addFields(
+            logIdsField(
+              idGuild(newMember.guild),
+              idMember(newMember.user.id),
+              idExecutor(executor)
+            ),
             {
               name: "Par",
               value: executor ? executor.tag : "Système",
@@ -563,10 +983,15 @@ module.exports = (client) => {
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
-      .setTitle("🧱 Channel Créé")
+      .setTitle("🧱 Salon créé")
       .setDescription(`${channel.name} (<#${channel.id}>)`)
       .addFields(
-        { name: "ID", value: channel.id, inline: true },
+        logIdsField(
+          idGuild(guild),
+          idChannel(channel.id, "Salon"),
+          channel.parentId ? idChannel(channel.parentId, "Catégorie") : null,
+          idExecutor(executor)
+        ),
         {
           name: "Catégorie",
           value: channel.parentId ? `<#${channel.parentId}>` : "Aucune",
@@ -592,10 +1017,15 @@ module.exports = (client) => {
 
     const embed = new EmbedBuilder()
       .setColor(0xff0000)
-      .setTitle("🗑️ Channel Supprimé")
+      .setTitle("🗑️ Salon supprimé")
       .setDescription(`${channel.name || "Salon"} (<#${channel.id}>)`)
       .addFields(
-        { name: "ID", value: channel.id, inline: true },
+        logIdsField(
+          idGuild(guild),
+          idChannel(channel.id, "Salon"),
+          channel.parentId ? idChannel(channel.parentId, "Catégorie") : null,
+          idExecutor(executor)
+        ),
         {
           name: "Catégorie",
           value: channel.parentId ? `<#${channel.parentId}>` : "Aucune",
@@ -640,7 +1070,9 @@ module.exports = (client) => {
       typeof newChannel.nsfw === "boolean"
     ) {
       if (oldChannel.nsfw !== newChannel.nsfw) {
-        changes.push(`NSFW: \`${oldChannel.nsfw}\` -> \`${newChannel.nsfw}\``);
+        changes.push(
+          `Contenu sensible (NSFW) : \`${oldChannel.nsfw}\` -> \`${newChannel.nsfw}\``
+        );
       }
     }
 
@@ -650,19 +1082,23 @@ module.exports = (client) => {
       newChannel.rateLimitPerUser !== undefined
     ) {
       changes.push(
-        `Limite: \`${oldChannel.rateLimitPerUser || 0}\` -> \`${newChannel.rateLimitPerUser || 0}\``
+        `Mode lent (s) : \`${oldChannel.rateLimitPerUser || 0}\` -> \`${newChannel.rateLimitPerUser || 0}\``
       );
     }
 
     // Voice
     if (oldChannel.userLimit !== newChannel.userLimit) {
       if (newChannel.userLimit !== undefined) {
-        changes.push(`User limit: \`${oldChannel.userLimit}\` -> \`${newChannel.userLimit}\``);
+        changes.push(
+          `Limite de places : \`${oldChannel.userLimit}\` -> \`${newChannel.userLimit}\``
+        );
       }
     }
     if (oldChannel.bitrate !== newChannel.bitrate) {
       if (newChannel.bitrate !== undefined) {
-        changes.push(`Bitrate: \`${oldChannel.bitrate}\` -> \`${newChannel.bitrate}\``);
+        changes.push(
+          `Débit audio : \`${oldChannel.bitrate}\` -> \`${newChannel.bitrate}\``
+        );
       }
     }
 
@@ -677,16 +1113,16 @@ module.exports = (client) => {
           const n = newOw.get(id);
           const label = formatOverwriteTarget(guild, id);
           if (!o && n) {
-            changes.push(`Permission ajoutée: ${label}`);
+            changes.push(`Permission ajoutée : ${label}`);
           } else if (o && !n) {
-            changes.push(`Permission supprimée: ${label}`);
+            changes.push(`Permission supprimée : ${label}`);
           } else if (o && n) {
             const oA = String(o.allow?.bitfield ?? o.allow);
             const nA = String(n.allow?.bitfield ?? n.allow);
             const oD = String(o.deny?.bitfield ?? o.deny);
             const nD = String(n.deny?.bitfield ?? n.deny);
             if (oA !== nA || oD !== nD) {
-              changes.push(`Permissions modifiées: ${label}`);
+              changes.push(`Permissions modifiées : ${label}`);
             }
           }
         }
@@ -705,9 +1141,14 @@ module.exports = (client) => {
 
     const embed = new EmbedBuilder()
       .setColor(0xffa500)
-      .setTitle("🛠️ Channel Modifié")
+      .setTitle("🛠️ Salon modifié")
       .setDescription(`${newChannel.name} (<#${newChannel.id}>)`)
       .addFields(
+        logIdsField(
+          idGuild(guild),
+          idChannel(newChannel.id, "Salon"),
+          idExecutor(executor)
+        ),
         {
           name: "Changements",
           value: changes.join("\n").substring(0, 1024),
@@ -734,12 +1175,17 @@ module.exports = (client) => {
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
-      .setTitle("🧵 Thread Créé")
+      .setTitle("🧵 Fil créé")
       .setDescription(`${thread.name} (<#${thread.id}>)`)
       .addFields(
-        { name: "ID", value: thread.id, inline: true },
+        logIdsField(
+          idGuild(guild),
+          idChannel(thread.id, "Fil"),
+          thread.parentId ? idChannel(thread.parentId, "Salon parent") : null,
+          idExecutor(executor)
+        ),
         {
-          name: "Parent",
+          name: "Salon parent",
           value: thread.parentId ? `<#${thread.parentId}>` : "Aucun",
           inline: true,
         },
@@ -763,10 +1209,15 @@ module.exports = (client) => {
 
     const embed = new EmbedBuilder()
       .setColor(0xff0000)
-      .setTitle("🗑️ Thread Supprimé")
-      .setDescription(`${thread.name || "Thread"} (<#${thread.id}>)`)
+      .setTitle("🗑️ Fil supprimé")
+      .setDescription(`${thread.name || "Fil"} (<#${thread.id}>)`)
       .addFields(
-        { name: "ID", value: thread.id, inline: true },
+        logIdsField(
+          idGuild(guild),
+          idChannel(thread.id, "Fil"),
+          thread.parentId ? idChannel(thread.parentId, "Salon parent") : null,
+          idExecutor(executor)
+        ),
         { name: "Par", value: executor ? executor.tag : "Système", inline: false }
       )
       .setTimestamp();
@@ -784,10 +1235,14 @@ module.exports = (client) => {
       changes.push(`Nom: \`${oldThread.name}\` -> \`${newThread.name}\``);
     }
     if (oldThread.locked !== newThread.locked) {
-      changes.push(`Locked: \`${oldThread.locked}\` -> \`${newThread.locked}\``);
+      changes.push(
+        `Verrouillé : \`${oldThread.locked}\` -> \`${newThread.locked}\``
+      );
     }
     if (oldThread.archived !== newThread.archived) {
-      changes.push(`Archived: \`${oldThread.archived}\` -> \`${newThread.archived}\``);
+      changes.push(
+        `Archivé : \`${oldThread.archived}\` -> \`${newThread.archived}\``
+      );
     }
 
     if (changes.length === 0) return;
@@ -800,9 +1255,14 @@ module.exports = (client) => {
 
     const embed = new EmbedBuilder()
       .setColor(0xffa500)
-      .setTitle("🛠️ Thread Modifié")
+      .setTitle("🛠️ Fil modifié")
       .setDescription(`${newThread.name} (<#${newThread.id}>)`)
       .addFields(
+        logIdsField(
+          idGuild(guild),
+          idChannel(newThread.id, "Fil"),
+          idExecutor(executor)
+        ),
         {
           name: "Changements",
           value: changes.join("\n").substring(0, 1024),
@@ -829,10 +1289,14 @@ module.exports = (client) => {
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
-      .setTitle("😊 Emoji Créé")
+      .setTitle("😊 Émoji créé")
       .setDescription(`${emoji.toString()} \`${emoji.name}\``)
       .addFields(
-        { name: "ID", value: emoji.id, inline: true },
+        logIdsField(
+          idGuild(guild),
+          `${emoji.toString()}${parenId(emoji.id)}`,
+          idExecutor(executor)
+        ),
         { name: "Animé", value: emoji.animated ? "Oui" : "Non", inline: true },
         { name: "Par", value: executor ? executor.tag : "Système", inline: false }
       )
@@ -854,9 +1318,14 @@ module.exports = (client) => {
 
     const embed = new EmbedBuilder()
       .setColor(0xff0000)
-      .setTitle("🗑️ Emoji Supprimé")
+      .setTitle("🗑️ Émoji supprimé")
       .setDescription(`\`${emoji.name}\` (ID: ${emoji.id})`)
       .addFields(
+        logIdsField(
+          idGuild(guild),
+          idSnowflake("Émoji", emoji.id),
+          idExecutor(executor)
+        ),
         { name: "Animé", value: emoji.animated ? "Oui" : "Non", inline: true },
         { name: "Par", value: executor ? executor.tag : "Système", inline: false }
       )
@@ -881,7 +1350,7 @@ module.exports = (client) => {
     }
     if (oldEmoji.requireColons !== newEmoji.requireColons) {
       changes.push(
-        `Require colons: \`${oldEmoji.requireColons}\` -> \`${newEmoji.requireColons}\``
+        `Deux-points obligatoires : \`${oldEmoji.requireColons}\` -> \`${newEmoji.requireColons}\``
       );
     }
 
@@ -895,9 +1364,14 @@ module.exports = (client) => {
 
     const embed = new EmbedBuilder()
       .setColor(0xffa500)
-      .setTitle("🛠️ Emoji Modifié")
+      .setTitle("🛠️ Émoji modifié")
       .setDescription(`${newEmoji.toString()} \`${newEmoji.name}\``)
       .addFields(
+        logIdsField(
+          idGuild(guild),
+          `${newEmoji.toString()}${parenId(newEmoji.id)}`,
+          idExecutor(executor)
+        ),
         {
           name: "Changements",
           value: changes.join("\n").substring(0, 1024),
@@ -933,18 +1407,29 @@ module.exports = (client) => {
       const emojiName =
         reaction.emoji?.name || reaction.emoji?.id || emojiStr;
 
+      const emojiIdLine = reaction.emoji?.id
+        ? `${reaction.emoji.toString()}${parenId(reaction.emoji.id)}`
+        : `Émoji \`${emojiName}\` (${emojiStr})`;
+
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
         .setTitle("💠 Réaction ajoutée")
-        .setDescription(message?.url ? `Message: ${message.url}` : "Message")
+        .setDescription(message?.url ? `Message : ${message.url}` : "Message")
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idMessage(message.id),
+            message.channelId ? idChannel(message.channelId, "Salon") : null,
+            idMember(user.id, "Utilisateur"),
+            emojiIdLine
+          ),
           {
             name: "Utilisateur",
             value: user.tag ? `${user.tag} (<@${user.id}>)` : `${user.id}`,
             inline: false,
           },
           {
-            name: "Emoji",
+            name: "Émoji",
             value: `\`${emojiName}\` (${emojiStr})`,
             inline: true,
           },
@@ -954,7 +1439,7 @@ module.exports = (client) => {
             inline: true,
           }
         )
-        .setFooter({ text: `ID Message: ${message.id}` })
+        .setFooter({ text: user.tag || user.id })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -985,18 +1470,29 @@ module.exports = (client) => {
       const emojiName =
         reaction.emoji?.name || reaction.emoji?.id || emojiStr;
 
+      const emojiIdLineRm = reaction.emoji?.id
+        ? `${reaction.emoji.toString()}${parenId(reaction.emoji.id)}`
+        : `Émoji \`${emojiName}\` (${emojiStr})`;
+
       const embed = new EmbedBuilder()
         .setColor(0xffa500)
         .setTitle("💠 Réaction retirée")
-        .setDescription(message?.url ? `Message: ${message.url}` : "Message")
+        .setDescription(message?.url ? `Message : ${message.url}` : "Message")
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idMessage(message.id),
+            message.channelId ? idChannel(message.channelId, "Salon") : null,
+            idMember(user.id, "Utilisateur"),
+            emojiIdLineRm
+          ),
           {
             name: "Utilisateur",
             value: user.tag ? `${user.tag} (<@${user.id}>)` : `${user.id}`,
             inline: false,
           },
           {
-            name: "Emoji",
+            name: "Émoji",
             value: `\`${emojiName}\` (${emojiStr})`,
             inline: true,
           },
@@ -1006,7 +1502,7 @@ module.exports = (client) => {
             inline: true,
           }
         )
-        .setFooter({ text: `ID Message: ${message.id}` })
+        .setFooter({ text: user.tag || user.id })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1035,15 +1531,25 @@ module.exports = (client) => {
 
       const channelId = first?.channel?.id;
 
+      const idsBulk = [
+        idGuild(guild),
+        channelId != null
+          ? idChannel(channelId, "Salon cible")
+          : "*Salon inconnu*",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
       const embed = new EmbedBuilder()
         .setColor(0xff0000)
         .setTitle("🧨 Messages supprimés en masse")
+        .setDescription(`**${deletedCount}** message(s) supprimé(s).`)
         .addFields(
-          { name: "Salon", value: channelId ? `<#${channelId}>` : "Inconnu", inline: true },
+          { name: "IDs", value: idsBulk.substring(0, 1024), inline: false },
           { name: "Nombre", value: `${deletedCount}`, inline: true },
-          { name: "Auteurs (échantillon)", value: authors, inline: false }
+          { name: "Auteurs (échantillon)", value: authors.substring(0, 1024), inline: false }
         )
-        .setFooter({ text: "Bulk delete (Discord)" })
+        .setFooter({ text: "Suppression en masse (Discord)" })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1080,10 +1586,11 @@ module.exports = (client) => {
       .setTitle("🏷️ Serveur modifié")
       .setDescription(`${newGuild.name}`)
       .addFields(
+        logIdsField(idGuild(newGuild), idExecutor(executor)),
         { name: "Changements", value: changes.join("\n").substring(0, 1024), inline: false },
         { name: "Par", value: executor ? executor.tag : "Système", inline: false }
       )
-      .setFooter({ text: `ID Serveur: ${newGuild.id}` })
+      .setFooter({ text: newGuild.name })
       .setTimestamp();
 
     await sendLog(newGuild, embed);
@@ -1098,18 +1605,24 @@ module.exports = (client) => {
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
-        .setTitle("📨 Invite créée")
+        .setTitle("📨 Invitation créée")
         .setDescription(`Code: \`${invite.code}\``)
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Code invite", invite.code),
+            invite.channelId ? idChannel(invite.channelId, "Salon") : null,
+            invite.inviter?.id ? idMember(invite.inviter.id, "Créé par") : null
+          ),
           {
             name: "Salon",
             value: invite.channelId ? `<#${invite.channelId}>` : "Inconnu",
             inline: true,
           },
           { name: "Créé par", value: invite.inviter ? invite.inviter.tag : "Inconnu", inline: true },
-          { name: "Uses", value: `${invite.uses ?? 0}`, inline: true }
+          { name: "Utilisations", value: `${invite.uses ?? 0}`, inline: true }
         )
-        .setFooter({ text: `ID Invite: ${invite.code}` })
+        .setFooter({ text: `Invitation ${invite.code}` })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1126,13 +1639,18 @@ module.exports = (client) => {
 
       const embed = new EmbedBuilder()
         .setColor(0xff0000)
-        .setTitle("🗑️ Invite supprimée")
+        .setTitle("🗑️ Invitation supprimée")
         .setDescription(`Code: \`${invite.code}\``)
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Code invite", invite.code),
+            invite.channelId ? idChannel(invite.channelId, "Salon") : null
+          ),
           { name: "Salon", value: invite.channelId ? `<#${invite.channelId}>` : "Inconnu", inline: true },
-          { name: "Uses", value: `${invite.uses ?? 0}`, inline: true }
+          { name: "Utilisations", value: `${invite.uses ?? 0}`, inline: true }
         )
-        .setFooter({ text: `ID Invite: ${invite.code}` })
+        .setFooter({ text: `Invitation ${invite.code}` })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1156,13 +1674,17 @@ module.exports = (client) => {
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
-        .setTitle("✅ Unban")
+        .setTitle("✅ Débannissement")
         .setDescription(`${ban.user.tag} (<@${ban.user.id}>)`)
         .addFields(
-          { name: "Par", value: executor ? executor.tag : "Système", inline: false },
-          { name: "ID Utilisateur", value: ban.user.id, inline: true }
+          logIdsField(
+            idGuild(guild),
+            idMember(ban.user.id, "Membre"),
+            idExecutor(executor)
+          ),
+          { name: "Par", value: executor ? executor.tag : "Système", inline: false }
         )
-        .setFooter({ text: `ID Serveur: ${guild.id}` })
+        .setFooter({ text: ban.user.tag })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1190,11 +1712,15 @@ module.exports = (client) => {
         .setDescription(`${ban.user.tag} (<@${ban.user.id}>)`)
         .setThumbnail(ban.user.displayAvatarURL({ dynamic: true, size: 256 }))
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idMember(ban.user.id, "Membre"),
+            idExecutor(executor)
+          ),
           { name: "Raison", value: ban.reason || "Non spécifiée", inline: false },
-          { name: "Par", value: executor ? executor.tag : "Système", inline: true },
-          { name: "ID", value: ban.user.id, inline: true }
+          { name: "Par", value: executor ? executor.tag : "Système", inline: true }
         )
-        .setFooter({ text: `ID Serveur: ${guild.id}` })
+        .setFooter({ text: ban.user.tag })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1250,10 +1776,13 @@ module.exports = (client) => {
             ? `Salon: <#${channel.id}>`
             : String(channel.name || channel.id)
         );
+      embed.addFields(
+        logIdsField(idGuild(guild), idChannel(channel.id, "Salon"))
+      );
       if (extra) {
-        embed.addFields({ name: "Audit", value: extra, inline: false });
+        embed.addFields({ name: "Journal d'audit", value: extra, inline: false });
       }
-      embed.setFooter({ text: `ID Salon: ${channel.id}` }).setTimestamp();
+      embed.setFooter({ text: channel.isTextBased?.() ? `#${channel.name}` : String(channel.id) }).setTimestamp();
 
       await sendLog(guild, embed);
     } catch (err) {
@@ -1279,7 +1808,7 @@ module.exports = (client) => {
         .setTitle("🎭 Rôle créé")
         .setDescription(`${role.name} (${role})`)
         .addFields(
-          { name: "ID", value: role.id, inline: true },
+          logIdsField(idGuild(guild), idRole(role.id), idExecutor(executor)),
           { name: "Par", value: executor ? executor.tag : "Système", inline: true }
         )
         .setTimestamp();
@@ -1307,7 +1836,7 @@ module.exports = (client) => {
         .setTitle("🗑️ Rôle supprimé")
         .setDescription(`\`${role.name}\``)
         .addFields(
-          { name: "ID", value: role.id, inline: true },
+          logIdsField(idGuild(guild), idRole(role.id), idExecutor(executor)),
           { name: "Par", value: executor ? executor.tag : "Système", inline: true }
         )
         .setTimestamp();
@@ -1354,6 +1883,7 @@ module.exports = (client) => {
         .setTitle("🛠️ Rôle modifié")
         .setDescription(`${newRole.name} (${newRole})`)
         .addFields(
+          logIdsField(idGuild(guild), idRole(newRole.id), idExecutor(executor)),
           {
             name: "Changements",
             value: changes.join("\n").substring(0, 1024),
@@ -1361,7 +1891,7 @@ module.exports = (client) => {
           },
           { name: "Par", value: executor ? executor.tag : "Système", inline: false }
         )
-        .setFooter({ text: `ID Rôle: ${newRole.id}` })
+        .setFooter({ text: newRole.name })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1388,7 +1918,11 @@ module.exports = (client) => {
         .setTitle("📅 Événement créé")
         .setDescription(evt.name || "Sans nom")
         .addFields(
-          { name: "ID", value: evt.id, inline: true },
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Événement", evt.id),
+            idExecutor(executor)
+          ),
           { name: "Par", value: executor ? executor.tag : "Système", inline: true }
         )
         .setTimestamp();
@@ -1425,6 +1959,11 @@ module.exports = (client) => {
         .setTitle("🛠️ Événement modifié")
         .setDescription(newEvt.name || "Sans nom")
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Événement", newEvt.id),
+            idExecutor(executor)
+          ),
           {
             name: "Changements",
             value: changes.join("\n").substring(0, 1024),
@@ -1432,7 +1971,7 @@ module.exports = (client) => {
           },
           { name: "Par", value: executor ? executor.tag : "Système", inline: false }
         )
-        .setFooter({ text: `ID: ${newEvt.id}` })
+        .setFooter({ text: newEvt.name || newEvt.id })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1458,7 +1997,11 @@ module.exports = (client) => {
         .setTitle("🗑️ Événement supprimé")
         .setDescription(evt.name || "Sans nom")
         .addFields(
-          { name: "ID", value: evt.id, inline: true },
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Événement", evt.id),
+            idExecutor(executor)
+          ),
           { name: "Par", value: executor ? executor.tag : "Système", inline: true }
         )
         .setTimestamp();
@@ -1479,7 +2022,14 @@ module.exports = (client) => {
         .setColor(0x00ff00)
         .setTitle("✅ Inscription événement")
         .setDescription(`${user.tag} (<@${user.id}>)`)
-        .addFields({ name: "Événement", value: scheduledEvent.name || scheduledEvent.id })
+        .addFields(
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Événement", scheduledEvent.id),
+            idMember(user.id, "Membre")
+          ),
+          { name: "Événement", value: scheduledEvent.name || scheduledEvent.id }
+        )
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1498,7 +2048,14 @@ module.exports = (client) => {
         .setColor(0xff9900)
         .setTitle("❌ Désinscription événement")
         .setDescription(`${user.tag} (<@${user.id}>)`)
-        .addFields({ name: "Événement", value: scheduledEvent.name || scheduledEvent.id })
+        .addFields(
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Événement", scheduledEvent.id),
+            idMember(user.id, "Membre")
+          ),
+          { name: "Événement", value: scheduledEvent.name || scheduledEvent.id }
+        )
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1522,10 +2079,14 @@ module.exports = (client) => {
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
-        .setTitle("🏷️ Sticker créé")
+        .setTitle("🏷️ Autocollant créé")
         .setDescription(`\`${sticker.name}\``)
         .addFields(
-          { name: "ID", value: sticker.id, inline: true },
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Autocollant", sticker.id),
+            idExecutor(executor)
+          ),
           { name: "Par", value: executor ? executor.tag : "Système", inline: true }
         )
         .setTimestamp();
@@ -1550,10 +2111,14 @@ module.exports = (client) => {
 
       const embed = new EmbedBuilder()
         .setColor(0xff0000)
-        .setTitle("🗑️ Sticker supprimé")
+        .setTitle("🗑️ Autocollant supprimé")
         .setDescription(`\`${sticker.name}\``)
         .addFields(
-          { name: "ID", value: sticker.id, inline: true },
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Autocollant", sticker.id),
+            idExecutor(executor)
+          ),
           { name: "Par", value: executor ? executor.tag : "Système", inline: true }
         )
         .setTimestamp();
@@ -1587,9 +2152,14 @@ module.exports = (client) => {
 
       const embed = new EmbedBuilder()
         .setColor(0xffa500)
-        .setTitle("🛠️ Sticker modifié")
+        .setTitle("🛠️ Autocollant modifié")
         .setDescription(`\`${newSticker.name}\``)
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Autocollant", newSticker.id),
+            idExecutor(executor)
+          ),
           {
             name: "Changements",
             value: changes.join("\n").substring(0, 1024),
@@ -1597,7 +2167,7 @@ module.exports = (client) => {
           },
           { name: "Par", value: executor ? executor.tag : "Système", inline: false }
         )
-        .setFooter({ text: `ID: ${newSticker.id}` })
+        .setFooter({ text: newSticker.name })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1624,6 +2194,12 @@ module.exports = (client) => {
         .setTitle("🎭 Scène créée")
         .setDescription(instance.topic || "Sans titre")
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Scène", instance.id),
+            instance.channelId ? idChannel(instance.channelId, "Salon de conférence") : null,
+            idExecutor(executor)
+          ),
           {
             name: "Salon",
             value: instance.channelId ? `<#${instance.channelId}>` : "Inconnu",
@@ -1631,7 +2207,7 @@ module.exports = (client) => {
           },
           { name: "Par", value: executor ? executor.tag : "Système", inline: false }
         )
-        .setFooter({ text: `ID: ${instance.id}` })
+        .setFooter({ text: instance.topic || "Scène" })
         .setTimestamp();
 
       await sendLog(guild, embed);
@@ -1657,6 +2233,12 @@ module.exports = (client) => {
         .setTitle("🗑️ Scène supprimée")
         .setDescription(instance.topic || "Sans titre")
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Scène", instance.id),
+            instance.channelId ? idChannel(instance.channelId, "Salon de conférence") : null,
+            idExecutor(executor)
+          ),
           {
             name: "Salon",
             value: instance.channelId ? `<#${instance.channelId}>` : "Inconnu",
@@ -1697,6 +2279,12 @@ module.exports = (client) => {
         .setTitle("🛠️ Scène modifiée")
         .setDescription(newInst.topic || "Sans titre")
         .addFields(
+          logIdsField(
+            idGuild(guild),
+            idSnowflake("Scène", newInst.id),
+            newInst.channelId ? idChannel(newInst.channelId, "Salon de conférence") : null,
+            idExecutor(executor)
+          ),
           {
             name: "Changements",
             value: changes.join("\n").substring(0, 1024),
@@ -1726,10 +2314,11 @@ module.exports = (client) => {
 
       const embed = new EmbedBuilder()
         .setColor(0xffa500)
-        .setTitle("🔗 Webhooks mis à jour")
+        .setTitle("🔗 Webhooks du salon mis à jour")
         .setDescription(channel.isTextBased?.() ? `<#${channel.id}>` : String(channel.id))
         .addFields(
-          { name: "Webhooks (aperçu)", value: names.substring(0, 1024) || "—" },
+          logIdsField(idGuild(guild), idChannel(channel.id, "Salon")),
+          { name: "Webhooks (extrait)", value: names.substring(0, 1024) || "—" },
           { name: "Nombre", value: `${hooks ? hooks.size : 0}`, inline: true }
         )
         .setTimestamp();

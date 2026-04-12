@@ -6,6 +6,9 @@ node_modules/
 .env.local
 .env.*.local
 
+# Verrou instance bot (local)
+.wingbot-instance.lock
+
 # Base de données
 *.db
 *.db-shm

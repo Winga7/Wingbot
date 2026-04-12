@@ -40,12 +40,19 @@ module.exports = {
       });
     }
 
+    const idsTest = [
+      `${interaction.guild.name} (\`${interaction.guild.id}\`)`,
+      `Salon logs <#${logChannel.id}> (\`${logChannel.id}\`)`,
+      `Demandeur ${interaction.user} (\`${interaction.user.id}\`)`,
+    ].join("\n");
+
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
-      .setTitle("🧪 Test des logs")
+      .setTitle("🧪 Test du salon de logs")
       .setDescription(
-        "Si tu vois ce message, c'est que le bot envoie correctement dans le salon de logs."
+        "Si tu vois ce message, le bot écrit bien dans le salon de logs configuré."
       )
+      .addFields({ name: "IDs", value: idsTest.substring(0, 1024), inline: false })
       .setTimestamp();
 
     await logChannel.send({ embeds: [embed] });
@@ -77,12 +84,19 @@ module.exports = {
       );
     }
 
+    const idsTest = [
+      `${message.guild.name} (\`${message.guild.id}\`)`,
+      `Salon logs <#${logChannel.id}> (\`${logChannel.id}\`)`,
+      `Demandeur ${message.author} (\`${message.author.id}\`)`,
+    ].join("\n");
+
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
-      .setTitle("🧪 Test des logs")
+      .setTitle("🧪 Test du salon de logs")
       .setDescription(
-        "Si tu vois ce message, c'est que le bot envoie correctement dans le salon de logs."
+        "Si tu vois ce message, le bot écrit bien dans le salon de logs configuré."
       )
+      .addFields({ name: "IDs", value: idsTest.substring(0, 1024), inline: false })
       .setTimestamp();
 
     logChannel.send({ embeds: [embed] }).catch(() => null);

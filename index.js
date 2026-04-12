@@ -14,6 +14,79 @@ const { expandCustomTemplate } = require("./customCommandTemplates");
 // Initialiser la base de données
 initDatabase();
 
+/** Une seule connexion Gateway par token : évite les logs en double (2× `node index.js`, etc.). */
+function acquireRunLockOrExit() {
+  if (process.env.WINGBOT_ALLOW_MULTIPLE === "1") return;
+  const lockPath = path.join(__dirname, ".wingbot-instance.lock");
+  const tryRemoveStale = () => {
+    if (!fs.existsSync(lockPath)) return true;
+    const raw = fs.readFileSync(lockPath, "utf8").trim();
+    const oldPid = Number(raw);
+    if (!Number.isFinite(oldPid) || oldPid <= 0) {
+      fs.unlinkSync(lockPath);
+      return true;
+    }
+    try {
+      process.kill(oldPid, 0);
+      return false;
+    } catch {
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {
+        /* ignore */
+      }
+      return true;
+    }
+  };
+
+  if (!tryRemoveStale()) {
+    console.error(
+      "\n[Wingbot] Une autre instance du bot tourne déjà (même dossier, autre terminal ou processus).\n" +
+        "→ Ferme l’autre `npm run dev` / `npm start` avant d’en relancer un.\n" +
+        "→ Le dashboard (`npm run dashboard`) ne remplace pas le bot : il peut tourner en parallèle sans second `index.js`.\n" +
+        "→ Pour contourner ce verrou (déconseillé) : WINGBOT_ALLOW_MULTIPLE=1\n"
+    );
+    process.exit(1);
+  }
+
+  try {
+    fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+  } catch (e) {
+    if (e && e.code === "EEXIST") {
+      if (!tryRemoveStale()) {
+        console.error(
+          "[Wingbot] Verrou présent : une autre instance vient de démarrer. Réessaie dans une seconde."
+        );
+        process.exit(1);
+      }
+      fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+    } else {
+      throw e;
+    }
+  }
+
+  const release = () => {
+    try {
+      if (!fs.existsSync(lockPath)) return;
+      const cur = fs.readFileSync(lockPath, "utf8").trim();
+      if (cur === String(process.pid)) fs.unlinkSync(lockPath);
+    } catch {
+      /* ignore */
+    }
+  };
+  process.once("exit", release);
+  process.once("SIGINT", () => {
+    release();
+    process.exit(0);
+  });
+  process.once("SIGTERM", () => {
+    release();
+    process.exit(0);
+  });
+}
+
+acquireRunLockOrExit();
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,

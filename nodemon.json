@@ -1,0 +1,11 @@
+{
+  "ext": "js,cjs,mjs,json",
+  "ignore": [
+    "node_modules/**",
+    "wingbot.db",
+    "wingbot.db-shm",
+    "wingbot.db-wal",
+    ".wingbot-instance.lock",
+    "dashboard/public/**"
+  ]
+}
