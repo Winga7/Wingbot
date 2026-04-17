@@ -67,8 +67,87 @@ function initDatabase() {
   migrateLogSettingsFeatureFlags();
   migrateGuildConfigExtras();
   migrateCustomCommandsTable();
+  migrateBotGlobalSettingsTable();
 
   console.log("✅ Base de données initialisée");
+}
+
+function migrateBotGlobalSettingsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS bot_global_settings (
+      singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+      desired_username TEXT,
+      presence_status TEXT DEFAULT 'online',
+      presence_activity_type TEXT DEFAULT 'None',
+      presence_activity_text TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `
+  ).run();
+  db.prepare(
+    `
+    INSERT INTO bot_global_settings (singleton_id, desired_username, presence_status, presence_activity_type, presence_activity_text)
+    VALUES (1, NULL, 'online', 'None', NULL)
+    ON CONFLICT(singleton_id) DO NOTHING
+  `
+  ).run();
+}
+
+function getBotGlobalSettings() {
+  const row = db
+    .prepare(
+      `SELECT desired_username, presence_status, presence_activity_type, presence_activity_text
+       FROM bot_global_settings WHERE singleton_id = 1`
+    )
+    .get();
+  return {
+    desired_username: row?.desired_username ?? null,
+    presence_status: row?.presence_status || "online",
+    presence_activity_type: row?.presence_activity_type || "None",
+    presence_activity_text: row?.presence_activity_text ?? null,
+  };
+}
+
+function setBotGlobalSettings(patch) {
+  const current = getBotGlobalSettings();
+  const merged = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "desired_username")) {
+    const v = String(patch.desired_username ?? "").trim();
+    merged.desired_username = v || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "presence_status")) {
+    const allowed = new Set(["online", "idle", "dnd", "invisible"]);
+    const v = String(patch.presence_status || "").trim().toLowerCase();
+    if (!allowed.has(v)) throw new Error("presence_status invalide");
+    merged.presence_status = v;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "presence_activity_type")) {
+    const allowed = new Set(["None", "Playing", "Listening", "Watching", "Competing"]);
+    const v = String(patch.presence_activity_type || "").trim();
+    if (!allowed.has(v)) throw new Error("presence_activity_type invalide");
+    merged.presence_activity_type = v;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "presence_activity_text")) {
+    const v = String(patch.presence_activity_text ?? "").trim();
+    merged.presence_activity_text = v || null;
+  }
+
+  db.prepare(
+    `UPDATE bot_global_settings
+     SET desired_username = ?,
+         presence_status = ?,
+         presence_activity_type = ?,
+         presence_activity_text = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE singleton_id = 1`
+  ).run(
+    merged.desired_username,
+    merged.presence_status,
+    merged.presence_activity_type,
+    merged.presence_activity_text
+  );
+  return merged;
 }
 
 function migrateCustomCommandsTable() {
@@ -559,4 +638,6 @@ module.exports = {
   cacheMessage,
   getCachedMessage,
   cleanOldMessages,
+  getBotGlobalSettings,
+  setBotGlobalSettings,
 };

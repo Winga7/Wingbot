@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Wingbot — Dashboard</title>
+    <link id="site-favicon" rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,7 +17,14 @@
     <div class="app">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <span class="sidebar-logo">W</span>
+          <img
+            class="sidebar-logo-img"
+            id="sidebar-logo-img"
+            src="/favicon.svg"
+            alt="Logo Wingbot"
+            width="36"
+            height="36"
+          />
           <div>
             <strong>Wingbot</strong>
             <span class="muted tiny">Dashboard</span>
@@ -44,37 +52,13 @@
           </a>
         </nav>
 
-        <details class="sidebar-help">
-          <summary>URL API (optionnel)</summary>
-          <p class="tiny muted">
-            Vide si tu ouvres cette page via <code>npm run dashboard</code>.
-            Sinon indique <code>http://127.0.0.1:PORT</code>.
-          </p>
-        </details>
-        <input
-          type="url"
-          class="sidebar-input"
-          id="api-origin"
-          placeholder="URL du serveur Node"
-          autocomplete="off"
-        />
-
-        <label class="sidebar-label">Token <code>DASHBOARD_TOKEN</code></label>
-        <input
-          type="password"
-          class="sidebar-input"
-          id="token"
-          placeholder="Secret .env"
-          autocomplete="off"
-        />
-        <button type="button" class="btn primary full" id="load">Connexion API</button>
-
         <p class="sidebar-label tiny muted">Compte Discord</p>
         <a class="btn secondary full" id="discord-oauth-link" href="#">Voir mes serveurs (admin)</a>
         <button type="button" class="btn ghost full tiny" id="btn-discord-logout" hidden>
           Déconnecter Discord
         </button>
         <p id="discord-user-label" class="tiny muted" hidden></p>
+        <button type="button" class="btn primary full" id="load">Actualiser</button>
 
         <p id="error" class="error" hidden></p>
 
@@ -100,7 +84,53 @@
           </div>
           <div class="main-actions">
             <span class="dirty-badge" id="dirty-hint" hidden>Non enregistré</span>
-            <button type="button" class="btn primary" id="save" disabled>Enregistrer</button>
+            <details id="founder-menu" class="founder-menu" hidden>
+              <summary class="btn secondary">Fonda</summary>
+              <div class="founder-menu-panel">
+                <h4>Paramètres globaux bot</h4>
+                <label class="field-row">
+                  <span>Nom global du bot</span>
+                  <input type="text" id="global-bot-username" maxlength="32" class="input-sm input-wide" />
+                </label>
+                <label class="field-row">
+                  <span>Avatar global (URL)</span>
+                  <input type="url" id="global-bot-avatar-url" class="input-sm input-wide mono" />
+                </label>
+                <label class="field-row">
+                  <span>Avatar global (upload)</span>
+                  <input type="file" id="global-bot-avatar-file" accept="image/*" class="input-sm input-wide" />
+                </label>
+                <label class="field-row">
+                  <span>Statut</span>
+                  <select id="global-presence-status" class="input-sm input-wide">
+                    <option value="online">En ligne</option>
+                    <option value="idle">Inactif</option>
+                    <option value="dnd">Ne pas déranger</option>
+                    <option value="invisible">Invisible</option>
+                  </select>
+                </label>
+                <label class="field-row">
+                  <span>Type d’activité</span>
+                  <select id="global-presence-type" class="input-sm input-wide">
+                    <option value="None">Aucune (statut seul)</option>
+                    <option value="Playing">Joue à</option>
+                    <option value="Listening">Écoute</option>
+                    <option value="Watching">Regarde</option>
+                    <option value="Competing">Participe à</option>
+                  </select>
+                </label>
+                <label class="field-row">
+                  <span>Texte d’activité</span>
+                  <input type="text" id="global-presence-text" maxlength="128" class="input-sm input-wide" placeholder="Ignoré si « Aucune »" />
+                </label>
+                <p class="muted tiny" style="margin: 0 0 0.35rem">
+                  Les changements sont appliqués par le bot en quelques secondes (lecture de la base).
+                </p>
+                <button type="button" class="btn primary" id="save-global-bot">Enregistrer global</button>
+                <span class="save-status" id="save-global-status"></span>
+              </div>
+            </details>
+            <button type="button" class="btn primary save-main-btn" id="save" disabled>Enregistrer</button>
             <span class="save-status" id="save-status"></span>
           </div>
         </header>
@@ -163,6 +193,39 @@
                 Si désactivé, <strong>aucun</strong> log n’est envoyé (même si des cases sont cochées
                 dans l’onglet Logs).
               </p>
+              <hr class="section-sep" />
+              <label class="field-row">
+                <span>Pseudo du bot sur ce serveur</span>
+                <input
+                  type="text"
+                  id="input-bot-nickname"
+                  maxlength="32"
+                  class="input-sm input-wide"
+                  placeholder="Laisser vide pour remettre le pseudo global"
+                />
+              </label>
+              <label class="field-row">
+                <span>Avatar global du bot (URL image)</span>
+                <input
+                  type="url"
+                  id="input-bot-avatar-url"
+                  class="input-sm input-wide mono"
+                  placeholder="https://.../avatar.png"
+                />
+              </label>
+              <label class="field-row">
+                <span>Avatar global du bot (upload)</span>
+                <input
+                  type="file"
+                  id="input-bot-avatar-file"
+                  accept="image/*"
+                  class="input-sm input-wide"
+                />
+              </label>
+              <p class="muted tiny">
+                Ces options sont appliquées quand tu cliques sur <strong>Enregistrer</strong>.
+              </p>
+              <div id="premium-internal-panel" hidden aria-hidden="true"></div>
             </div>
           </section>
 

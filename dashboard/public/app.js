@@ -1,7 +1,5 @@
 const $ = (id) => document.getElementById(id);
 
-const LS_KEY = "wingbot_dashboard_token";
-const LS_API_ORIGIN = "wingbot_api_origin";
 const VIEWS = ["overview", "settings", "logs", "commands", "custom", "moderation"];
 
 let manifest = { groups: [] };
@@ -28,11 +26,20 @@ let guildState = null;
 let selectedGuildId = null;
 let dirty = false;
 let discordOAuthConnected = false;
+let internalAccess = null; // prévu pour futur premium/fondateur (section non visible)
+let botProfileState = { avatar_url: "", nickname: "" };
+
+async function fileToDataUri(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Lecture du fichier impossible"));
+    reader.readAsDataURL(file);
+  });
+}
 
 function getApiBase() {
-  const raw = ($("api-origin")?.value || "").trim();
-  if (raw) return raw.replace(/\/$/, "");
-  return (localStorage.getItem(LS_API_ORIGIN) || "").replace(/\/$/, "");
+  return "";
 }
 
 function apiUrl(path) {
@@ -42,18 +49,14 @@ function apiUrl(path) {
 }
 
 function authHeaders() {
-  const token = $("token").value.trim();
   return {
-    Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
   };
 }
 
 /** GET avec cookie Discord : pas de Content-Type JSON inutile */
 function fetchOptsGet() {
-  const token = $("token").value.trim();
   return {
-    headers: { Authorization: `Bearer ${token}` },
     credentials: "include",
   };
 }
@@ -92,18 +95,29 @@ function navigate() {
 
 window.addEventListener("hashchange", navigate);
 
-function hintApiOriginFromPage() {
-  const o = $("api-origin");
-  if (!o || o.value.trim()) return;
-  const { protocol, host } = window.location;
-  if (protocol === "http:" || protocol === "https:") {
-    o.placeholder = `${protocol}//${host}`;
-  }
-}
-
 function setDiscordOAuthHref() {
   const a = $("discord-oauth-link");
   if (a) a.href = apiUrl("/api/auth/discord/login");
+}
+
+async function refreshBotBranding() {
+  try {
+    const r = await fetch(apiUrl("/api/bot/profile"), fetchOptsGet());
+    if (!r.ok) return;
+    const b = await r.json();
+    if (!b?.avatar_url) return;
+
+    const logo = $("sidebar-logo-img");
+    if (logo) logo.src = b.avatar_url;
+
+    const fav = $("site-favicon");
+    if (fav) {
+      fav.href = b.avatar_url;
+      fav.type = "image/png";
+    }
+  } catch {
+    // silencieux : branding non bloquant
+  }
 }
 
 function escapeHtml(s) {
@@ -165,7 +179,7 @@ function updateGuildHeader(guildId) {
 async function fetchGuildMeta(guildId) {
   const res = await fetch(
     apiUrl(`/api/discord/guilds/${encodeURIComponent(guildId)}`),
-    { headers: { Authorization: authHeaders().Authorization }, credentials: "include" }
+    { credentials: "include" }
   );
   if (res.ok) {
     guildMeta[guildId] = await res.json();
@@ -182,7 +196,7 @@ async function loadChannelSelect(guildId) {
 
   const res = await fetch(
     apiUrl(`/api/discord/guilds/${encodeURIComponent(guildId)}/channels`),
-    { headers: { Authorization: authHeaders().Authorization }, credentials: "include" }
+    { credentials: "include" }
   );
 
   if (!res.ok) {
@@ -452,13 +466,14 @@ function fillGuildSelect() {
     sel.appendChild(o);
   }
 
+  const firstWithBot = guildPickerList.find((x) => x.bot_in_guild)?.guild_id || "";
   if (
     selectedGuildId &&
     guildPickerList.some((x) => x.guild_id === selectedGuildId)
   ) {
     sel.value = selectedGuildId;
   } else {
-    sel.value = guildPickerList[0]?.guild_id || "";
+    sel.value = firstWithBot || guildPickerList[0]?.guild_id || "";
     selectedGuildId = sel.value || null;
   }
 }
@@ -496,6 +511,31 @@ async function refreshDiscordForGuild(guildId) {
   }
 }
 
+async function loadBotProfileForGuild(guildId) {
+  const avatarInput = $("input-bot-avatar-url");
+  const nickInput = $("input-bot-nickname");
+  if (!avatarInput || !nickInput) return;
+
+  avatarInput.value = "";
+  nickInput.value = "";
+  botProfileState = { avatar_url: "", nickname: "" };
+
+  const row = guildPickerList.find((x) => x.guild_id === guildId);
+  if (!row?.bot_in_guild) return;
+
+  const r = await fetch(
+    apiUrl(`/api/discord/guilds/${encodeURIComponent(guildId)}/bot-profile`),
+    fetchOptsGet()
+  );
+  if (!r.ok) return;
+  const p = await r.json();
+  botProfileState = {
+    avatar_url: p.avatar_url || "",
+    nickname: p.nickname || "",
+  };
+  nickInput.value = p.nickname || "";
+}
+
 async function applyGuildData(data) {
   const dis = Array.isArray(data.commands_disabled)
     ? [...data.commands_disabled]
@@ -526,6 +566,7 @@ async function applyGuildData(data) {
   updateOverview();
 
   await refreshDiscordForGuild(data.guild_id);
+  await loadBotProfileForGuild(data.guild_id);
 
   const sel = $("log-channel-select");
   const id = guildState.log_channel_id || "";
@@ -558,6 +599,11 @@ async function clearGuildUiForNoBot() {
   $("ov-logs").textContent = "—";
   $("ov-prefix").textContent = "—";
   $("ov-cmd-off").textContent = "—";
+  const avatarInput = $("input-bot-avatar-url");
+  const nickInput = $("input-bot-nickname");
+  if (avatarInput) avatarInput.value = "";
+  if (nickInput) nickInput.value = "";
+  botProfileState = { avatar_url: "", nickname: "" };
   setDirty(false);
 }
 
@@ -580,38 +626,58 @@ async function refreshDiscordStatus() {
 }
 
 async function loadData() {
-  const token = $("token").value.trim();
   $("error").hidden = true;
   $("error").textContent = "";
+  setDiscordOAuthHref();
+  await refreshBotBranding();
 
-  if (!token) {
+  const st = await fetch(apiUrl("/api/auth/discord/status"), fetchOptsGet());
+  if (!st.ok) {
     $("error").hidden = false;
-    $("error").textContent = "Indique le token DASHBOARD_TOKEN.";
+    $("error").textContent = "Impossible de vérifier la session Discord.";
+    return;
+  }
+  const status = await st.json();
+  if (!status.connected) {
+    discordOAuthConnected = false;
+    $("workspace").hidden = true;
+    $("main-top").hidden = true;
+    $("views").hidden = true;
+    $("stats-section").hidden = true;
+    $("discord-user-label").hidden = true;
+    $("btn-discord-logout").hidden = true;
+    $("error").hidden = false;
+    $("error").textContent =
+      "Connecte ton compte Discord avec « Voir mes serveurs (admin) ».";
     return;
   }
 
-  localStorage.setItem(LS_KEY, token);
-  const apiInput = ($("api-origin")?.value || "").trim();
-  if (apiInput) {
-    localStorage.setItem(LS_API_ORIGIN, apiInput.replace(/\/$/, ""));
-  } else {
-    localStorage.removeItem(LS_API_ORIGIN);
-  }
-
-  setDiscordOAuthHref();
-
-  const headers = { Authorization: `Bearer ${token}` };
-
-  const [manRes, cmdManRes, cfgRes, statsRes] = await Promise.all([
-    fetch(apiUrl("/api/manifest"), { headers }),
-    fetch(apiUrl("/api/commands-manifest"), { headers }),
-    fetch(apiUrl("/api/config"), { headers }),
-    fetch(apiUrl("/api/stats"), { headers }),
+  const [manRes, cmdManRes, cfgRes, statsRes, accessRes] = await Promise.all([
+    fetch(apiUrl("/api/manifest"), fetchOptsGet()),
+    fetch(apiUrl("/api/commands-manifest"), fetchOptsGet()),
+    fetch(apiUrl("/api/config"), fetchOptsGet()),
+    fetch(apiUrl("/api/stats"), fetchOptsGet()),
+    fetch(apiUrl("/api/internal/access"), fetchOptsGet()),
   ]);
 
-  if (!manRes.ok || !cmdManRes.ok || !cfgRes.ok || !statsRes.ok) {
-    const bad = !manRes.ok ? manRes : !cmdManRes.ok ? cmdManRes : !cfgRes.ok ? cfgRes : statsRes;
+  if (!manRes.ok || !cmdManRes.ok || !cfgRes.ok || !statsRes.ok || !accessRes.ok) {
+    const bad = !manRes.ok
+      ? manRes
+      : !cmdManRes.ok
+      ? cmdManRes
+      : !cfgRes.ok
+      ? cfgRes
+      : !statsRes.ok
+      ? statsRes
+      : accessRes;
     let err = await bad.text();
+    try {
+      const j = JSON.parse(err);
+      if (j?.message) err = j.message;
+      else if (j?.error) err = j.error;
+    } catch {
+      /* texte brut */
+    }
     if (
       err.includes("Cannot GET") ||
       err.includes("<!DOCTYPE html>") ||
@@ -629,6 +695,12 @@ async function loadData() {
   commandManifest = await cmdManRes.json();
   const config = await cfgRes.json();
   const stats = await statsRes.json();
+  internalAccess = await accessRes.json();
+  const founderMenu = $("founder-menu");
+  if (founderMenu) founderMenu.hidden = !internalAccess?.founder;
+  if (internalAccess?.founder) {
+    loadGlobalBotSettings().catch(() => null);
+  }
 
   guilds = config.guilds || [];
   guildMeta = {};
@@ -686,7 +758,10 @@ async function loadData() {
 
   fillGuildSelect();
 
-  const firstId = selectedGuildId || guildPickerList[0].guild_id;
+  const fallbackId =
+    guildPickerList.find((x) => x.bot_in_guild)?.guild_id ||
+    guildPickerList[0].guild_id;
+  const firstId = selectedGuildId || fallbackId;
   const pick = guildPickerList.find((x) => x.guild_id === firstId) || guildPickerList[0];
   selectedGuildId = pick.guild_id;
   $("guild-select").value = selectedGuildId;
@@ -795,6 +870,48 @@ async function save() {
   };
 
   try {
+    const avatarInput = $("input-bot-avatar-url");
+    const avatarFileInput = $("input-bot-avatar-file");
+    const nickInput = $("input-bot-nickname");
+    const desiredAvatar = String(avatarInput?.value || "").trim();
+    const desiredNick = String(nickInput?.value || "").trim();
+    const avatarFile = avatarFileInput?.files?.[0] || null;
+    const avatarDataUri = avatarFile ? await fileToDataUri(avatarFile) : "";
+    const avatarChanged =
+      !!avatarDataUri ||
+      (desiredAvatar.length > 0 && desiredAvatar !== String(botProfileState.avatar_url || ""));
+    const nickChanged = desiredNick !== String(botProfileState.nickname || "");
+    if (avatarChanged || nickChanged) {
+      const bpRes = await fetch(
+        apiUrl(`/api/discord/guilds/${encodeURIComponent(selectedGuildId)}/bot-profile`),
+        {
+          method: "PUT",
+          headers: authHeaders(),
+          credentials: "include",
+          body: JSON.stringify({
+            ...(avatarChanged ? { avatar_url: desiredAvatar } : {}),
+            ...(avatarDataUri ? { avatar_data_uri: avatarDataUri } : {}),
+            ...(nickChanged ? { nickname: desiredNick } : {}),
+          }),
+        }
+      );
+      if (!bpRes.ok) {
+        const j = await bpRes.json().catch(() => ({}));
+        $("save-status").textContent = "";
+        $("error").hidden = false;
+        $("error").textContent =
+          j.message || j.error || (await bpRes.text()) || "Erreur mise à jour profil bot";
+        return;
+      }
+      const updatedBotProfile = await bpRes.json().catch(() => ({}));
+      botProfileState = {
+        avatar_url: updatedBotProfile.avatar_url || botProfileState.avatar_url || "",
+        nickname: updatedBotProfile.nickname || "",
+      };
+      if (avatarChanged) await refreshBotBranding();
+      if (avatarFileInput) avatarFileInput.value = "";
+    }
+
     const res = await fetch(
       apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}`),
       {
@@ -835,6 +952,59 @@ async function save() {
   }
 }
 
+async function loadGlobalBotSettings() {
+  if (!internalAccess?.founder) return;
+  const res = await fetch(apiUrl("/api/bot/global-settings"), fetchOptsGet());
+  if (!res.ok) return;
+  const data = await res.json();
+  $("global-bot-username").value = data.desired_username || "";
+  $("global-bot-avatar-url").value = "";
+  $("global-presence-status").value = data.presence_status || "online";
+  $("global-presence-type").value = data.presence_activity_type || "None";
+  $("global-presence-text").value = data.presence_activity_text || "";
+}
+
+async function saveGlobalBotSettings() {
+  if (!internalAccess?.founder) return;
+  const status = $("save-global-status");
+  status.textContent = "Enregistrement…";
+  try {
+    const avatarFile = $("global-bot-avatar-file")?.files?.[0] || null;
+    const avatarDataUri = avatarFile ? await fileToDataUri(avatarFile) : "";
+    const body = {
+      desired_username: $("global-bot-username").value.trim(),
+      presence_status: $("global-presence-status").value,
+      presence_activity_type: $("global-presence-type").value,
+      presence_activity_text: $("global-presence-text").value.trim(),
+    };
+    const avatarUrl = $("global-bot-avatar-url").value.trim();
+    if (avatarUrl) body.avatar_url = avatarUrl;
+    if (avatarDataUri) body.avatar_data_uri = avatarDataUri;
+    const res = await fetch(apiUrl("/api/bot/global-settings"), {
+      method: "PUT",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.message || j.error || (await res.text()) || "Erreur");
+    }
+    const data = await res.json();
+    $("global-bot-avatar-url").value = "";
+    $("global-bot-avatar-file").value = "";
+    status.textContent = "Enregistré ✓";
+    await refreshBotBranding();
+    setTimeout(() => {
+      status.textContent = "";
+    }, 2200);
+  } catch (e) {
+    status.textContent = "";
+    $("error").hidden = false;
+    $("error").textContent = String(e.message || e);
+  }
+}
+
 $("load").addEventListener("click", loadData);
 $("save").addEventListener("click", save);
 $("guild-select").addEventListener("change", onGuildChange);
@@ -868,14 +1038,17 @@ $("switch-logs-master").addEventListener("change", () => {
   updateOverview();
 });
 
-$("token").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") loadData();
+$("input-bot-nickname")?.addEventListener("input", () => {
+  setDirty(true);
+});
+
+$("input-bot-avatar-url")?.addEventListener("input", () => {
+  setDirty(true);
 });
 
 $("btn-discord-logout")?.addEventListener("click", async () => {
   await fetch(apiUrl("/api/auth/discord/logout"), {
     method: "POST",
-    headers: authHeaders(),
     credentials: "include",
   });
   discordOAuthConnected = false;
@@ -884,12 +1057,10 @@ $("btn-discord-logout")?.addEventListener("click", async () => {
   await loadData();
 });
 
-const saved = localStorage.getItem(LS_KEY);
-if (saved) $("token").value = saved;
-const savedApi = localStorage.getItem(LS_API_ORIGIN);
-if (savedApi && $("api-origin")) $("api-origin").value = savedApi;
-hintApiOriginFromPage();
+$("save-global-bot")?.addEventListener("click", saveGlobalBotSettings);
+
 setDiscordOAuthHref();
+loadData();
 
 document.querySelectorAll(".nav-link").forEach((a) => {
   a.addEventListener("click", () => {

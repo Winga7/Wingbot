@@ -1,13 +1,20 @@
 require("dotenv").config();
 const fs = require("node:fs");
 const path = require("node:path");
-const { Client, Collection, Events, GatewayIntentBits } = require("discord.js");
+const {
+  ActivityType,
+  Client,
+  Collection,
+  Events,
+  GatewayIntentBits,
+} = require("discord.js");
 const {
   initDatabase,
   cleanOldMessages,
   getGuildPrefix,
   isCommandEnabled,
   getCustomCommandReply,
+  getBotGlobalSettings,
 } = require("./database");
 const { expandCustomTemplate } = require("./customCommandTemplates");
 
@@ -136,6 +143,44 @@ loadLogs(client);
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
+
+  const activityTypeByKey = {
+    Playing: ActivityType.Playing,
+    Listening: ActivityType.Listening,
+    Watching: ActivityType.Watching,
+    Competing: ActivityType.Competing,
+  };
+
+  const applyGlobalBotSettings = async () => {
+    try {
+      const cfg = getBotGlobalSettings();
+      if (cfg.desired_username && client.user.username !== cfg.desired_username) {
+        await client.user.setUsername(cfg.desired_username).catch(() => null);
+      }
+      const activityText = String(cfg.presence_activity_text || "").trim();
+      const typeKey = String(cfg.presence_activity_type || "None").trim();
+      const wantActivity = typeKey !== "None" && activityText.length > 0;
+      const activities = wantActivity
+        ? [
+            {
+              name: activityText.slice(0, 128),
+              type: activityTypeByKey[typeKey] ?? ActivityType.Playing,
+            },
+          ]
+        : [];
+      client.user.setPresence({
+        status: cfg.presence_status || "online",
+        activities,
+      });
+    } catch (e) {
+      console.error("Erreur applyGlobalBotSettings:", e);
+    }
+  };
+
+  applyGlobalBotSettings();
+  setInterval(() => {
+    applyGlobalBotSettings();
+  }, 5 * 1000);
 
   // Nettoyer les vieux messages du cache tous les jours
   setInterval(() => {

@@ -77,6 +77,15 @@ body {
   font-size: 0.95rem;
 }
 
+.sidebar-logo-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  object-fit: cover;
+  border: 1px solid #ffffff22;
+  background: #0d1220;
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;
@@ -235,6 +244,43 @@ body {
   flex-wrap: wrap;
 }
 
+.save-main-btn {
+  min-width: 150px;
+  font-size: 0.9rem;
+  box-shadow: 0 0 0 2px #ffffff14, 0 8px 18px #00000040;
+}
+
+.founder-menu {
+  position: relative;
+}
+
+.founder-menu > summary {
+  list-style: none;
+}
+
+.founder-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.founder-menu-panel {
+  position: absolute;
+  top: 2.2rem;
+  right: 0;
+  z-index: 15;
+  width: min(420px, 86vw);
+  max-height: 70vh;
+  overflow: auto;
+  background: #0f1420;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.8rem;
+  box-shadow: 0 18px 30px #00000066;
+}
+
+.founder-menu-panel h4 {
+  margin: 0 0 0.6rem;
+}
+
 .dirty-badge {
   font-size: 0.72rem;
   color: #fbbf24;
@@ -317,6 +363,12 @@ body {
   margin-bottom: 1rem;
 }
 
+.section-sep {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.85rem 0;
+}
+
 .field-row span:first-child {
   font-size: 0.85rem;
   font-weight: 500;
@@ -329,6 +381,11 @@ body {
   border: 1px solid var(--border);
   background: #0a0c12;
   color: var(--text);
+}
+
+.input-wide {
+  width: 100%;
+  max-width: 460px;
 }
 
 .switch-row {

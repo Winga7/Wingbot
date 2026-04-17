@@ -2,13 +2,14 @@
  * Dashboard HTTP : lit/écrit wingbot.db + OAuth Discord (liste des serveurs admin).
  *
  * .env :
- *   DASHBOARD_TOKEN, TOKEN (bot), CLIENT_ID
+ *   TOKEN (bot), CLIENT_ID
  *   DISCORD_CLIENT_SECRET — secret OAuth2 (Discord Developer Portal)
  *   DASHBOARD_PUBLIC_URL — ex. http://127.0.0.1:3847 (URL exacte du dashboard)
  *   DASHBOARD_HOST — optionnel, IP d'écoute HTTP (défaut : 0.0.0.0)
  *   BOT_INVITE_PERMISSIONS — optionnel, entier permissions (défaut : 268438528)
  */
 const path = require("node:path");
+const fs = require("node:fs");
 const express = require("express");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
@@ -20,6 +21,8 @@ const {
   getGuildDashboardPayload,
   applyGuildSettingsPatch,
   ensureGuildLogRow,
+  getBotGlobalSettings,
+  setBotGlobalSettings,
 } = require("../database");
 const {
   getSession,
@@ -40,11 +43,59 @@ initDatabase();
 const app = express();
 const PORT = Number(process.env.DASHBOARD_PORT) || 3847;
 const HOST = process.env.DASHBOARD_HOST || "0.0.0.0";
-const TOKEN = process.env.DASHBOARD_TOKEN || "";
 const DISCORD_API = "https://discord.com/api/v10";
 
+function csvSet(raw) {
+  return new Set(
+    String(raw || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+}
+
+const FOUNDER_IDS = csvSet(process.env.FOUNDER_DISCORD_IDS || process.env.FOUNDER_DISCORD_ID);
+const PREMIUM_USER_IDS = csvSet(process.env.PREMIUM_USER_IDS);
+const PREMIUM_FEATURES = csvSet(process.env.PREMIUM_FEATURES);
+const FOUNDER_ONLY_FEATURES = csvSet(process.env.FOUNDER_ONLY_FEATURES);
+const ENFORCE_PREMIUM = process.env.ENFORCE_PREMIUM === "1";
+const ENFORCE_FOUNDER_ONLY = process.env.ENFORCE_FOUNDER_ONLY === "1";
+
+function isFounderUser(userId) {
+  const id = normalizeSnowflakeId(userId);
+  return !!id && FOUNDER_IDS.has(id);
+}
+
+function requireFounder(req, res, next) {
+  if (!isFounderUser(req.discordSession?.userId)) {
+    return res.status(403).json({
+      error: "founder_only",
+      message: "Fonction réservée au compte fondateur.",
+    });
+  }
+  next();
+}
+
+function isPremiumUser(userId) {
+  const id = normalizeSnowflakeId(userId);
+  return !!id && PREMIUM_USER_IDS.has(id);
+}
+
+function canUseFeature(userId, featureKey) {
+  const founder = isFounderUser(userId);
+  if (founder) return true;
+
+  if (ENFORCE_FOUNDER_ONLY && FOUNDER_ONLY_FEATURES.has(featureKey)) {
+    return false;
+  }
+  if (ENFORCE_PREMIUM && PREMIUM_FEATURES.has(featureKey)) {
+    return isPremiumUser(userId);
+  }
+  return true;
+}
+
 function publicBaseUrl() {
-  const u = process.env.DASHBOARD_PUBLIC_URL || `http://127.0.0.1:${PORT}`;
+  const u = process.env.DASHBOARD_PUBLIC_URL || `http://localhost:${PORT}`;
   return u.replace(/\/$/, "");
 }
 
@@ -109,6 +160,84 @@ function guildIconUrlBot(guildId, iconHash) {
   return `https://cdn.discordapp.com/icons/${guildId}/${iconHash}.${ext}?size=64`;
 }
 
+function botAvatarUrl(user, size = 256) {
+  if (!user?.id) return null;
+  if (!user.avatar) return `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator || 0) % 5}.png`;
+  const ext = String(user.avatar).startsWith("a_") ? "gif" : "png";
+  return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${ext}?size=${size}`;
+}
+
+async function fetchBotUser() {
+  return discordFetchJson("/users/@me");
+}
+
+async function setBotAvatarFromDataUri(dataUri) {
+  const botToken = (process.env.TOKEN || "").trim();
+  if (!botToken) {
+    const err = new Error("TOKEN du bot manquant dans .env");
+    err.code = "NO_BOT_TOKEN";
+    throw err;
+  }
+  const r = await fetch(`${DISCORD_API}/users/@me`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bot ${botToken}`,
+      "Content-Type": "application/json",
+      "User-Agent": "WingbotDashboard (https://discord.com)",
+    },
+    body: JSON.stringify({ avatar: dataUri }),
+  });
+  const txt = await r.text();
+  if (!r.ok) {
+    const e = new Error(`Discord avatar ${r.status}: ${txt.slice(0, 300)}`);
+    e.status = r.status;
+    throw e;
+  }
+  return txt ? JSON.parse(txt) : null;
+}
+
+async function setBotNicknameInGuild(guildId, nickname) {
+  const botToken = (process.env.TOKEN || "").trim();
+  if (!botToken) {
+    const err = new Error("TOKEN du bot manquant dans .env");
+    err.code = "NO_BOT_TOKEN";
+    throw err;
+  }
+  const normalizedGuildId = normalizeSnowflakeId(guildId);
+  const nick = String(nickname || "").trim();
+  const body = { nick: nick || null };
+  const r = await fetch(
+    `${DISCORD_API}/guilds/${encodeURIComponent(normalizedGuildId)}/members/@me`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        "Content-Type": "application/json",
+        "User-Agent": "WingbotDashboard (https://discord.com)",
+      },
+      body: JSON.stringify(body),
+    }
+  );
+  const txt = await r.text();
+  if (!r.ok) {
+    const e = new Error(`Discord bot nick ${r.status}: ${txt.slice(0, 300)}`);
+    e.status = r.status;
+    throw e;
+  }
+  return txt ? JSON.parse(txt) : null;
+}
+
+async function imageUrlToDataUri(imageUrl) {
+  const r = await fetch(imageUrl);
+  if (!r.ok) {
+    throw new Error(`Téléchargement image impossible (${r.status})`);
+  }
+  const contentType = r.headers.get("content-type") || "image/png";
+  const arr = await r.arrayBuffer();
+  const b64 = Buffer.from(arr).toString("base64");
+  return `data:${contentType};base64,${b64}`;
+}
+
 const LOGGABLE_CHANNEL_TYPES = new Set([0, 5, 15]);
 
 function formatChannelsForUi(channels) {
@@ -166,23 +295,6 @@ app.use((req, res, next) => {
   next();
 });
 
-function requireToken(req, res, next) {
-  if (!TOKEN) {
-    return res
-      .status(503)
-      .type("text/plain")
-      .send(
-        "DASHBOARD_TOKEN n'est pas défini dans .env. Ajoute un secret puis redémarre le dashboard."
-      );
-  }
-  const auth = req.headers.authorization || "";
-  const expected = `Bearer ${TOKEN}`;
-  if (auth !== expected) {
-    return res.status(401).type("text/plain").send("Non autorisé");
-  }
-  next();
-}
-
 function requireDiscordSession(req, res, next) {
   const s = getSession(req);
   if (!s) {
@@ -195,9 +307,310 @@ function requireDiscordSession(req, res, next) {
   next();
 }
 
+// Evite de spammer /users/@me/guilds pendant le chargement initial du dashboard.
+// Clé = sessionId, TTL court pour rester frais.
+const manageableGuildIdsCache = new Map();
+const MANAGEABLE_CACHE_TTL_MS = 15000;
+
+async function getManageableGuildIds(accessToken, cacheKey = "") {
+  const now = Date.now();
+  if (cacheKey) {
+    const hit = manageableGuildIdsCache.get(cacheKey);
+    if (hit && hit.expiresAt > now) return hit.ids;
+  }
+
+  const rawGuilds = await fetchUserGuilds(accessToken);
+  const manageable = rawGuilds.filter((g) => canManageGuild(g));
+  const ids = new Set(
+    manageable
+      .map((g) => normalizeSnowflakeId(g.id))
+      .filter((id) => !!id)
+  );
+  if (cacheKey) {
+    manageableGuildIdsCache.set(cacheKey, {
+      ids,
+      expiresAt: now + MANAGEABLE_CACHE_TTL_MS,
+    });
+    if (manageableGuildIdsCache.size > 300) {
+      for (const [k, v] of manageableGuildIdsCache) {
+        if (v.expiresAt <= now) manageableGuildIdsCache.delete(k);
+      }
+    }
+  }
+  return ids;
+}
+
+async function requireGuildManageAccess(req, res, next) {
+  try {
+    const gid = normalizeSnowflakeId(req.params.guildId);
+    if (!gid) {
+      return res.status(400).json({ error: "guild_id_invalide" });
+    }
+    const ids = await getManageableGuildIds(
+      req.discordSession.accessToken,
+      req.discordSession.sessionId || req.discordSession.userId
+    );
+    if (!ids.has(gid)) {
+      return res.status(403).json({
+        error: "forbidden",
+        message: "Tu n'as pas les permissions de gestion sur ce serveur.",
+      });
+    }
+    req.guildId = gid;
+    next();
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: String(e.message) });
+  }
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "wingbot-dashboard" });
 });
+
+app.get("/api/bot/profile", async (_req, res) => {
+  try {
+    const bot = await fetchBotUser();
+    res.json({
+      id: bot.id,
+      username: bot.username,
+      avatar_url: botAvatarUrl(bot, 256),
+    });
+  } catch (e) {
+    if (e.code === "NO_BOT_TOKEN") {
+      return res.status(503).json({ error: e.message });
+    }
+    console.error(e);
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get("/api/internal/access", requireDiscordSession, (req, res) => {
+  const userId = req.discordSession.userId;
+  res.json({
+    user_id: userId,
+    founder: isFounderUser(userId),
+    premium: isPremiumUser(userId),
+    // caché côté UI pour l'instant, mais prêt pour activation future
+    enforcement: {
+      premium: ENFORCE_PREMIUM,
+      founder_only: ENFORCE_FOUNDER_ONLY,
+    },
+  });
+});
+
+app.get("/api/bot/global-settings", requireDiscordSession, requireFounder, async (_req, res) => {
+  try {
+    const bot = await fetchBotUser();
+    const cfg = getBotGlobalSettings();
+    res.json({
+      ...cfg,
+      current_username: bot.username,
+      avatar_url: botAvatarUrl(bot, 512),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.put("/api/bot/global-settings", requireDiscordSession, requireFounder, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const hasAvatarUrl = Object.prototype.hasOwnProperty.call(payload, "avatar_url");
+    const hasAvatarDataUri = Object.prototype.hasOwnProperty.call(payload, "avatar_data_uri");
+
+    if (hasAvatarDataUri) {
+      const dataUri = String(payload.avatar_data_uri || "").trim();
+      if (!dataUri.startsWith("data:image/")) {
+        return res.status(400).json({ error: "avatar_data_uri_invalide" });
+      }
+      await setBotAvatarFromDataUri(dataUri);
+    } else if (hasAvatarUrl) {
+      const imageUrl = String(payload.avatar_url || "").trim();
+      if (!/^https?:\/\//i.test(imageUrl)) {
+        return res.status(400).json({ error: "image_url_invalide" });
+      }
+      const dataUri = await imageUrlToDataUri(imageUrl);
+      await setBotAvatarFromDataUri(dataUri);
+    }
+
+    const nextCfg = setBotGlobalSettings({
+      desired_username: payload.desired_username,
+      presence_status: payload.presence_status,
+      presence_activity_type: payload.presence_activity_type,
+      presence_activity_text: payload.presence_activity_text,
+    });
+
+    const bot = await fetchBotUser();
+    res.json({
+      ok: true,
+      ...nextCfg,
+      current_username: bot.username,
+      avatar_url: botAvatarUrl(bot, 512),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({ error: String(e.message) });
+  }
+});
+
+app.put("/api/bot/avatar", requireDiscordSession, async (req, res) => {
+  try {
+    if (!canUseFeature(req.discordSession.userId, "bot_avatar")) {
+      return res.status(403).json({
+        error: "feature_locked",
+        message: "Cette fonctionnalité n'est pas disponible pour ce compte.",
+      });
+    }
+    const manageableIds = await getManageableGuildIds(
+      req.discordSession.accessToken,
+      req.discordSession.sessionId || req.discordSession.userId
+    );
+    if (manageableIds.size === 0) {
+      return res.status(403).json({
+        error: "forbidden",
+        message: "Aucun serveur gérable détecté pour ce compte Discord.",
+      });
+    }
+
+    const imageUrl = String(req.body?.image_url || "").trim();
+    if (!/^https?:\/\//i.test(imageUrl)) {
+      return res.status(400).json({
+        error: "image_url_invalide",
+        message: "Envoie une URL d'image valide (http/https).",
+      });
+    }
+
+    const dataUri = await imageUrlToDataUri(imageUrl);
+    const updated = await setBotAvatarFromDataUri(dataUri);
+    res.json({
+      ok: true,
+      avatar_url: botAvatarUrl(updated, 512),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({ error: String(e.message) });
+  }
+});
+
+app.get(
+  "/api/discord/guilds/:guildId/bot-profile",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const botIn = await botGuildExists(guildId);
+      if (!botIn) {
+        return res.status(404).json({ error: "Bot non présent sur ce serveur" });
+      }
+      const bot = await fetchBotUser();
+      const member = await discordFetchJson(
+        `/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(bot.id)}`
+      );
+      res.json({
+        guild_id: guildId,
+        bot_user_id: bot.id,
+        username: bot.username,
+        avatar_url: botAvatarUrl(bot, 512),
+        nickname: member?.nick || "",
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/discord/guilds/:guildId/bot-profile",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const botIn = await botGuildExists(guildId);
+      if (!botIn) {
+        return res.status(404).json({ error: "Bot non présent sur ce serveur" });
+      }
+
+      const payload = req.body || {};
+      const hasAvatar =
+        Object.prototype.hasOwnProperty.call(payload, "avatar_url") ||
+        Object.prototype.hasOwnProperty.call(payload, "avatar_data_uri");
+      const hasNick = Object.prototype.hasOwnProperty.call(payload, "nickname");
+
+      if (!hasAvatar && !hasNick) {
+        return res.status(400).json({
+          error: "payload_invalide",
+          message: "Renseigne avatar_url et/ou nickname.",
+        });
+      }
+
+      if (hasAvatar && !canUseFeature(req.discordSession.userId, "bot_avatar")) {
+        return res.status(403).json({
+          error: "feature_locked",
+          message: "Cette fonctionnalité n'est pas disponible pour ce compte.",
+        });
+      }
+      if (hasNick && !canUseFeature(req.discordSession.userId, "bot_nickname")) {
+        return res.status(403).json({
+          error: "feature_locked",
+          message: "Cette fonctionnalité n'est pas disponible pour ce compte.",
+        });
+      }
+
+      if (hasAvatar) {
+        const imageUrl = String(payload.avatar_url || "").trim();
+        const dataUriRaw = String(payload.avatar_data_uri || "").trim();
+        if (dataUriRaw) {
+          if (!dataUriRaw.startsWith("data:image/")) {
+            return res.status(400).json({
+              error: "avatar_data_uri_invalide",
+              message: "Le fichier avatar doit être une image valide.",
+            });
+          }
+          await setBotAvatarFromDataUri(dataUriRaw);
+        } else {
+          if (!/^https?:\/\//i.test(imageUrl)) {
+            return res.status(400).json({
+              error: "image_url_invalide",
+              message: "Envoie une URL d'image valide (http/https).",
+            });
+          }
+          const dataUri = await imageUrlToDataUri(imageUrl);
+          await setBotAvatarFromDataUri(dataUri);
+        }
+      }
+
+      if (hasNick) {
+        const nick = String(payload.nickname || "").trim();
+        if (nick.length > 32) {
+          return res.status(400).json({
+            error: "nickname_trop_long",
+            message: "Le pseudo du bot ne peut pas dépasser 32 caractères.",
+          });
+        }
+        await setBotNicknameInGuild(guildId, nick);
+      }
+
+      const bot = await fetchBotUser();
+      const member = await discordFetchJson(
+        `/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(bot.id)}`
+      );
+      res.json({
+        ok: true,
+        guild_id: guildId,
+        avatar_url: botAvatarUrl(bot, 512),
+        nickname: member?.nick || "",
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
 
 /** Démarre le flux OAuth Discord (redirection) */
 app.get("/api/auth/discord/login", (req, res) => {
@@ -214,7 +627,6 @@ app.get("/api/auth/discord/login", (req, res) => {
     redirect_uri: oauthRedirectUri(),
     response_type: "code",
     scope: "identify guilds",
-    prompt: "consent",
   });
   res.redirect(`https://discord.com/oauth2/authorize?${params}`);
 });
@@ -264,7 +676,7 @@ app.post("/api/auth/discord/logout", (req, res) => {
 });
 
 /** État session Discord (pour l’UI) */
-app.get("/api/auth/discord/status", requireToken, (req, res) => {
+app.get("/api/auth/discord/status", (req, res) => {
   const s = getSession(req);
   res.json({
     connected: !!s,
@@ -277,7 +689,6 @@ app.get("/api/auth/discord/status", requireToken, (req, res) => {
  */
 app.get(
   "/api/me/guilds",
-  requireToken,
   requireDiscordSession,
   async (req, res) => {
     try {
@@ -351,19 +762,26 @@ app.get(
   }
 );
 
-app.get("/api/manifest", requireToken, (_req, res) => {
+app.get("/api/manifest", requireDiscordSession, (_req, res) => {
   res.json({ groups: DASHBOARD_GROUPS });
 });
 
-app.get("/api/config", requireToken, (_req, res) => {
+app.get("/api/config", requireDiscordSession, async (req, res) => {
   try {
+    const manageableIds = await getManageableGuildIds(
+      req.discordSession.accessToken,
+      req.discordSession.sessionId || req.discordSession.userId
+    );
     const rows = db
       .prepare(
         `SELECT guild_id FROM guild_config ORDER BY updated_at DESC`
       )
       .all();
 
-    const guilds = rows.map((r) => getGuildDashboardPayload(r.guild_id));
+    const guilds = rows
+      .map((r) => normalizeSnowflakeId(r.guild_id))
+      .filter((id) => manageableIds.has(id))
+      .map((gid) => getGuildDashboardPayload(gid));
     res.json({ guilds });
   } catch (e) {
     console.error(e);
@@ -371,9 +789,13 @@ app.get("/api/config", requireToken, (_req, res) => {
   }
 });
 
-app.get("/api/guilds/:guildId", requireToken, async (req, res) => {
+app.get(
+  "/api/guilds/:guildId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
   try {
-    const { guildId } = req.params;
+    const guildId = req.guildId;
     const exists = db
       .prepare("SELECT 1 FROM guild_config WHERE guild_id = ?")
       .get(guildId);
@@ -394,9 +816,13 @@ app.get("/api/guilds/:guildId", requireToken, async (req, res) => {
   }
 });
 
-app.put("/api/guilds/:guildId", requireToken, async (req, res) => {
+app.put(
+  "/api/guilds/:guildId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
   try {
-    const { guildId } = req.params;
+    const guildId = req.guildId;
     const botIn = await botGuildExists(guildId);
     if (!botIn) {
       return res.status(400).json({
@@ -413,21 +839,26 @@ app.put("/api/guilds/:guildId", requireToken, async (req, res) => {
   }
 });
 
-app.get("/api/commands-manifest", requireToken, (_req, res) => {
+app.get("/api/commands-manifest", requireDiscordSession, (_req, res) => {
   res.json({ groups: COMMAND_GROUPS, commands: COMMANDS });
 });
 
-app.get("/api/stats", requireToken, (_req, res) => {
+app.get("/api/stats", requireDiscordSession, async (req, res) => {
   try {
     const cacheCount = db
       .prepare("SELECT COUNT(*) AS n FROM message_cache")
       .get();
-    const guildCount = db
-      .prepare("SELECT COUNT(*) AS n FROM guild_config")
-      .get();
+    const manageableIds = await getManageableGuildIds(
+      req.discordSession.accessToken,
+      req.discordSession.sessionId || req.discordSession.userId
+    );
+    const rows = db.prepare("SELECT guild_id FROM guild_config").all();
+    const guildCount = rows
+      .map((r) => normalizeSnowflakeId(r.guild_id))
+      .filter((id) => manageableIds.has(id)).length;
 
     res.json({
-      serveurs_configures: guildCount?.n ?? 0,
+      serveurs_configures: guildCount,
       messages_en_cache: cacheCount?.n ?? 0,
     });
   } catch (e) {
@@ -436,9 +867,13 @@ app.get("/api/stats", requireToken, (_req, res) => {
   }
 });
 
-app.get("/api/discord/guilds/:guildId", requireToken, async (req, res) => {
+app.get(
+  "/api/discord/guilds/:guildId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
   try {
-    const { guildId } = req.params;
+    const guildId = req.guildId;
     const botIn = await botGuildExists(guildId);
     if (!botIn) {
       return res.status(404).json({ error: "Bot non présent sur ce serveur" });
@@ -459,9 +894,13 @@ app.get("/api/discord/guilds/:guildId", requireToken, async (req, res) => {
   }
 });
 
-app.get("/api/discord/guilds/:guildId/channels", requireToken, async (req, res) => {
+app.get(
+  "/api/discord/guilds/:guildId/channels",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
   try {
-    const { guildId } = req.params;
+    const guildId = req.guildId;
     const botIn = await botGuildExists(guildId);
     if (!botIn) {
       return res.status(404).json({ error: "Bot non présent sur ce serveur" });
@@ -488,9 +927,6 @@ app.listen(PORT, HOST, () => {
   console.log(
     `   OAuth redirect à déclarer sur Discord : ${oauthRedirectUri()}`
   );
-  if (!TOKEN) {
-    console.warn("⚠️  DASHBOARD_TOKEN manquant dans .env");
-  }
   if (!process.env.DISCORD_CLIENT_SECRET) {
     console.warn(
       "⚠️  DISCORD_CLIENT_SECRET manquant — connexion « Mes serveurs » désactivée."
