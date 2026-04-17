@@ -35,7 +35,6 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    // Vérifier les permissions
     if (
       !interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)
     ) {
@@ -55,7 +54,6 @@ module.exports = {
       const channel = interaction.channel;
       let deletedCount = 0;
 
-      // Si aucune option n'est spécifiée, supprimer le maximum possible
       if (!nombre && !utilisateur && !type) {
         const messages = await channel.messages.fetch({ limit: 100 });
         const filteredMessages = messages.filter(
@@ -71,7 +69,6 @@ module.exports = {
         await channel.bulkDelete(filteredMessages);
         deletedCount = filteredMessages.size;
       } else {
-        // Déterminer la limite de messages à récupérer
         const limite = nombre || 100;
 
         const messages = await channel.messages.fetch({ limit: limite });
@@ -79,14 +76,12 @@ module.exports = {
           (msg) => msg.createdTimestamp > Date.now() - 14 * 24 * 60 * 60 * 1000
         );
 
-        // Filtrer par utilisateur si spécifié
         if (utilisateur) {
           filteredMessages = filteredMessages.filter(
             (msg) => msg.author.id === utilisateur.id
           );
         }
 
-        // Filtrer par type si spécifié
         if (type) {
           switch (type) {
             case "images":
@@ -136,29 +131,24 @@ module.exports = {
   },
 
   executeMessage(message, args) {
-    // Commande avec préfixe $ - peut prendre un nombre en argument
     if (!message.member.permissions.has("ManageMessages")) {
       return message.reply(
         "❌ Vous n'avez pas la permission de gérer les messages."
       );
     }
 
-    // Récupérer le canal avant de supprimer le message
     const channel = message.channel;
 
-    // Déterminer le nombre de messages à supprimer
-    let nombre = 100; // Par défaut, maximum possible
+    let nombre = 100;
     if (args.length > 0) {
-      const argNombre = parseInt(args[0]);
+      const argNombre = parseInt(args[0], 10);
       if (!isNaN(argNombre) && argNombre > 0 && argNombre <= 100) {
         nombre = argNombre;
       }
     }
 
-    // Supprimer le message de commande
     message.delete().catch(() => {});
 
-    // Attendre un peu puis procéder
     setTimeout(() => {
       channel.messages
         .fetch({ limit: nombre })
@@ -193,6 +183,6 @@ module.exports = {
             )
             .then((msg) => setTimeout(() => msg.delete(), 3000));
         });
-    }, 100); // Attendre 100ms
+    }, 100);
   },
 };

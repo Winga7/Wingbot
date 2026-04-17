@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wingbot — Dashboard</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <span class="sidebar-logo">W</span>
+          <div>
+            <strong>Wingbot</strong>
+            <span class="muted tiny">Dashboard</span>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav" id="sidebar-nav">
+          <a href="#overview" class="nav-link active" data-view="overview">
+            <span class="nav-ico">◇</span> Vue d’ensemble
+          </a>
+          <a href="#settings" class="nav-link" data-view="settings">
+            <span class="nav-ico">⚙</span> Paramètres
+          </a>
+          <a href="#logs" class="nav-link" data-view="logs">
+            <span class="nav-ico">▤</span> Logs
+          </a>
+          <a href="#commands" class="nav-link" data-view="commands">
+            <span class="nav-ico">⌘</span> Commandes
+          </a>
+          <a href="#custom" class="nav-link" data-view="custom">
+            <span class="nav-ico">✎</span> Commandes perso
+          </a>
+          <a href="#moderation" class="nav-link" data-view="moderation">
+            <span class="nav-ico">🛡</span> Modération
+          </a>
+        </nav>
+
+        <details class="sidebar-help">
+          <summary>URL API (optionnel)</summary>
+          <p class="tiny muted">
+            Vide si tu ouvres cette page via <code>npm run dashboard</code>.
+            Sinon indique <code>http://127.0.0.1:PORT</code>.
+          </p>
+        </details>
+        <input
+          type="url"
+          class="sidebar-input"
+          id="api-origin"
+          placeholder="URL du serveur Node"
+          autocomplete="off"
+        />
+
+        <label class="sidebar-label">Token <code>DASHBOARD_TOKEN</code></label>
+        <input
+          type="password"
+          class="sidebar-input"
+          id="token"
+          placeholder="Secret .env"
+          autocomplete="off"
+        />
+        <button type="button" class="btn primary full" id="load">Connexion API</button>
+
+        <p class="sidebar-label tiny muted">Compte Discord</p>
+        <a class="btn secondary full" id="discord-oauth-link" href="#">Voir mes serveurs (admin)</a>
+        <button type="button" class="btn ghost full tiny" id="btn-discord-logout" hidden>
+          Déconnecter Discord
+        </button>
+        <p id="discord-user-label" class="tiny muted" hidden></p>
+
+        <p id="error" class="error" hidden></p>
+
+        <div class="sidebar-stats" id="stats-section" hidden>
+          <span class="pill"><b id="stat-guilds">—</b> serveurs</span>
+          <span class="pill"><b id="stat-cache">—</b> cache</span>
+        </div>
+      </aside>
+
+      <div class="workspace" id="workspace" hidden>
+      <div class="main">
+        <header class="main-top" id="main-top" hidden>
+          <div class="guild-bar">
+            <img class="guild-icon" id="guild-icon" width="36" height="36" alt="" hidden />
+            <div class="guild-bar-text">
+              <span class="guild-name" id="guild-name">—</span>
+              <span class="muted tiny" id="guild-meta-sub">—</span>
+            </div>
+            <label class="guild-select-wrap">
+              <span class="tiny muted">Serveur</span>
+              <select id="guild-select"></select>
+            </label>
+          </div>
+          <div class="main-actions">
+            <span class="dirty-badge" id="dirty-hint" hidden>Non enregistré</span>
+            <button type="button" class="btn primary" id="save" disabled>Enregistrer</button>
+            <span class="save-status" id="save-status"></span>
+          </div>
+        </header>
+
+        <p class="discord-warn muted tiny" id="discord-warn-meta" hidden></p>
+        <p class="discord-warn muted tiny" id="discord-warn-channels" hidden></p>
+
+        <div class="invite-banner" id="invite-banner" hidden>
+          <p>
+            <strong>Le bot n’est pas encore sur ce serveur.</strong> Invite-le, puis
+            reviens ici (actualise la page si besoin).
+          </p>
+          <a class="btn primary" id="invite-link" href="#" target="_blank" rel="noopener noreferrer"
+            >Inviter Wingbot sur ce serveur</a
+          >
+        </div>
+
+        <div class="views" id="views" hidden>
+          <section class="view" id="view-overview" hidden>
+            <div class="view-head">
+              <h2>Vue d’ensemble</h2>
+              <p class="muted tiny">Résumé pour ce serveur</p>
+            </div>
+            <div class="cards">
+              <div class="stat-card">
+                <span class="stat-card-label">Module logs</span>
+                <span class="stat-card-val" id="ov-logs">—</span>
+                <span class="muted tiny">Interrupteur principal</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-card-label">Préfixe texte</span>
+                <span class="stat-card-val mono" id="ov-prefix">—</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-card-label">Commandes coupées</span>
+                <span class="stat-card-val" id="ov-cmd-off">—</span>
+              </div>
+            </div>
+            <p class="muted tiny hint-box">
+              Utilise le menu à gauche pour tout configurer. Pense à cliquer sur
+              <strong>Enregistrer</strong> après tes changements.
+            </p>
+          </section>
+
+          <section class="view" id="view-settings" hidden>
+            <div class="view-head">
+              <h2>Paramètres</h2>
+              <p class="muted tiny">Préfixe des commandes par message et activation globale des logs</p>
+            </div>
+            <div class="panel-block">
+              <label class="field-row">
+                <span>Préfixe <span class="muted tiny">(commandes <code>$help</code> etc.)</span></span>
+                <input type="text" id="input-prefix" maxlength="16" class="input-sm mono" />
+              </label>
+              <label class="switch-row">
+                <input type="checkbox" id="switch-logs-master" />
+                <span>Activer le <strong>module logs</strong> sur ce serveur</span>
+              </label>
+              <p class="muted tiny">
+                Si désactivé, <strong>aucun</strong> log n’est envoyé (même si des cases sont cochées
+                dans l’onglet Logs).
+              </p>
+            </div>
+          </section>
+
+          <section class="view" id="view-logs" hidden>
+            <div class="view-head">
+              <h2>Logs détaillés</h2>
+              <p class="muted tiny">Salon de destination + événements à tracer</p>
+            </div>
+            <div class="panel-block">
+              <label class="field-row">
+                <span>Salon des logs</span>
+                <select id="log-channel-select"></select>
+              </label>
+            </div>
+            <div id="groups-root" class="groups-inner"></div>
+          </section>
+
+          <section class="view" id="view-commands" hidden>
+            <div class="view-head">
+              <h2>Commandes</h2>
+              <p class="muted tiny">Désactive les commandes que tu ne veux pas sur ce serveur (slash + préfixe). <strong>help</strong> reste toujours disponible.</p>
+            </div>
+            <div id="commands-root" class="commands-grid"></div>
+          </section>
+
+          <section class="view" id="view-custom" hidden>
+            <div class="view-head">
+              <h2>Commandes personnalisées</h2>
+              <p class="muted tiny">Réponses déclenchées par le préfixe (ex. <code>$règles</code>). Pas de slash Discord pour les perso.</p>
+            </div>
+            <div class="panel-block">
+              <p class="muted tiny">
+                <strong>Déclencheur :</strong> 1–32 caractères (lettres y compris accents, chiffres, <code>_</code>, <code>-</code>), nom différent d’une commande du bot. Il est enregistré en minuscules.
+              </p>
+              <details class="custom-guide">
+                <summary>Mini-guide — texte dynamique dans la réponse</summary>
+                <div class="custom-guide-body muted tiny">
+                  <p>Placeholders (copie-colle dans la zone réponse) :</p>
+                  <ul>
+                    <li><code>{{user}}</code> — mention de l’auteur de la commande</li>
+                    <li><code>{{username}}</code> — pseudo Discord (sans mention)</li>
+                    <li><code>{{user.tag}}</code> — pseudo#0000</li>
+                    <li><code>{{channel}}</code> — mention du salon actuel</li>
+                    <li><code>{{guild}}</code> — nom du serveur</li>
+                    <li><code>{{members}}</code> — nombre de membres (approximatif)</li>
+                    <li><code>{{reply}}</code> ou <code>{{reply.content}}</code> — texte du message auquel tu réponds (commande en réponse)</li>
+                    <li><code>{{reply.user}}</code> — mention de l’auteur du message répondu</li>
+                    <li><code>{{delete}}</code> — supprime le <strong>message de commande</strong> après envoi de la réponse (le bot doit avoir « Gérer les messages » dans ce salon)</li>
+                  </ul>
+                  <p class="hint-box">
+                    Exemple : <code>Bienvenue {{user}} sur {{guild}} ! {{delete}}</code>
+                  </p>
+                </div>
+              </details>
+              <div id="custom-commands-root" class="custom-commands-list"></div>
+              <button type="button" class="btn secondary" id="btn-add-custom">+ Ajouter une commande</button>
+            </div>
+          </section>
+
+          <section class="view" id="view-moderation" hidden>
+            <div class="view-head">
+              <h2>Modération</h2>
+              <p class="muted tiny">Commandes slash et préfixe — permissions Discord requises</p>
+            </div>
+            <div class="panel-block">
+              <ul class="mod-doc-list muted">
+                <li><strong class="mono">kick</strong> — Expulser (<code>KickMembers</code>)</li>
+                <li><strong class="mono">ban</strong> — Bannir, option jours de messages effacés (<code>BanMembers</code>)</li>
+                <li><strong class="mono">timeout</strong> / <strong class="mono">untimeout</strong> — Sourdine Discord (<code>ModerateMembers</code>)</li>
+                <li><strong class="mono">warn</strong> — Avertissement + MP si possible (<code>ModerateMembers</code>)</li>
+                <li><strong class="mono">slowmode</strong> — Mode lent du salon (<code>ManageChannels</code>)</li>
+                <li><strong class="mono">clear</strong> — Purge de messages (<code>ManageMessages</code>)</li>
+              </ul>
+              <p class="muted tiny">
+                Après mise à jour du code, redéploie les slash : <code>npm run deploy</code> (nécessite <code>GUILD_ID</code> dans <code>.env</code>).
+              </p>
+            </div>
+          </section>
+        </div>
+      </div>
+      </div>
+    </div>
+
+    <footer class="foot muted tiny">
+      Wingbot · même base SQLite que le bot · <code>TOKEN</code> bot requis pour noms Discord
+    </footer>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
