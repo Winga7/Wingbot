@@ -9,6 +9,8 @@ const {
 const {
   ALL_COMMAND_IDS,
   IMMUTABLE_COMMAND_IDS,
+  COMMANDS,
+  COMMAND_GROUPS,
 } = require("./commandsManifest");
 
 // Créer ou ouvrir la base de données
@@ -68,8 +70,141 @@ function initDatabase() {
   migrateGuildConfigExtras();
   migrateCustomCommandsTable();
   migrateBotGlobalSettingsTable();
+  migrateGuildEmbedsTable();
 
   console.log("✅ Base de données initialisée");
+}
+
+function migrateGuildEmbedsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS guild_embeds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      channel_id TEXT,
+      message_id TEXT,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_guild_embeds_guild ON guild_embeds(guild_id)`
+  ).run();
+}
+
+function parseGuildEmbedPayload(raw) {
+  try {
+    const o = JSON.parse(raw || "{}");
+    if (!o || typeof o !== "object") return {};
+    return o;
+  } catch {
+    return {};
+  }
+}
+
+function listGuildEmbeds(guildId) {
+  const rows = db
+    .prepare(
+      `SELECT id, guild_id, name, channel_id, message_id, payload, created_at, updated_at
+       FROM guild_embeds WHERE guild_id = ? ORDER BY updated_at DESC`
+    )
+    .all(guildId);
+  return rows.map((r) => ({
+    id: r.id,
+    guild_id: r.guild_id,
+    name: r.name || "",
+    channel_id: r.channel_id || null,
+    message_id: r.message_id || null,
+    payload: parseGuildEmbedPayload(r.payload),
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  }));
+}
+
+function getGuildEmbedRow(embedId, guildId) {
+  const row = db
+    .prepare(
+      `SELECT id, guild_id, name, channel_id, message_id, payload, created_at, updated_at
+       FROM guild_embeds WHERE id = ? AND guild_id = ?`
+    )
+    .get(embedId, guildId);
+  if (!row) return null;
+  return {
+    id: row.id,
+    guild_id: row.guild_id,
+    name: row.name || "",
+    channel_id: row.channel_id || null,
+    message_id: row.message_id || null,
+    payload: parseGuildEmbedPayload(row.payload),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function insertGuildEmbed(guildId, name, payloadObj) {
+  ensureGuildLogRow(guildId);
+  const nm = String(name || "Sans titre").trim().slice(0, 120) || "Sans titre";
+  const payloadStr = JSON.stringify(payloadObj && typeof payloadObj === "object" ? payloadObj : {});
+  const r = db
+    .prepare(
+      `INSERT INTO guild_embeds (guild_id, name, payload, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)`
+    )
+    .run(guildId, nm, payloadStr);
+  return getGuildEmbedRow(Number(r.lastInsertRowid), guildId);
+}
+
+function updateGuildEmbed(embedId, guildId, patch) {
+  const cur = getGuildEmbedRow(embedId, guildId);
+  if (!cur) return null;
+  const name =
+    patch.name != null
+      ? String(patch.name).trim().slice(0, 120) || cur.name
+      : cur.name;
+  let payload = cur.payload;
+  if (patch.payload != null && typeof patch.payload === "object") {
+    payload = patch.payload;
+  }
+  const channel_id =
+    patch.channel_id !== undefined
+      ? patch.channel_id == null || patch.channel_id === ""
+        ? null
+        : String(patch.channel_id).trim()
+      : cur.channel_id;
+  const message_id =
+    patch.message_id !== undefined
+      ? patch.message_id == null || patch.message_id === ""
+        ? null
+        : String(patch.message_id).trim()
+      : cur.message_id;
+
+  db.prepare(
+    `UPDATE guild_embeds SET
+      name = ?,
+      channel_id = ?,
+      message_id = ?,
+      payload = ?,
+      updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND guild_id = ?`
+  ).run(
+    name,
+    channel_id,
+    message_id,
+    JSON.stringify(payload),
+    embedId,
+    guildId
+  );
+  return getGuildEmbedRow(embedId, guildId);
+}
+
+function deleteGuildEmbed(embedId, guildId) {
+  const r = db
+    .prepare(`DELETE FROM guild_embeds WHERE id = ? AND guild_id = ?`)
+    .run(embedId, guildId);
+  return r.changes > 0;
 }
 
 function migrateBotGlobalSettingsTable() {
@@ -123,7 +258,7 @@ function setBotGlobalSettings(patch) {
     merged.presence_status = v;
   }
   if (Object.prototype.hasOwnProperty.call(patch, "presence_activity_type")) {
-    const allowed = new Set(["None", "Playing", "Listening", "Watching", "Competing"]);
+    const allowed = new Set(["None", "Custom", "Playing", "Listening", "Watching", "Competing"]);
     const v = String(patch.presence_activity_type || "").trim();
     if (!allowed.has(v)) throw new Error("presence_activity_type invalide");
     merged.presence_activity_type = v;
@@ -196,6 +331,86 @@ function migrateGuildConfigExtras() {
     db.prepare(
       "UPDATE guild_config SET commands_disabled = ? WHERE commands_disabled IS NULL"
     ).run("[]");
+  }
+  if (!names.has("command_groups_disabled")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN command_groups_disabled TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET command_groups_disabled = ? WHERE command_groups_disabled IS NULL"
+    ).run("[]");
+  }
+  if (!names.has("command_access")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN command_access TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET command_access = ? WHERE command_access IS NULL"
+    ).run("{}");
+  }
+}
+
+const COMMAND_GROUP_IDS = new Set(COMMAND_GROUPS.map((g) => g.id));
+const COMMAND_CATEGORY_BY_ID = Object.fromEntries(
+  COMMANDS.map((c) => [c.id, c.category])
+);
+
+function defaultCommandAccess() {
+  return {
+    ignore_channel_ids: [],
+    block_role_ids: [],
+    allow_role_ids: [],
+    staff_role_ids: [],
+  };
+}
+
+function normalizeSnowflakeList(arr, max = 60) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const x of arr) {
+    const id = String(x ?? "")
+      .replace(/\D/g, "")
+      .trim();
+    if (!/^\d{17,20}$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function parseCommandAccess(raw) {
+  const base = defaultCommandAccess();
+  if (raw == null || String(raw).trim() === "") return base;
+  try {
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== "object") return base;
+    return {
+      ignore_channel_ids: normalizeSnowflakeList(o.ignore_channel_ids),
+      block_role_ids: normalizeSnowflakeList(o.block_role_ids),
+      allow_role_ids: normalizeSnowflakeList(o.allow_role_ids),
+      staff_role_ids: normalizeSnowflakeList(o.staff_role_ids),
+    };
+  } catch {
+    return base;
+  }
+}
+
+function getCommandAccessConfig(guildId) {
+  const row = db
+    .prepare("SELECT command_access FROM guild_config WHERE guild_id = ?")
+    .get(guildId);
+  return parseCommandAccess(row?.command_access);
+}
+
+function getDisabledCommandGroups(guildId) {
+  const row = db
+    .prepare("SELECT command_groups_disabled FROM guild_config WHERE guild_id = ?")
+    .get(guildId);
+  if (!row?.command_groups_disabled) return [];
+  try {
+    const arr = JSON.parse(row.command_groups_disabled);
+    if (!Array.isArray(arr)) return [];
+    return [...new Set(arr.filter((x) => typeof x === "string" && COMMAND_GROUP_IDS.has(x)))];
+  } catch {
+    return [];
   }
 }
 
@@ -356,7 +571,10 @@ function getDisabledCommands(guildId) {
 
 function isCommandEnabled(guildId, commandName) {
   if (IMMUTABLE_COMMAND_IDS.includes(commandName)) return true;
-  return !getDisabledCommands(guildId).includes(commandName);
+  if (getDisabledCommands(guildId).includes(commandName)) return false;
+  const cat = COMMAND_CATEGORY_BY_ID[commandName];
+  if (cat && getDisabledCommandGroups(guildId).includes(cat)) return false;
+  return true;
 }
 
 /** Clé de déclencheur (minuscules, trim) — compatible caractères accentués */
@@ -441,6 +659,8 @@ function getGuildDashboardPayload(guildId) {
     prefix: getGuildPrefix(guildId),
     logs_master_enabled: isLogsMasterEnabled(guildId),
     commands_disabled: getDisabledCommands(guildId),
+    command_groups_disabled: getDisabledCommandGroups(guildId),
+    command_access: getCommandAccessConfig(guildId),
     custom_commands: getCustomCommands(guildId),
   };
 }
@@ -521,6 +741,47 @@ function applyGuildSettingsPatch(guildId, patch) {
     db.prepare(
       "UPDATE guild_config SET commands_disabled = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
     ).run(JSON.stringify(filtered), guildId);
+  }
+
+  if (patch.command_groups_disabled != null) {
+    if (!Array.isArray(patch.command_groups_disabled)) {
+      throw new Error("command_groups_disabled doit être un tableau de groupes");
+    }
+    const filtered = [
+      ...new Set(
+        patch.command_groups_disabled.filter(
+          (x) => typeof x === "string" && COMMAND_GROUP_IDS.has(x)
+        )
+      ),
+    ];
+    db.prepare(
+      "UPDATE guild_config SET command_groups_disabled = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+    ).run(JSON.stringify(filtered), guildId);
+  }
+
+  if (patch.command_access != null) {
+    if (typeof patch.command_access !== "object" || patch.command_access === null) {
+      throw new Error("command_access invalide");
+    }
+    const cur = getCommandAccessConfig(guildId);
+    const next = { ...cur };
+    for (const key of [
+      "ignore_channel_ids",
+      "block_role_ids",
+      "allow_role_ids",
+      "staff_role_ids",
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(patch.command_access, key)) {
+        const v = patch.command_access[key];
+        if (!Array.isArray(v)) {
+          throw new Error(`command_access.${key} doit être un tableau d’IDs`);
+        }
+        next[key] = normalizeSnowflakeList(v);
+      }
+    }
+    db.prepare(
+      "UPDATE guild_config SET command_access = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+    ).run(JSON.stringify(next), guildId);
   }
 
   if (Object.prototype.hasOwnProperty.call(patch, "custom_commands")) {
@@ -630,6 +891,7 @@ module.exports = {
   getGuildPrefix,
   getDisabledCommands,
   isCommandEnabled,
+  getCommandAccessConfig,
   getCustomCommands,
   getCustomCommandReply,
   getGuildDashboardPayload,
@@ -640,4 +902,9 @@ module.exports = {
   cleanOldMessages,
   getBotGlobalSettings,
   setBotGlobalSettings,
+  listGuildEmbeds,
+  getGuildEmbedRow,
+  insertGuildEmbed,
+  updateGuildEmbed,
+  deleteGuildEmbed,
 };

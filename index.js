@@ -17,6 +17,7 @@ const {
   getBotGlobalSettings,
 } = require("./database");
 const { expandCustomTemplate } = require("./customCommandTemplates");
+const { getCommandAccessDenial } = require("./commandAccessGate");
 
 // Initialiser la base de données
 initDatabase();
@@ -145,6 +146,7 @@ client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
 
   const activityTypeByKey = {
+    Custom: ActivityType.Custom,
     Playing: ActivityType.Playing,
     Listening: ActivityType.Listening,
     Watching: ActivityType.Watching,
@@ -208,6 +210,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
     });
   }
 
+  if (command && interaction.guild) {
+    const denial = getCommandAccessDenial({
+      guild: interaction.guild,
+      member: interaction.member,
+      channel: interaction.channel,
+      commandName: interaction.commandName,
+    });
+    if (denial) {
+      return interaction.reply({
+        content: `❌ ${denial}`,
+        ephemeral: true,
+      });
+    }
+  }
+
   if (!command) {
     console.error(
       `Aucune commande correspondant à ${interaction.commandName} n'a été trouvée.`
@@ -258,6 +275,17 @@ client.on(Events.MessageCreate, async (message) => {
         "Cette commande est désactivée sur ce serveur. Réactive-la depuis le dashboard."
       );
     }
+    if (message.guild) {
+      const denial = getCommandAccessDenial({
+        guild: message.guild,
+        member: message.member,
+        channel: message.channel,
+        commandName,
+      });
+      if (denial) {
+        return message.reply(`❌ ${denial}`);
+      }
+    }
     try {
       if (command.executeMessage) {
         command.executeMessage(message, args);
@@ -271,6 +299,18 @@ client.on(Events.MessageCreate, async (message) => {
       );
     }
     return;
+  }
+
+  if (message.guild) {
+    const denialCustom = getCommandAccessDenial({
+      guild: message.guild,
+      member: message.member,
+      channel: message.channel,
+      commandName: "__custom__",
+    });
+    if (denialCustom) {
+      return message.reply(`❌ ${denialCustom}`);
+    }
   }
 
   const customReply = guildId && getCustomCommandReply(guildId, commandName);
@@ -293,10 +333,5 @@ client.on(Events.MessageCreate, async (message) => {
   );
 });
 
-// Accès aux variables d'environnement
-const token = process.env.TOKEN;
-const clientId = process.env.CLIENT_ID;
-const guildId = process.env.GUILD_ID;
-
 // Connexion du bot avec le token
-client.login(token);
+client.login(process.env.TOKEN);

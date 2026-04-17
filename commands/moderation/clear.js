@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const { memberHasPermOrAdmin } = require("../../memberPerms");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -36,7 +37,7 @@ module.exports = {
 
   async execute(interaction) {
     if (
-      !interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)
+      !memberHasPermOrAdmin(interaction.member, PermissionFlagsBits.ManageMessages)
     ) {
       return interaction.reply({
         content: "❌ Vous n'avez pas la permission de gérer les messages.",
@@ -131,7 +132,7 @@ module.exports = {
   },
 
   executeMessage(message, args) {
-    if (!message.member.permissions.has("ManageMessages")) {
+    if (!memberHasPermOrAdmin(message.member, PermissionFlagsBits.ManageMessages)) {
       return message.reply(
         "❌ Vous n'avez pas la permission de gérer les messages."
       );

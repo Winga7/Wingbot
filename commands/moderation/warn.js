@@ -3,6 +3,7 @@ const {
   PermissionFlagsBits,
   EmbedBuilder,
 } = require("discord.js");
+const { memberHasPermOrAdmin } = require("../../memberPerms");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -20,7 +21,7 @@ module.exports = {
     const user = interaction.options.getUser("membre", true);
     const reason = interaction.options.getString("raison", true).slice(0, 500);
 
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+    if (!memberHasPermOrAdmin(interaction.member, PermissionFlagsBits.ModerateMembers)) {
       return interaction.reply({
         content: "❌ Tu n’as pas la permission de modérer les membres.",
         ephemeral: true,
@@ -54,7 +55,7 @@ module.exports = {
   },
 
   executeMessage(message, args) {
-    if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+    if (!memberHasPermOrAdmin(message.member, PermissionFlagsBits.ModerateMembers)) {
       return message.reply(
         "❌ Tu n’as pas la permission de modérer les membres."
       );

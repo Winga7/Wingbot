@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 
-const VIEWS = ["overview", "settings", "logs", "commands", "custom", "moderation"];
+const VIEWS = ["overview", "settings", "logs", "commands", "custom", "embeds", "moderation"];
 
 let manifest = { groups: [] };
 let commandManifest = { groups: [], commands: [] };
@@ -9,6 +9,10 @@ let commandManifest = { groups: [], commands: [] };
 let guildPickerList = [];
 
 let guilds = [];
+/** Dernières listes Discord (UI accès commandes) */
+let lastGuildChannelsList = [];
+let lastGuildRolesList = [];
+
 /** @type {Record<string, { id: string, name: string, icon_url: string | null }>} */
 let guildMeta = {};
 
@@ -19,9 +23,18 @@ let guildMeta = {};
  *   prefix: string,
  *   logs_master_enabled: boolean,
  *   commands_disabled: string[],
+ *   command_groups_disabled: string[],
+ *   command_access: {
+ *     ignore_channel_ids: string[],
+ *     block_role_ids: string[],
+ *     allow_role_ids: string[],
+ *     staff_role_ids: string[],
+ *   },
  *   custom_commands: { id?: number, trigger: string, response: string }[]
  * } | null} */
 let guildState = null;
+
+const LS_LAST_GUILD_KEY = "wingbot.lastGuildId";
 
 let selectedGuildId = null;
 let dirty = false;
@@ -91,6 +104,9 @@ function navigate() {
   document.querySelectorAll(".nav-link").forEach((a) => {
     a.classList.toggle("active", a.dataset.view === name);
   });
+  if (name === "embeds" && window.wingbotEmbedWorkbench) {
+    window.wingbotEmbedWorkbench.refresh();
+  }
 }
 
 window.addEventListener("hashchange", navigate);
@@ -200,6 +216,7 @@ async function loadChannelSelect(guildId) {
   );
 
   if (!res.ok) {
+    lastGuildChannelsList = [];
     const w = $("discord-warn-channels");
     w.hidden = false;
     w.textContent =
@@ -212,6 +229,7 @@ async function loadChannelSelect(guildId) {
 
   const data = await res.json();
   const channels = data.channels || [];
+  lastGuildChannelsList = channels;
   const byCat = new Map();
   for (const ch of channels) {
     const label = ch.category || "Sans catégorie";
@@ -246,6 +264,32 @@ async function loadChannelSelect(guildId) {
       sel.appendChild(og);
     }
   }
+}
+
+function normalizeSnowflakeArrayUi(arr) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const x of arr) {
+    const id = String(x ?? "")
+      .replace(/\D/g, "")
+      .trim();
+    if (!/^\d{17,20}$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+async function loadGuildRoles(guildId) {
+  lastGuildRolesList = [];
+  const res = await fetch(
+    apiUrl(`/api/discord/guilds/${encodeURIComponent(guildId)}/roles`),
+    { credentials: "include" }
+  );
+  if (!res.ok) return;
+  const data = await res.json();
+  lastGuildRolesList = Array.isArray(data.roles) ? data.roles : [];
 }
 
 function renderGroups() {
@@ -333,19 +377,268 @@ function renderGroups() {
   });
 }
 
+function syncCommandAccessSet(key, id, checked) {
+  if (!guildState?.command_access) return;
+  const s = new Set(guildState.command_access[key]);
+  if (checked) s.add(id);
+  else s.delete(id);
+  guildState.command_access[key] = [...s];
+  setDirty(true);
+}
+
+/* Rendu des chips (salons ou rôles) pour une section d'accès.
+   Clic sur le chip entier = toggle. État visuel via data-checked. */
+function renderAccessChips(container, items, key, getLabel, getColor) {
+  container.innerHTML = "";
+  const ca = guildState.command_access;
+
+  if (!items.length) {
+    const sp = document.createElement("span");
+    sp.className = "muted tiny access-empty";
+    sp.textContent =
+      key === "ignore_channel_ids"
+        ? "Aucun salon listé (bot absent, TOKEN manquant, ou erreur API)."
+        : "Aucun rôle listé.";
+    container.appendChild(sp);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const item of items) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "access-chip";
+    chip.dataset.id = item.id;
+    chip.dataset.search = getLabel(item).toLowerCase();
+    const checked = ca[key].includes(item.id);
+    chip.dataset.checked = checked ? "1" : "0";
+
+    const color = getColor ? getColor(item) : null;
+    if (color) {
+      chip.style.setProperty("--chip-accent", color);
+    }
+
+    const dot = document.createElement("span");
+    dot.className = "access-chip-dot";
+    chip.appendChild(dot);
+
+    const label = document.createElement("span");
+    label.className = "access-chip-label";
+    label.textContent = getLabel(item);
+    chip.appendChild(label);
+
+    const tick = document.createElement("span");
+    tick.className = "access-chip-tick";
+    tick.innerHTML =
+      '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    chip.appendChild(tick);
+
+    chip.addEventListener("click", (e) => {
+      e.preventDefault();
+      const next = chip.dataset.checked !== "1";
+      chip.dataset.checked = next ? "1" : "0";
+      syncCommandAccessSet(key, item.id, next);
+      updateSectionCounter(chip.closest(".access-sec"));
+    });
+
+    frag.appendChild(chip);
+  }
+  container.appendChild(frag);
+}
+
+function updateSectionCounter(sec) {
+  if (!sec) return;
+  const total = sec.querySelectorAll(".access-chip").length;
+  const checked = sec.querySelectorAll('.access-chip[data-checked="1"]').length;
+  const badge = sec.querySelector(".access-count");
+  if (badge) {
+    badge.textContent = checked > 0 ? `${checked} / ${total}` : `${total}`;
+    badge.classList.toggle("is-active", checked > 0);
+  }
+}
+
+function renderAccessSection({
+  id,
+  title,
+  hint,
+  key,
+  items,
+  getLabel,
+  getColor,
+  open,
+}) {
+  const details = document.createElement("details");
+  details.className = "access-sec";
+  details.id = `access-sec-${id}`;
+  if (open) details.open = true;
+
+  const total = items.length;
+  const selected = (guildState.command_access[key] || []).length;
+
+  const sum = document.createElement("summary");
+  sum.className = "access-sec-head";
+  sum.innerHTML = `
+    <span class="access-sec-title">${escapeHtml(title)}</span>
+    <span class="access-count ${selected > 0 ? "is-active" : ""}">${
+    selected > 0 ? `${selected} / ${total}` : `${total}`
+  }</span>
+    <svg class="access-sec-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  `;
+  details.appendChild(sum);
+
+  const body = document.createElement("div");
+  body.className = "access-sec-body";
+
+  const hintEl = document.createElement("p");
+  hintEl.className = "access-sec-hint muted tiny";
+  hintEl.textContent = hint;
+  body.appendChild(hintEl);
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "access-sec-toolbar";
+  toolbar.innerHTML = `
+    <div class="access-search">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="search" placeholder="${
+        key === "ignore_channel_ids" ? "Rechercher un salon…" : "Rechercher un rôle…"
+      }" />
+    </div>
+    <button type="button" class="btn ghost tiny access-clear">Tout décocher</button>
+  `;
+  body.appendChild(toolbar);
+
+  const chipsWrap = document.createElement("div");
+  chipsWrap.className = "access-chips";
+  body.appendChild(chipsWrap);
+  details.appendChild(body);
+
+  renderAccessChips(chipsWrap, items, key, getLabel, getColor);
+
+  const searchInput = toolbar.querySelector('input[type="search"]');
+  searchInput.addEventListener("input", () => {
+    const q = searchInput.value.trim().toLowerCase();
+    chipsWrap.querySelectorAll(".access-chip").forEach((c) => {
+      c.style.display = !q || c.dataset.search.includes(q) ? "" : "none";
+    });
+  });
+
+  toolbar.querySelector(".access-clear").addEventListener("click", () => {
+    guildState.command_access[key] = [];
+    chipsWrap.querySelectorAll(".access-chip").forEach((c) => {
+      c.dataset.checked = "0";
+    });
+    setDirty(true);
+    updateSectionCounter(details);
+  });
+
+  return details;
+}
+
+function roleColorCss(role) {
+  const c = Number(role.color);
+  if (!c || c === 0) return null;
+  return "#" + c.toString(16).padStart(6, "0");
+}
+
+function renderCommandAccessPanel() {
+  const root = $("command-access-root");
+  if (!root || !guildState) return;
+  root.innerHTML = "";
+
+  const intro = document.createElement("details");
+  intro.className = "access-intro";
+  intro.innerHTML = `
+    <summary>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      Comment ça marche ?
+    </summary>
+    <div class="access-intro-body muted tiny">
+      <p><strong>Salons sans commandes</strong> — aucune commande (y compris <code>help</code>) dans ces salons.</p>
+      <p><strong>Rôles sans commandes</strong> — ces rôles ne peuvent rien lancer sauf <code>help</code>.</p>
+      <p><strong>Rôles autorisés</strong> — au moins une case = liste blanche (eux + admin + propriétaire seulement).</p>
+      <p><strong>Staff modération</strong> — au moins une case = commandes modération/admin exigent en plus un de ces rôles.</p>
+      <p>Administrateur ou propriétaire Discord : toujours prioritaires sur ces règles.</p>
+    </div>
+  `;
+  root.appendChild(intro);
+
+  root.appendChild(
+    renderAccessSection({
+      id: "channels",
+      title: "Salons sans commandes",
+      hint: "Aucune commande du bot dans les salons cochés.",
+      key: "ignore_channel_ids",
+      items: lastGuildChannelsList,
+      getLabel: (ch) => `#${ch.name}`,
+      open: true,
+    })
+  );
+
+  root.appendChild(
+    renderAccessSection({
+      id: "blocked",
+      title: "Rôles sans commandes",
+      hint: "Ces rôles ne peuvent utiliser aucune commande (sauf help).",
+      key: "block_role_ids",
+      items: lastGuildRolesList,
+      getLabel: (r) => r.name,
+      getColor: roleColorCss,
+    })
+  );
+
+  root.appendChild(
+    renderAccessSection({
+      id: "allowed",
+      title: "Rôles autorisés (liste blanche)",
+      hint: "Vide = tout le monde peut essayer. Au moins un coché = seuls ces rôles + admin Discord + propriétaire.",
+      key: "allow_role_ids",
+      items: lastGuildRolesList,
+      getLabel: (r) => r.name,
+      getColor: roleColorCss,
+    })
+  );
+
+  root.appendChild(
+    renderAccessSection({
+      id: "staff",
+      title: "Rôles staff (modération & administration)",
+      hint: "Au moins un coché = commandes modération/admin exigent en plus un de ces rôles (ou admin / propriétaire).",
+      key: "staff_role_ids",
+      items: lastGuildRolesList,
+      getLabel: (r) => r.name,
+      getColor: roleColorCss,
+    })
+  );
+}
+
 function renderCommands() {
   const root = $("commands-root");
   if (!root || !guildState) return;
   root.innerHTML = "";
   const groups = commandManifest.groups || [];
   const cmds = commandManifest.commands || [];
+  const groupsDisabled = new Set(guildState.command_groups_disabled || []);
 
   for (const g of groups) {
     const section = document.createElement("div");
     section.className = "cmd-group";
+    const head = document.createElement("div");
+    head.className = "cmd-group-head";
     const h = document.createElement("h4");
     h.textContent = `${g.icon || ""} ${g.title}`.trim();
-    section.appendChild(h);
+    const groupOff = groupsDisabled.has(g.id);
+    const masterLab = document.createElement("label");
+    const masterInp = document.createElement("input");
+    masterInp.type = "checkbox";
+    masterInp.setAttribute("data-group-master", g.id);
+    masterInp.checked = !groupOff;
+    masterLab.appendChild(masterInp);
+    const masterSpan = document.createElement("span");
+    masterSpan.textContent = "Groupe activé";
+    masterLab.appendChild(masterSpan);
+    head.appendChild(h);
+    head.appendChild(masterLab);
+    section.appendChild(head);
 
     const grid = document.createElement("div");
     grid.className = "cmd-toggles";
@@ -363,14 +656,14 @@ function renderCommands() {
         grid.appendChild(row);
         continue;
       }
-      const enabled = !guildState.commands_disabled.includes(c.id);
+      const enabled = !groupOff && !guildState.commands_disabled.includes(c.id);
       const row = document.createElement("label");
       row.className = "cmd-row";
       row.innerHTML = `
-        <input type="checkbox" data-cmd="${escapeHtml(c.id)}" ${enabled ? "checked" : ""} />
+        <input type="checkbox" data-cmd="${escapeHtml(c.id)}" ${enabled ? "checked" : ""} ${groupOff ? "disabled" : ""} />
         <span class="cmd-row-text">
           <strong class="mono">${escapeHtml(c.label)}</strong>
-          <span class="muted tiny">${escapeHtml(c.description)}</span>
+          <span class="muted tiny">${escapeHtml(c.description)}${groupOff ? " — groupe désactivé" : ""}</span>
         </span>
       `;
       grid.appendChild(row);
@@ -388,6 +681,20 @@ function renderCommands() {
       else dis.add(id);
       guildState.commands_disabled = [...dis].filter((x) => x !== "help");
       setDirty(true);
+      updateOverview();
+    });
+  });
+
+  root.querySelectorAll("[data-group-master]").forEach((inp) => {
+    inp.addEventListener("change", () => {
+      const gid = inp.getAttribute("data-group-master");
+      if (!gid) return;
+      const set = new Set(guildState.command_groups_disabled);
+      if (inp.checked) set.delete(gid);
+      else set.add(gid);
+      guildState.command_groups_disabled = [...set];
+      setDirty(true);
+      renderCommands();
       updateOverview();
     });
   });
@@ -440,13 +747,26 @@ function renderCustomCommands() {
   });
 }
 
+function effectiveDisabledCommandCount() {
+  if (!guildState) return 0;
+  const dis = new Set(
+    (guildState.commands_disabled || []).filter((x) => x !== "help")
+  );
+  const groupsOff = new Set(guildState.command_groups_disabled || []);
+  for (const c of commandManifest.commands || []) {
+    if (c.id === "help") continue;
+    if (groupsOff.has(c.category)) dis.add(c.id);
+  }
+  return dis.size;
+}
+
 function updateOverview() {
   if (!guildState) return;
   $("ov-logs").textContent = guildState.logs_master_enabled
     ? "Activé"
     : "Désactivé";
   $("ov-prefix").textContent = guildState.prefix || "$";
-  $("ov-cmd-off").textContent = String(guildState.commands_disabled.length);
+  $("ov-cmd-off").textContent = String(effectiveDisabledCommandCount());
 }
 
 function fillGuildSelect() {
@@ -466,16 +786,124 @@ function fillGuildSelect() {
     sel.appendChild(o);
   }
 
-  const firstWithBot = guildPickerList.find((x) => x.bot_in_guild)?.guild_id || "";
   if (
     selectedGuildId &&
     guildPickerList.some((x) => x.guild_id === selectedGuildId)
   ) {
     sel.value = selectedGuildId;
   } else {
-    sel.value = firstWithBot || guildPickerList[0]?.guild_id || "";
-    selectedGuildId = sel.value || null;
+    sel.value = "";
   }
+}
+
+function renderGuildPickerGrid() {
+  const grid = $("guild-picker-grid");
+  const empty = $("guild-picker-empty");
+  if (!grid) return;
+  grid.innerHTML = "";
+
+  if (!guildPickerList.length) {
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  const sorted = [...guildPickerList].sort((a, b) => {
+    if (a.bot_in_guild !== b.bot_in_guild) return a.bot_in_guild ? -1 : 1;
+    const an = (a.name || guildMeta[a.guild_id]?.name || "").toLowerCase();
+    const bn = (b.name || guildMeta[b.guild_id]?.name || "").toLowerCase();
+    return an.localeCompare(bn, "fr");
+  });
+
+  const frag = document.createDocumentFragment();
+  for (const g of sorted) {
+    const meta = guildMeta[g.guild_id];
+    const name = g.name || meta?.name || g.guild_id;
+    const icon = g.icon_url || meta?.icon_url || "";
+    const initials = name
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((s) => s[0] || "")
+      .join("")
+      .toUpperCase() || "?";
+
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "guild-card";
+    if (!g.bot_in_guild) card.classList.add("no-bot");
+    card.dataset.guildId = g.guild_id;
+
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "guild-card-icon";
+    if (icon) {
+      const img = document.createElement("img");
+      img.src = icon;
+      img.alt = "";
+      img.loading = "lazy";
+      img.width = 72;
+      img.height = 72;
+      iconWrap.appendChild(img);
+    } else {
+      iconWrap.textContent = initials;
+      iconWrap.classList.add("fallback");
+    }
+    card.appendChild(iconWrap);
+
+    const label = document.createElement("span");
+    label.className = "guild-card-name";
+    label.textContent = name;
+    card.appendChild(label);
+
+    const badge = document.createElement("span");
+    badge.className = "guild-card-badge " + (g.bot_in_guild ? "ok" : "warn");
+    badge.textContent = g.bot_in_guild ? "Bot actif" : "Bot absent";
+    card.appendChild(badge);
+
+    card.addEventListener("click", () => pickGuild(g.guild_id));
+    frag.appendChild(card);
+  }
+  grid.appendChild(frag);
+}
+
+function showGuildPicker() {
+  const picker = $("guild-picker");
+  const top = $("main-top");
+  const views = $("views");
+  if (picker) {
+    picker.hidden = false;
+    renderGuildPickerGrid();
+  }
+  if (top) top.hidden = true;
+  if (views) views.hidden = true;
+  const banner = $("invite-banner");
+  if (banner) banner.hidden = true;
+}
+
+function hideGuildPicker() {
+  const picker = $("guild-picker");
+  const top = $("main-top");
+  const views = $("views");
+  if (picker) picker.hidden = true;
+  if (top) top.hidden = false;
+  if (views) views.hidden = false;
+}
+
+async function pickGuild(id) {
+  if (!id) return;
+  if (dirty) {
+    const ok = window.confirm(
+      "Modifications non enregistrées. Continuer sans enregistrer ?"
+    );
+    if (!ok) return;
+  }
+  try {
+    localStorage.setItem(LS_LAST_GUILD_KEY, id);
+  } catch {
+    // localStorage peut être indisponible (mode privé) — on ignore
+  }
+  $("guild-select").value = id;
+  hideGuildPicker();
+  await onGuildChange({ skipConfirm: true });
 }
 
 function syncSettingsInputs() {
@@ -485,7 +913,14 @@ function syncSettingsInputs() {
 }
 
 function setViewsDisabled(noBot) {
-  const ids = ["view-settings", "view-logs", "view-commands", "view-custom"];
+  const ids = [
+    "view-settings",
+    "view-logs",
+    "view-commands",
+    "view-custom",
+    "view-embeds",
+    "view-moderation",
+  ];
   for (const id of ids) {
     const el = $(id);
     if (!el) continue;
@@ -508,6 +943,10 @@ async function refreshDiscordForGuild(guildId) {
   updateGuildHeader(guildId);
   if (currentGuildHasBot()) {
     await loadChannelSelect(guildId);
+    await loadGuildRoles(guildId);
+  } else {
+    lastGuildChannelsList = [];
+    lastGuildRolesList = [];
   }
 }
 
@@ -540,6 +979,7 @@ async function applyGuildData(data) {
   const dis = Array.isArray(data.commands_disabled)
     ? [...data.commands_disabled]
     : [];
+  const ac = data.command_access || {};
   guildState = {
     guild_id: data.guild_id,
     feature_flags: { ...data.feature_flags },
@@ -548,6 +988,15 @@ async function applyGuildData(data) {
     logs_master_enabled:
       data.logs_master_enabled !== undefined ? !!data.logs_master_enabled : true,
     commands_disabled: dis.filter((id) => id !== "help"),
+    command_groups_disabled: Array.isArray(data.command_groups_disabled)
+      ? [...data.command_groups_disabled]
+      : [],
+    command_access: {
+      ignore_channel_ids: normalizeSnowflakeArrayUi(ac.ignore_channel_ids),
+      block_role_ids: normalizeSnowflakeArrayUi(ac.block_role_ids),
+      allow_role_ids: normalizeSnowflakeArrayUi(ac.allow_role_ids),
+      staff_role_ids: normalizeSnowflakeArrayUi(ac.staff_role_ids),
+    },
     custom_commands: Array.isArray(data.custom_commands)
       ? data.custom_commands.map((r) => ({
           id: r.id,
@@ -567,6 +1016,10 @@ async function applyGuildData(data) {
 
   await refreshDiscordForGuild(data.guild_id);
   await loadBotProfileForGuild(data.guild_id);
+  renderCommandAccessPanel();
+  if (getHashView() === "embeds" && window.wingbotEmbedWorkbench) {
+    window.wingbotEmbedWorkbench.refresh();
+  }
 
   const sel = $("log-channel-select");
   const id = guildState.log_channel_id || "";
@@ -591,8 +1044,18 @@ async function applyGuildData(data) {
 
 async function clearGuildUiForNoBot() {
   guildState = null;
+  lastGuildChannelsList = [];
+  lastGuildRolesList = [];
   $("groups-root").innerHTML = "";
   $("commands-root").innerHTML = "";
+  const car = $("command-access-root");
+  if (car) car.innerHTML = "";
+  const ebr = $("embed-builder-root");
+  if (ebr) {
+    ebr.innerHTML =
+      '<p class="muted">Choisis un serveur où le bot est présent.</p>';
+    ebr.dataset.ready = "";
+  }
   const ccr = $("custom-commands-root");
   if (ccr) ccr.innerHTML = "";
   $("log-channel-select").innerHTML = "";
@@ -753,59 +1216,66 @@ async function loadData() {
   }
 
   $("workspace").hidden = false;
-  $("main-top").hidden = false;
-  $("views").hidden = false;
 
   fillGuildSelect();
-
-  const fallbackId =
-    guildPickerList.find((x) => x.bot_in_guild)?.guild_id ||
-    guildPickerList[0].guild_id;
-  const firstId = selectedGuildId || fallbackId;
-  const pick = guildPickerList.find((x) => x.guild_id === firstId) || guildPickerList[0];
-  selectedGuildId = pick.guild_id;
-  $("guild-select").value = selectedGuildId;
 
   if (!location.hash) {
     location.hash = "#overview";
   }
-  navigate();
 
   const params = new URLSearchParams(location.search);
   if (params.get("discord") === "connected") {
     history.replaceState({}, "", location.pathname + location.hash);
   }
 
-  if (!pick.bot_in_guild) {
-    await clearGuildUiForNoBot();
-    updateGuildHeader(selectedGuildId);
+  let savedId = null;
+  try {
+    savedId = localStorage.getItem(LS_LAST_GUILD_KEY);
+  } catch {
+    savedId = null;
+  }
+  const savedStillThere =
+    savedId && guildPickerList.some((x) => x.guild_id === savedId);
+
+  if (savedStillThere) {
+    selectedGuildId = savedId;
+    $("guild-select").value = savedId;
+    hideGuildPicker();
+    navigate();
+    const pick = guildPickerList.find((x) => x.guild_id === savedId);
+    if (!pick.bot_in_guild) {
+      await clearGuildUiForNoBot();
+      updateGuildHeader(savedId);
+      updateInviteBanner();
+      setViewsDisabled(true);
+      return;
+    }
+    setViewsDisabled(false);
+    const res = await fetch(
+      apiUrl(`/api/guilds/${encodeURIComponent(savedId)}`),
+      fetchOptsGet()
+    );
+    if (!res.ok) {
+      $("error").hidden = false;
+      $("error").textContent = await res.text();
+      return;
+    }
+    const data = await res.json();
+    await applyGuildData(data);
     updateInviteBanner();
-    setViewsDisabled(true);
     return;
   }
 
-  setViewsDisabled(false);
-
-  const res = await fetch(
-    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}`),
-    fetchOptsGet()
-  );
-  if (!res.ok) {
-    $("error").hidden = false;
-    $("error").textContent = await res.text();
-    return;
-  }
-  const data = await res.json();
-  await applyGuildData(data);
-  updateInviteBanner();
+  selectedGuildId = null;
+  showGuildPicker();
 }
 
-async function onGuildChange() {
+async function onGuildChange(opts = {}) {
   const id = $("guild-select").value;
   if (!id) return;
   const previous = selectedGuildId;
 
-  if (dirty) {
+  if (dirty && !opts.skipConfirm) {
     const ok = window.confirm(
       "Modifications non enregistrées. Continuer sans enregistrer ?"
     );
@@ -816,6 +1286,11 @@ async function onGuildChange() {
   }
 
   selectedGuildId = id;
+  try {
+    localStorage.setItem(LS_LAST_GUILD_KEY, id);
+  } catch {
+    // pas de persistance dispo, on continue
+  }
   $("save-status").textContent = "Chargement…";
 
   const pick = guildPickerList.find((x) => x.guild_id === id);
@@ -866,6 +1341,8 @@ async function save() {
     prefix: ($("input-prefix").value || "").trim() || "$",
     logs_master_enabled: $("switch-logs-master").checked,
     commands_disabled: [...guildState.commands_disabled].filter((id) => id !== "help"),
+    command_groups_disabled: [...(guildState.command_groups_disabled || [])],
+    command_access: { ...guildState.command_access },
     custom_commands: customPayload,
   };
 
@@ -1009,6 +1486,16 @@ $("load").addEventListener("click", loadData);
 $("save").addEventListener("click", save);
 $("guild-select").addEventListener("change", onGuildChange);
 
+$("btn-switch-guild")?.addEventListener("click", () => {
+  if (dirty) {
+    const ok = window.confirm(
+      "Modifications non enregistrées. Changer de serveur sans enregistrer ?"
+    );
+    if (!ok) return;
+  }
+  showGuildPicker();
+});
+
 $("btn-add-custom")?.addEventListener("click", () => {
   if (!guildState) return;
   if (!guildState.custom_commands) guildState.custom_commands = [];
@@ -1038,12 +1525,14 @@ $("switch-logs-master").addEventListener("change", () => {
   updateOverview();
 });
 
-$("input-bot-nickname")?.addEventListener("input", () => {
-  setDirty(true);
+$("input-bot-nickname")?.addEventListener("input", (e) => {
+  const v = String(e.target.value ?? "").trim();
+  if (v !== String(botProfileState.nickname || "")) setDirty(true);
 });
 
-$("input-bot-avatar-url")?.addEventListener("input", () => {
-  setDirty(true);
+$("input-bot-avatar-url")?.addEventListener("input", (e) => {
+  const v = String(e.target.value ?? "").trim();
+  if (v !== String(botProfileState.avatar_url || "")) setDirty(true);
 });
 
 $("btn-discord-logout")?.addEventListener("click", async () => {
@@ -1060,6 +1549,16 @@ $("btn-discord-logout")?.addEventListener("click", async () => {
 $("save-global-bot")?.addEventListener("click", saveGlobalBotSettings);
 
 setDiscordOAuthHref();
+
+window.wingbotDashboard = {
+  apiUrl,
+  authHeaders,
+  fetchOptsGet,
+  getSelectedGuildId: () => selectedGuildId,
+  currentGuildHasBot,
+  getLastChannels: () => lastGuildChannelsList,
+};
+
 loadData();
 
 document.querySelectorAll(".nav-link").forEach((a) => {

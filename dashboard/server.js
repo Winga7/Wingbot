@@ -23,7 +23,18 @@ const {
   ensureGuildLogRow,
   getBotGlobalSettings,
   setBotGlobalSettings,
+  listGuildEmbeds,
+  getGuildEmbedRow,
+  insertGuildEmbed,
+  updateGuildEmbed,
+  deleteGuildEmbed,
 } = require("../database");
+const {
+  defaultEmbedPayload,
+  mergeEmbedPayload,
+  payloadToDiscordMessageBody,
+  substituteEmbedPayload,
+} = require("./embedPayload");
 const {
   getSession,
   createSession,
@@ -103,32 +114,94 @@ function oauthRedirectUri() {
   return `${publicBaseUrl()}/api/auth/discord/callback`;
 }
 
-async function botGuildExists(guildId) {
-  const id = normalizeSnowflakeId(guildId);
-  if (!id) return false;
+/* ------------------------------------------------------------------ *
+ * Cache : IDs des serveurs où le bot est présent.
+ * Un seul appel `GET /users/@me/guilds` (jusqu'à 200 guildes par page)
+ * remplace N appels individuels `GET /guilds/:id`. TTL court (60s) pour
+ * rester à jour après une invitation du bot sans matraquer Discord.
+ * ------------------------------------------------------------------ */
+const BOT_GUILD_IDS_TTL_MS = 60 * 1000;
+let botGuildIdsCache = { ids: null, at: 0, inflight: null };
+
+async function fetchBotGuildIdsFromDiscord() {
   const botToken = (process.env.TOKEN || "").trim();
-  if (!botToken) return false;
-  const url = `${DISCORD_API}/guilds/${encodeURIComponent(id)}`;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  if (!botToken) return new Set();
+
+  const all = new Set();
+  let after = "";
+  for (let page = 0; page < 25; page++) {
+    const url = `${DISCORD_API}/users/@me/guilds?limit=200${
+      after ? `&after=${encodeURIComponent(after)}` : ""
+    }`;
     const r = await fetch(url, {
       headers: {
         Authorization: `Bot ${botToken}`,
         "User-Agent": "DiscordBot (https://discord.com, 1.0)",
       },
     });
-    if (r.status === 429 && attempt < 2) {
+    if (r.status === 429) {
       const reset = Number(r.headers.get("retry-after") || "1");
       await new Promise((res) => setTimeout(res, Math.ceil(reset * 1000) + 100));
+      page--;
       continue;
     }
-    if (!r.ok && r.status !== 404 && r.status !== 403) {
+    if (!r.ok) {
       console.warn(
-        `[dashboard] botGuildExists(${id}) HTTP ${r.status} — vérifie TOKEN (bot) dans .env`
+        `[dashboard] fetchBotGuildIdsFromDiscord HTTP ${r.status} — vérifie TOKEN (bot) dans .env`
       );
+      break;
     }
-    return r.ok;
+    const list = await r.json().catch(() => []);
+    if (!Array.isArray(list) || list.length === 0) break;
+    for (const g of list) {
+      const gid = normalizeSnowflakeId(g.id);
+      if (gid) all.add(gid);
+    }
+    if (list.length < 200) break;
+    after = list[list.length - 1].id;
   }
-  return false;
+  return all;
+}
+
+async function getBotGuildIdsCached({ force = false } = {}) {
+  const now = Date.now();
+  if (
+    !force &&
+    botGuildIdsCache.ids &&
+    now - botGuildIdsCache.at < BOT_GUILD_IDS_TTL_MS
+  ) {
+    return botGuildIdsCache.ids;
+  }
+  if (botGuildIdsCache.inflight) return botGuildIdsCache.inflight;
+
+  const p = fetchBotGuildIdsFromDiscord()
+    .then((ids) => {
+      botGuildIdsCache = { ids, at: Date.now(), inflight: null };
+      return ids;
+    })
+    .catch((e) => {
+      botGuildIdsCache.inflight = null;
+      if (botGuildIdsCache.ids) return botGuildIdsCache.ids;
+      throw e;
+    });
+  botGuildIdsCache.inflight = p;
+  return p;
+}
+
+async function botGuildExists(guildId) {
+  const id = normalizeSnowflakeId(guildId);
+  if (!id) return false;
+  const botToken = (process.env.TOKEN || "").trim();
+  if (!botToken) return false;
+  try {
+    const ids = await getBotGuildIdsCached();
+    if (ids.has(id)) return true;
+    if (Date.now() - botGuildIdsCache.at < 5000) return false;
+    const refreshed = await getBotGuildIdsCached({ force: true });
+    return refreshed.has(id);
+  } catch {
+    return false;
+  }
 }
 
 /** Appels Discord REST (bot) */
@@ -152,6 +225,58 @@ async function discordFetchJson(pathStr) {
     throw e;
   }
   return text ? JSON.parse(text) : null;
+}
+
+async function discordBotJson(method, pathStr, bodyObj) {
+  const botToken = (process.env.TOKEN || "").trim();
+  if (!botToken) {
+    const err = new Error("TOKEN du bot manquant dans .env");
+    err.code = "NO_BOT_TOKEN";
+    throw err;
+  }
+  const opts = {
+    method,
+    headers: {
+      Authorization: `Bot ${botToken}`,
+      "User-Agent": "WingbotDashboard (https://discord.com)",
+    },
+  };
+  if (bodyObj !== undefined) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(bodyObj);
+  }
+  const r = await fetch(`${DISCORD_API}${pathStr}`, opts);
+  const text = await r.text();
+  if (!r.ok) {
+    const e = new Error(`Discord ${method} ${pathStr} → ${r.status}: ${text.slice(0, 500)}`);
+    e.status = r.status;
+    throw e;
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+async function discordDeleteMessage(channelId, messageId) {
+  const ch = normalizeSnowflakeId(channelId);
+  const mid = normalizeSnowflakeId(messageId);
+  if (!ch || !mid) return;
+  const botToken = (process.env.TOKEN || "").trim();
+  if (!botToken) return;
+  const r = await fetch(
+    `${DISCORD_API}/channels/${encodeURIComponent(ch)}/messages/${encodeURIComponent(mid)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        "User-Agent": "WingbotDashboard (https://discord.com)",
+      },
+    }
+  );
+  if (!r.ok && r.status !== 404) {
+    const t = await r.text();
+    const e = new Error(`Discord DELETE message ${r.status}: ${t.slice(0, 200)}`);
+    e.status = r.status;
+    throw e;
+  }
 }
 
 function guildIconUrlBot(guildId, iconHash) {
@@ -271,6 +396,18 @@ function formatChannelsForUi(channels) {
   }
 
   return out;
+}
+
+function formatRolesForUi(roles) {
+  if (!Array.isArray(roles)) return [];
+  return roles
+    .filter((r) => r && r.name !== "@everyone" && !r.managed)
+    .sort((a, b) => (b.position ?? 0) - (a.position ?? 0))
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      color: r.color ?? 0,
+    }));
 }
 
 app.use(express.json({ limit: "512kb" }));
@@ -734,20 +871,23 @@ app.get(
           .get(gid);
 
       const perms = process.env.BOT_INVITE_PERMISSIONS || "268438528";
-      const out = [];
 
-      for (const g of manageable) {
+      /* Un seul appel Discord pour TOUTES les guildes du bot, en parallèle
+         avec le rendu — plus besoin d'await par serveur. */
+      const botIdsPromise = getBotGuildIdsCached().catch(() => new Set());
+      const botIds = await botIdsPromise;
+
+      const out = manageable.map((g) => {
         const gid = normalizeSnowflakeId(g.id);
-        const botIn = await botGuildExists(gid);
-        out.push({
+        return {
           guild_id: gid,
           name: g.name,
           icon_url: userGuildIconUrl(gid, g.icon),
-          bot_in_guild: botIn,
+          bot_in_guild: botIds.has(gid),
           has_config_in_db: hasRowInDb(gid),
           invite_url: buildInviteUrl(gid, clientId, perms),
-        });
-      }
+        };
+      });
 
       out.sort((a, b) => a.name.localeCompare(b.name, "fr"));
 
@@ -918,6 +1058,264 @@ app.get(
     res.status(500).json({ error: String(e.message) });
   }
 });
+
+app.get(
+  "/api/discord/guilds/:guildId/roles",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const botIn = await botGuildExists(guildId);
+      if (!botIn) {
+        return res.status(404).json({ error: "Bot non présent sur ce serveur" });
+      }
+      ensureGuildLogRow(guildId);
+      const roles = await discordFetchJson(
+        `/guilds/${encodeURIComponent(guildId)}/roles`
+      );
+      res.json({ roles: formatRolesForUi(roles) });
+    } catch (e) {
+      if (e.code === "NO_BOT_TOKEN") {
+        return res.status(503).json({ error: e.message });
+      }
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/embeds",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({
+          error: "bot_not_in_guild",
+          message: "Invite le bot sur ce serveur.",
+        });
+      }
+      ensureGuildLogRow(guildId);
+      res.json({ embeds: listGuildEmbeds(guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/embeds/:embedId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.embedId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "embed_id_invalide" });
+      }
+      const row = getGuildEmbedRow(id, guildId);
+      if (!row) return res.status(404).json({ error: "not_found" });
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/embeds",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      ensureGuildLogRow(guildId);
+      const name = req.body?.name;
+      const payload = mergeEmbedPayload(
+        defaultEmbedPayload(),
+        req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {}
+      );
+      const row = insertGuildEmbed(guildId, name, payload);
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/embeds/:embedId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.embedId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "embed_id_invalide" });
+      }
+      const cur = getGuildEmbedRow(id, guildId);
+      if (!cur) return res.status(404).json({ error: "not_found" });
+      const merged = mergeEmbedPayload(
+        cur.payload,
+        req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {}
+      );
+      const patch = { payload: merged };
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
+        patch.name = req.body.name;
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "channel_id")) {
+        patch.channel_id = req.body.channel_id;
+      }
+      const row = updateGuildEmbed(id, guildId, patch);
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.delete(
+  "/api/guilds/:guildId/embeds/:embedId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.embedId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "embed_id_invalide" });
+      }
+      const row = getGuildEmbedRow(id, guildId);
+      if (!row) return res.status(404).json({ error: "not_found" });
+      if (req.query.delete_discord_message === "1" && row.channel_id && row.message_id) {
+        await discordDeleteMessage(row.channel_id, row.message_id);
+      }
+      deleteGuildEmbed(id, guildId);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/embeds/:embedId/send",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.embedId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "embed_id_invalide" });
+      }
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      let row = getGuildEmbedRow(id, guildId);
+      if (!row) return res.status(404).json({ error: "not_found" });
+
+      if (req.body?.payload && typeof req.body.payload === "object") {
+        const merged = mergeEmbedPayload(row.payload, req.body.payload);
+        row = updateGuildEmbed(id, guildId, { payload: merged });
+      }
+
+      const allowedTypes = new Set([0, 5, 10, 11, 12]);
+      let chMeta = null;
+      let channelIdForSend = null;
+
+      if (!row.message_id) {
+        const chRaw = req.body?.channel_id || row.channel_id;
+        const channelId = normalizeSnowflakeId(chRaw);
+        if (!channelId) {
+          return res.status(400).json({
+            error: "channel_required",
+            message: "Choisis un salon pour la première publication.",
+          });
+        }
+        chMeta = await discordFetchJson(
+          `/channels/${encodeURIComponent(channelId)}`
+        );
+        if (!chMeta || normalizeSnowflakeId(chMeta.guild_id) !== guildId) {
+          return res.status(400).json({ error: "salon_invalide" });
+        }
+        if (!allowedTypes.has(chMeta.type)) {
+          return res.status(400).json({
+            error: "wrong_channel_type",
+            message: "Salon texte, annonce ou fil requis.",
+          });
+        }
+        channelIdForSend = channelId;
+      } else {
+        const chId = normalizeSnowflakeId(row.channel_id);
+        const msgId = normalizeSnowflakeId(row.message_id);
+        if (!chId || !msgId) {
+          return res.status(400).json({ error: "message_inconnu" });
+        }
+        chMeta = await discordFetchJson(
+          `/channels/${encodeURIComponent(chId)}`
+        );
+        if (!chMeta || normalizeSnowflakeId(chMeta.guild_id) !== guildId) {
+          return res.status(400).json({ error: "salon_invalide" });
+        }
+        channelIdForSend = chId;
+      }
+
+      const guildMeta = await discordFetchJson(
+        `/guilds/${encodeURIComponent(guildId)}?with_counts=true`
+      ).catch(() => null);
+      const substituted = substituteEmbedPayload(row.payload, {
+        guild: {
+          id: guildId,
+          name: guildMeta?.name,
+          member_count: guildMeta?.approximate_member_count,
+        },
+        channel: { id: chMeta?.id, name: chMeta?.name },
+      });
+      const apiBody = payloadToDiscordMessageBody(substituted);
+
+      if (!row.message_id) {
+        const msg = await discordBotJson(
+          "POST",
+          `/channels/${encodeURIComponent(channelIdForSend)}/messages`,
+          apiBody
+        );
+        row = updateGuildEmbed(id, guildId, {
+          channel_id: channelIdForSend,
+          message_id: String(msg.id),
+        });
+        return res.json(row);
+      }
+
+      const msgId = normalizeSnowflakeId(row.message_id);
+      await discordBotJson(
+        "PATCH",
+        `/channels/${encodeURIComponent(channelIdForSend)}/messages/${encodeURIComponent(msgId)}`,
+        apiBody
+      );
+      res.json(getGuildEmbedRow(id, guildId));
+    } catch (e) {
+      if (e.code === "NO_BOT_TOKEN") {
+        return res.status(503).json({ error: e.message });
+      }
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
 
 app.use(express.static(path.join(__dirname, "public")));
 

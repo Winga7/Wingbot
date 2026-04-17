@@ -33,22 +33,46 @@
 
         <nav class="sidebar-nav" id="sidebar-nav">
           <a href="#overview" class="nav-link active" data-view="overview">
-            <span class="nav-ico">◇</span> Vue d’ensemble
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3 13l9-9 9 9"/><path d="M5 11v9a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1v-9"/></svg>
+            </span>
+            Vue d’ensemble
           </a>
           <a href="#settings" class="nav-link" data-view="settings">
-            <span class="nav-ico">⚙</span> Paramètres
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            </span>
+            Paramètres
           </a>
           <a href="#logs" class="nav-link" data-view="logs">
-            <span class="nav-ico">▤</span> Logs
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+            </span>
+            Logs
           </a>
           <a href="#commands" class="nav-link" data-view="commands">
-            <span class="nav-ico">⌘</span> Commandes
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            </span>
+            Commandes
           </a>
           <a href="#custom" class="nav-link" data-view="custom">
-            <span class="nav-ico">✎</span> Commandes perso
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </span>
+            Commandes perso
+          </a>
+          <a href="#embeds" class="nav-link" data-view="embeds">
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="7" y1="13" x2="14" y2="13"/><line x1="7" y1="16.5" x2="12" y2="16.5"/></svg>
+            </span>
+            Embeds
           </a>
           <a href="#moderation" class="nav-link" data-view="moderation">
-            <span class="nav-ico">🛡</span> Modération
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4z"/><polyline points="9 12 11 14 15 10"/></svg>
+            </span>
+            Modération
           </a>
         </nav>
 
@@ -70,6 +94,17 @@
 
       <div class="workspace" id="workspace" hidden>
       <div class="main">
+        <section class="guild-picker" id="guild-picker" hidden>
+          <div class="guild-picker-head">
+            <h2>Choisis un serveur</h2>
+            <p class="muted tiny">Clique sur une carte pour gérer la configuration du bot.</p>
+          </div>
+          <div class="guild-picker-grid" id="guild-picker-grid"></div>
+          <p class="guild-picker-empty muted tiny" id="guild-picker-empty" hidden>
+            Aucun serveur trouvé — connecte ton compte Discord via la sidebar.
+          </p>
+        </section>
+
         <header class="main-top" id="main-top" hidden>
           <div class="guild-bar">
             <img class="guild-icon" id="guild-icon" width="36" height="36" alt="" hidden />
@@ -77,13 +112,13 @@
               <span class="guild-name" id="guild-name">—</span>
               <span class="muted tiny" id="guild-meta-sub">—</span>
             </div>
-            <label class="guild-select-wrap">
-              <span class="tiny muted">Serveur</span>
-              <select id="guild-select"></select>
-            </label>
+            <button type="button" class="btn ghost tiny btn-switch-guild" id="btn-switch-guild" title="Changer de serveur">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M9 10V6a3 3 0 016 0v4"/></svg>
+              Changer
+            </button>
+            <select id="guild-select" class="guild-select-hidden" aria-hidden="true" tabindex="-1"></select>
           </div>
           <div class="main-actions">
-            <span class="dirty-badge" id="dirty-hint" hidden>Non enregistré</span>
             <details id="founder-menu" class="founder-menu" hidden>
               <summary class="btn secondary">Fonda</summary>
               <div class="founder-menu-panel">
@@ -113,6 +148,7 @@
                   <span>Type d’activité</span>
                   <select id="global-presence-type" class="input-sm input-wide">
                     <option value="None">Aucune (statut seul)</option>
+                    <option value="Custom">Statut personnalisé (texte seul)</option>
                     <option value="Playing">Joue à</option>
                     <option value="Listening">Écoute</option>
                     <option value="Watching">Regarde</option>
@@ -121,7 +157,7 @@
                 </label>
                 <label class="field-row">
                   <span>Texte d’activité</span>
-                  <input type="text" id="global-presence-text" maxlength="128" class="input-sm input-wide" placeholder="Ignoré si « Aucune »" />
+                  <input type="text" id="global-presence-text" maxlength="128" class="input-sm input-wide" placeholder="Texte du statut (obligatoire sauf « Aucune »)" />
                 </label>
                 <p class="muted tiny" style="margin: 0 0 0.35rem">
                   Les changements sont appliqués par le bot en quelques secondes (lecture de la base).
@@ -130,8 +166,6 @@
                 <span class="save-status" id="save-global-status"></span>
               </div>
             </details>
-            <button type="button" class="btn primary save-main-btn" id="save" disabled>Enregistrer</button>
-            <span class="save-status" id="save-status"></span>
           </div>
         </header>
 
@@ -246,9 +280,14 @@
           <section class="view" id="view-commands" hidden>
             <div class="view-head">
               <h2>Commandes</h2>
-              <p class="muted tiny">Désactive les commandes que tu ne veux pas sur ce serveur (slash + préfixe). <strong>help</strong> reste toujours disponible.</p>
+              <p class="muted tiny">
+                Désactive un <strong>groupe entier</strong> ou des commandes une par une (slash + préfixe).
+                <strong>help</strong> reste disponible sauf dans les salons marqués « sans commandes ». Les commandes modération / admin vérifient aussi les
+                permissions Discord ; tu peux ajouter des rôles staff ou des restrictions ci‑dessous.
+              </p>
             </div>
             <div id="commands-root" class="commands-grid"></div>
+            <div id="command-access-root" class="command-access-root"></div>
           </section>
 
           <section class="view" id="view-custom" hidden>
@@ -285,6 +324,17 @@
             </div>
           </section>
 
+          <section class="view" id="view-embeds" hidden>
+            <div class="view-head">
+              <h2>Constructeur d’embeds</h2>
+              <p class="muted tiny">
+                Rédige un message + embed comme sur Discord : aperçu en direct, mentions, champs, couleurs, puis
+                publication ou mise à jour du message du bot dans le salon choisi.
+              </p>
+            </div>
+            <div id="embed-builder-root" class="panel-block embed-builder-root"></div>
+          </section>
+
           <section class="view" id="view-moderation" hidden>
             <div class="view-head">
               <h2>Modération</h2>
@@ -309,10 +359,17 @@
       </div>
     </div>
 
+    <div class="save-dock" id="save-dock" aria-live="polite">
+      <span class="dirty-badge" id="dirty-hint" hidden>● Changements non enregistrés</span>
+      <span class="save-status" id="save-status"></span>
+      <button type="button" class="btn primary save-main-btn" id="save" disabled>Enregistrer</button>
+    </div>
+
     <footer class="foot muted tiny">
       Wingbot · même base SQLite que le bot · <code>TOKEN</code> bot requis pour noms Discord
     </footer>
 
     <script src="/app.js"></script>
+    <script src="/embedWorkbench.js"></script>
   </body>
 </html>
