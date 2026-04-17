@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
 const { setLogChannel } = require("../../database");
+const { hasModAdminBypass } = require("../../memberPerms");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -13,12 +14,10 @@ module.exports = {
         .setRequired(true)
     ),
   async execute(interaction) {
-    if (
-      !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
-    ) {
+    if (!hasModAdminBypass(interaction.member)) {
       return interaction.reply({
         content:
-          "❌ Vous devez être administrateur pour utiliser cette commande.",
+          "❌ Tu dois être propriétaire du serveur ou avoir la permission Administrateur.",
         ephemeral: true,
       });
     }
@@ -49,9 +48,9 @@ module.exports = {
     }
   },
   executeMessage(message, args) {
-    if (!message.member.permissions.has("Administrator")) {
+    if (!hasModAdminBypass(message.member)) {
       return message.reply(
-        "❌ Vous devez être administrateur pour utiliser cette commande."
+        "❌ Tu dois être propriétaire du serveur ou avoir la permission Administrateur."
       );
     }
 

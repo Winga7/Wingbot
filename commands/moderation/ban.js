@@ -3,6 +3,7 @@ const {
   PermissionFlagsBits,
   EmbedBuilder,
 } = require("discord.js");
+const { memberHasPermOrAdmin } = require("../../memberPerms");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -30,7 +31,7 @@ module.exports = {
     const reason =
       interaction.options.getString("raison")?.slice(0, 512) || "Aucune raison";
 
-    if (!interaction.member.permissions.has(PermissionFlagsBits.BanMembers)) {
+    if (!memberHasPermOrAdmin(interaction.member, PermissionFlagsBits.BanMembers)) {
       return interaction.reply({
         content: "❌ Tu n’as pas la permission de bannir des membres.",
         ephemeral: true,
@@ -73,7 +74,7 @@ module.exports = {
   },
 
   executeMessage(message, args) {
-    if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) {
+    if (!memberHasPermOrAdmin(message.member, PermissionFlagsBits.BanMembers)) {
       return message.reply("❌ Tu n’as pas la permission de bannir des membres.");
     }
     const targetUser =

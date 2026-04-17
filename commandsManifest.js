@@ -18,6 +18,11 @@ const COMMAND_GROUPS = [
     title: "Administration",
     icon: "⚙️",
   },
+  {
+    id: "premium",
+    title: "Premium",
+    icon: "💎",
+  },
 ];
 
 /** Ne peut pas être désactivé (toujours disponible) */
@@ -155,6 +160,12 @@ const COMMANDS = [
     category: "admin",
     label: "clearcache",
     description: "Vider le cache des messages",
+  },
+  {
+    id: "backup",
+    category: "premium",
+    label: "backup",
+    description: "Sauvegarde / restauration complète du serveur (Premium)",
   },
 ];
 

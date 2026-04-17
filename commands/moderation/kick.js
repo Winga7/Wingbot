@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
+const { memberHasPermOrAdmin } = require("../../memberPerms");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -23,7 +24,7 @@ module.exports = {
         ephemeral: true,
       });
     }
-    if (!interaction.member.permissions.has(PermissionFlagsBits.KickMembers)) {
+    if (!memberHasPermOrAdmin(interaction.member, PermissionFlagsBits.KickMembers)) {
       return interaction.reply({
         content: "❌ Tu n’as pas la permission d’expulser des membres.",
         ephemeral: true,
@@ -62,7 +63,7 @@ module.exports = {
   },
 
   executeMessage(message, args) {
-    if (!message.member.permissions.has(PermissionFlagsBits.KickMembers)) {
+    if (!memberHasPermOrAdmin(message.member, PermissionFlagsBits.KickMembers)) {
       return message.reply("❌ Tu n’as pas la permission d’expulser des membres.");
     }
     const target =

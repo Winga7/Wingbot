@@ -1,15 +1,23 @@
 require("dotenv").config();
 const fs = require("node:fs");
 const path = require("node:path");
-const { Client, Collection, Events, GatewayIntentBits } = require("discord.js");
+const {
+  ActivityType,
+  Client,
+  Collection,
+  Events,
+  GatewayIntentBits,
+} = require("discord.js");
 const {
   initDatabase,
   cleanOldMessages,
   getGuildPrefix,
   isCommandEnabled,
   getCustomCommandReply,
+  getBotGlobalSettings,
 } = require("./database");
 const { expandCustomTemplate } = require("./customCommandTemplates");
+const { getCommandAccessDenial } = require("./commandAccessGate");
 
 // Initialiser la base de données
 initDatabase();
@@ -137,6 +145,45 @@ loadLogs(client);
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
 
+  const activityTypeByKey = {
+    Custom: ActivityType.Custom,
+    Playing: ActivityType.Playing,
+    Listening: ActivityType.Listening,
+    Watching: ActivityType.Watching,
+    Competing: ActivityType.Competing,
+  };
+
+  const applyGlobalBotSettings = async () => {
+    try {
+      const cfg = getBotGlobalSettings();
+      if (cfg.desired_username && client.user.username !== cfg.desired_username) {
+        await client.user.setUsername(cfg.desired_username).catch(() => null);
+      }
+      const activityText = String(cfg.presence_activity_text || "").trim();
+      const typeKey = String(cfg.presence_activity_type || "None").trim();
+      const wantActivity = typeKey !== "None" && activityText.length > 0;
+      const activities = wantActivity
+        ? [
+            {
+              name: activityText.slice(0, 128),
+              type: activityTypeByKey[typeKey] ?? ActivityType.Playing,
+            },
+          ]
+        : [];
+      client.user.setPresence({
+        status: cfg.presence_status || "online",
+        activities,
+      });
+    } catch (e) {
+      console.error("Erreur applyGlobalBotSettings:", e);
+    }
+  };
+
+  applyGlobalBotSettings();
+  setInterval(() => {
+    applyGlobalBotSettings();
+  }, 5 * 1000);
+
   // Nettoyer les vieux messages du cache tous les jours
   setInterval(() => {
     cleanOldMessages();
@@ -161,6 +208,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         "Cette commande est désactivée sur ce serveur. Réactive-la depuis le dashboard.",
       ephemeral: true,
     });
+  }
+
+  if (command && interaction.guild) {
+    const denial = getCommandAccessDenial({
+      guild: interaction.guild,
+      member: interaction.member,
+      channel: interaction.channel,
+      commandName: interaction.commandName,
+    });
+    if (denial) {
+      return interaction.reply({
+        content: `❌ ${denial}`,
+        ephemeral: true,
+      });
+    }
   }
 
   if (!command) {
@@ -213,6 +275,17 @@ client.on(Events.MessageCreate, async (message) => {
         "Cette commande est désactivée sur ce serveur. Réactive-la depuis le dashboard."
       );
     }
+    if (message.guild) {
+      const denial = getCommandAccessDenial({
+        guild: message.guild,
+        member: message.member,
+        channel: message.channel,
+        commandName,
+      });
+      if (denial) {
+        return message.reply(`❌ ${denial}`);
+      }
+    }
     try {
       if (command.executeMessage) {
         command.executeMessage(message, args);
@@ -226,6 +299,18 @@ client.on(Events.MessageCreate, async (message) => {
       );
     }
     return;
+  }
+
+  if (message.guild) {
+    const denialCustom = getCommandAccessDenial({
+      guild: message.guild,
+      member: message.member,
+      channel: message.channel,
+      commandName: "__custom__",
+    });
+    if (denialCustom) {
+      return message.reply(`❌ ${denialCustom}`);
+    }
   }
 
   const customReply = guildId && getCustomCommandReply(guildId, commandName);
@@ -248,10 +333,5 @@ client.on(Events.MessageCreate, async (message) => {
   );
 });
 
-// Accès aux variables d'environnement
-const token = process.env.TOKEN;
-const clientId = process.env.CLIENT_ID;
-const guildId = process.env.GUILD_ID;
-
 // Connexion du bot avec le token
-client.login(token);
+client.login(process.env.TOKEN);

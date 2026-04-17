@@ -111,14 +111,34 @@ function userGuildIconUrl(guildId, iconHash) {
  * @param {string} accessToken - OAuth user token
  */
 async function fetchUserGuilds(accessToken) {
-  const r = await fetch(`${DISCORD_API}/users/@me/guilds`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!r.ok) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const r = await fetch(`${DISCORD_API}/users/@me/guilds`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (r.ok) return r.json();
+
+    if (r.status === 429 && attempt < 3) {
+      let waitMs = 1200;
+      try {
+        const txt = await r.text();
+        const j = txt ? JSON.parse(txt) : null;
+        const retrySec = Number(
+          r.headers.get("retry-after") ?? j?.retry_after ?? 1
+        );
+        if (Number.isFinite(retrySec) && retrySec > 0) {
+          waitMs = Math.ceil(retrySec * 1000) + 150;
+        }
+      } catch {
+        // fallback waitMs
+      }
+      await new Promise((res) => setTimeout(res, waitMs));
+      continue;
+    }
+
     const t = await r.text();
     throw new Error(`Discord guilds ${r.status}: ${t.slice(0, 200)}`);
   }
-  return r.json();
+  throw new Error("Discord guilds 429: limite atteinte après plusieurs tentatives");
 }
 
 async function fetchOAuthToken(code, redirectUri, clientId, clientSecret) {

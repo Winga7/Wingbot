@@ -9,6 +9,9 @@ const PREFIX_BLOCK = `**📋 Infos**
 **⚙️ Admin**
 \`setlogchannel\` \`togglelog\` \`logconfig\` \`logtest\` \`clearcache\`
 
+**💎 Premium** _(admin uniquement)_
+\`backup create\` \`backup list\` \`backup info <code>\` \`backup delete <code>\` \`backup load <code>\`
+
 **Perso** — réponses configurées sur le dashboard (préfixe uniquement).`;
 
 const SLASH_BLOCK = `**📋 Infos**
@@ -18,7 +21,10 @@ const SLASH_BLOCK = `**📋 Infos**
 \`/kick\` \`/ban\` \`/timeout\` \`/untimeout\` \`/warn\` \`/slowmode\` \`/clear\`
 
 **⚙️ Admin**
-\`/setlogchannel\` \`/togglelog\` \`/logconfig\` \`/logtest\` \`/clearcache\``;
+\`/setlogchannel\` \`/togglelog\` \`/logconfig\` \`/logtest\` \`/clearcache\`
+
+**💎 Premium** _(admin uniquement)_
+\`/backup create\` \`/backup list\` \`/backup info\` \`/backup delete\` \`/backup load\``;
 
 function buildEmbed() {
   return {

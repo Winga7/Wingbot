@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const { memberHasPermOrAdmin } = require("../../memberPerms");
 
 const MAX_SEC = 21600; // 6 h
 
@@ -27,7 +28,7 @@ module.exports = {
     const ch =
       interaction.options.getChannel("salon") || interaction.channel;
 
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    if (!memberHasPermOrAdmin(interaction.member, PermissionFlagsBits.ManageChannels)) {
       return interaction.reply({
         content: "❌ Tu n’as pas la permission de gérer les salons.",
         ephemeral: true,
@@ -57,7 +58,7 @@ module.exports = {
   },
 
   executeMessage(message, args) {
-    if (!message.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    if (!memberHasPermOrAdmin(message.member, PermissionFlagsBits.ManageChannels)) {
       return message.reply(
         "❌ Tu n’as pas la permission de gérer les salons."
       );
