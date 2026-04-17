@@ -5,6 +5,7 @@
  *   DASHBOARD_TOKEN, TOKEN (bot), CLIENT_ID
  *   DISCORD_CLIENT_SECRET — secret OAuth2 (Discord Developer Portal)
  *   DASHBOARD_PUBLIC_URL — ex. http://127.0.0.1:3847 (URL exacte du dashboard)
+ *   DASHBOARD_HOST — optionnel, IP d'écoute HTTP (défaut : 0.0.0.0)
  *   BOT_INVITE_PERMISSIONS — optionnel, entier permissions (défaut : 268438528)
  */
 const path = require("node:path");
@@ -38,6 +39,7 @@ initDatabase();
 
 const app = express();
 const PORT = Number(process.env.DASHBOARD_PORT) || 3847;
+const HOST = process.env.DASHBOARD_HOST || "0.0.0.0";
 const TOKEN = process.env.DASHBOARD_TOKEN || "";
 const DISCORD_API = "https://discord.com/api/v10";
 
@@ -480,8 +482,9 @@ app.get("/api/discord/guilds/:guildId/channels", requireToken, async (req, res) 
 
 app.use(express.static(path.join(__dirname, "public")));
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log(`📊 Dashboard Wingbot : ${publicBaseUrl()}/`);
+  console.log(`   Écoute réseau : http://${HOST}:${PORT}`);
   console.log(
     `   OAuth redirect à déclarer sur Discord : ${oauthRedirectUri()}`
   );
