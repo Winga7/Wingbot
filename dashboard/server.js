@@ -28,6 +28,9 @@ const {
   insertGuildEmbed,
   updateGuildEmbed,
   deleteGuildEmbed,
+  upsertPremiumUser,
+  deletePremiumUser,
+  listUserBackups,
 } = require("../database");
 const {
   defaultEmbedPayload,
@@ -65,16 +68,12 @@ function csvSet(raw) {
   );
 }
 
-const FOUNDER_IDS = csvSet(process.env.FOUNDER_DISCORD_IDS || process.env.FOUNDER_DISCORD_ID);
-const PREMIUM_USER_IDS = csvSet(process.env.PREMIUM_USER_IDS);
-const PREMIUM_FEATURES = csvSet(process.env.PREMIUM_FEATURES);
-const FOUNDER_ONLY_FEATURES = csvSet(process.env.FOUNDER_ONLY_FEATURES);
-const ENFORCE_PREMIUM = process.env.ENFORCE_PREMIUM === "1";
-const ENFORCE_FOUNDER_ONLY = process.env.ENFORCE_FOUNDER_ONLY === "1";
+// Couche premium unifiée : lit l'env + la table premium_users.
+// La source de vérité unique est ./premiumGate.js, y compris pour le bot et les commandes slash.
+const premiumGate = require("../premiumGate");
 
 function isFounderUser(userId) {
-  const id = normalizeSnowflakeId(userId);
-  return !!id && FOUNDER_IDS.has(id);
+  return premiumGate.isFounder(userId);
 }
 
 function requireFounder(req, res, next) {
@@ -88,21 +87,12 @@ function requireFounder(req, res, next) {
 }
 
 function isPremiumUser(userId) {
-  const id = normalizeSnowflakeId(userId);
-  return !!id && PREMIUM_USER_IDS.has(id);
+  return premiumGate.atLeast(userId, "premium");
 }
 
 function canUseFeature(userId, featureKey) {
-  const founder = isFounderUser(userId);
-  if (founder) return true;
-
-  if (ENFORCE_FOUNDER_ONLY && FOUNDER_ONLY_FEATURES.has(featureKey)) {
-    return false;
-  }
-  if (ENFORCE_PREMIUM && PREMIUM_FEATURES.has(featureKey)) {
-    return isPremiumUser(userId);
-  }
-  return true;
+  if (isFounderUser(userId)) return true;
+  return premiumGate.canUseFeature(userId, featureKey);
 }
 
 function publicBaseUrl() {
@@ -526,13 +516,9 @@ app.get("/api/internal/access", requireDiscordSession, (req, res) => {
   const userId = req.discordSession.userId;
   res.json({
     user_id: userId,
+    tier: premiumGate.getUserTier(userId),
     founder: isFounderUser(userId),
     premium: isPremiumUser(userId),
-    // caché côté UI pour l'instant, mais prêt pour activation future
-    enforcement: {
-      premium: ENFORCE_PREMIUM,
-      founder_only: ENFORCE_FOUNDER_ONLY,
-    },
   });
 });
 
@@ -1314,6 +1300,68 @@ app.post(
       console.error(e);
       res.status(400).json({ error: String(e.message) });
     }
+  }
+);
+
+// ============================================================
+// Admin VIP / Premium (founder-only)
+// ============================================================
+
+app.get(
+  "/api/admin/premium",
+  requireDiscordSession,
+  requireFounder,
+  (_req, res) => {
+    res.json({ users: premiumGate.listActivePremiumUsers() });
+  }
+);
+
+app.post(
+  "/api/admin/premium",
+  requireDiscordSession,
+  requireFounder,
+  (req, res) => {
+    try {
+      const { user_id, tier, expires_at, note } = req.body || {};
+      const id = premiumGate.normalizeSnowflakeId(user_id);
+      if (!id) return res.status(400).json({ error: "user_id invalide" });
+      if (!["founder", "vip", "premium"].includes(tier)) {
+        return res.status(400).json({ error: "tier invalide" });
+      }
+      const row = upsertPremiumUser({
+        user_id: id,
+        tier,
+        granted_by: req.discordSession.userId,
+        expires_at: expires_at || null,
+        note: note ? String(note).slice(0, 200) : null,
+      });
+      res.json({ user: row });
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.delete(
+  "/api/admin/premium/:userId",
+  requireDiscordSession,
+  requireFounder,
+  (req, res) => {
+    const id = premiumGate.normalizeSnowflakeId(req.params.userId);
+    if (!id) return res.status(400).json({ error: "user_id invalide" });
+    const changes = deletePremiumUser(id);
+    res.json({ ok: !!changes });
+  }
+);
+
+// Liste des backups de l'utilisateur courant (pour un futur onglet Backups dans le dashboard)
+app.get(
+  "/api/me/backups",
+  requireDiscordSession,
+  (req, res) => {
+    const rows = listUserBackups(req.discordSession.userId, 50);
+    res.json({ backups: rows });
   }
 );
 

@@ -71,8 +71,243 @@ function initDatabase() {
   migrateCustomCommandsTable();
   migrateBotGlobalSettingsTable();
   migrateGuildEmbedsTable();
+  migratePremiumUsersTable();
+  migrateGuildBackupsTable();
+  migrateBackupRestoresTable();
 
   console.log("✅ Base de données initialisée");
+}
+
+// ============================================================
+//  Premium / VIP / Backups
+// ============================================================
+
+function migratePremiumUsersTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS premium_users (
+      user_id    TEXT PRIMARY KEY,
+      tier       TEXT NOT NULL CHECK(tier IN ('founder','vip','premium')),
+      granted_by TEXT,
+      granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME,
+      note       TEXT
+    )
+    `
+  ).run();
+}
+
+function migrateGuildBackupsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS guild_backups (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      backup_code      TEXT UNIQUE NOT NULL,
+      source_guild_id  TEXT NOT NULL,
+      owner_user_id    TEXT NOT NULL,
+      name             TEXT,
+      include_messages INTEGER DEFAULT 0,
+      payload          TEXT NOT NULL,
+      size_bytes       INTEGER,
+      channels_count   INTEGER DEFAULT 0,
+      roles_count      INTEGER DEFAULT 0,
+      messages_count   INTEGER DEFAULT 0,
+      created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_guild_backups_owner ON guild_backups(owner_user_id)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_guild_backups_source ON guild_backups(source_guild_id)`
+  ).run();
+}
+
+function migrateBackupRestoresTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS backup_restores (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      backup_id        INTEGER NOT NULL,
+      target_guild_id  TEXT NOT NULL,
+      triggered_by     TEXT NOT NULL,
+      mode             TEXT NOT NULL,
+      status           TEXT NOT NULL,
+      log              TEXT,
+      started_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+      finished_at      DATETIME,
+      FOREIGN KEY(backup_id) REFERENCES guild_backups(id) ON DELETE CASCADE
+    )
+    `
+  ).run();
+}
+
+// ------- Premium users CRUD -------
+
+function listPremiumUsers() {
+  return db
+    .prepare(
+      `SELECT user_id, tier, granted_by, granted_at, expires_at, note
+       FROM premium_users ORDER BY granted_at DESC`
+    )
+    .all();
+}
+
+function getPremiumUser(userId) {
+  if (!userId) return null;
+  return db
+    .prepare(
+      `SELECT user_id, tier, granted_by, granted_at, expires_at, note
+       FROM premium_users WHERE user_id = ?`
+    )
+    .get(String(userId)) || null;
+}
+
+function upsertPremiumUser({ user_id, tier, granted_by, expires_at, note }) {
+  if (!user_id || !tier) throw new Error("user_id et tier requis");
+  if (!["founder", "vip", "premium"].includes(tier)) {
+    throw new Error("tier invalide");
+  }
+  db.prepare(
+    `INSERT INTO premium_users (user_id, tier, granted_by, expires_at, note)
+     VALUES (@user_id, @tier, @granted_by, @expires_at, @note)
+     ON CONFLICT(user_id) DO UPDATE SET
+       tier       = excluded.tier,
+       granted_by = excluded.granted_by,
+       expires_at = excluded.expires_at,
+       note       = excluded.note`
+  ).run({
+    user_id: String(user_id),
+    tier,
+    granted_by: granted_by ? String(granted_by) : null,
+    expires_at: expires_at || null,
+    note: note || null,
+  });
+  return getPremiumUser(user_id);
+}
+
+function deletePremiumUser(userId) {
+  if (!userId) return 0;
+  return db
+    .prepare(`DELETE FROM premium_users WHERE user_id = ?`)
+    .run(String(userId)).changes;
+}
+
+// ------- Backups CRUD -------
+
+function insertGuildBackup(row) {
+  const info = db
+    .prepare(
+      `INSERT INTO guild_backups
+        (backup_code, source_guild_id, owner_user_id, name, include_messages,
+         payload, size_bytes, channels_count, roles_count, messages_count)
+       VALUES (@backup_code, @source_guild_id, @owner_user_id, @name, @include_messages,
+               @payload, @size_bytes, @channels_count, @roles_count, @messages_count)`
+    )
+    .run({
+      backup_code: row.backup_code,
+      source_guild_id: row.source_guild_id,
+      owner_user_id: row.owner_user_id,
+      name: row.name || null,
+      include_messages: row.include_messages ? 1 : 0,
+      payload: row.payload,
+      size_bytes: row.size_bytes || null,
+      channels_count: row.channels_count || 0,
+      roles_count: row.roles_count || 0,
+      messages_count: row.messages_count || 0,
+    });
+  return info.lastInsertRowid;
+}
+
+function getBackupByCode(code) {
+  if (!code) return null;
+  return db
+    .prepare(
+      `SELECT * FROM guild_backups WHERE backup_code = ?`
+    )
+    .get(String(code).trim().toUpperCase()) || null;
+}
+
+function getBackupById(id) {
+  return db.prepare(`SELECT * FROM guild_backups WHERE id = ?`).get(id) || null;
+}
+
+function listUserBackups(userId, limit = 50) {
+  return db
+    .prepare(
+      `SELECT id, backup_code, source_guild_id, owner_user_id, name,
+              include_messages, size_bytes, channels_count, roles_count,
+              messages_count, created_at
+       FROM guild_backups
+       WHERE owner_user_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(String(userId), limit);
+}
+
+function countUserBackups(userId) {
+  return (
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM guild_backups WHERE owner_user_id = ?`)
+      .get(String(userId))?.n || 0
+  );
+}
+
+function deleteBackupByCodeFor(code, ownerUserId) {
+  if (!code) return 0;
+  return db
+    .prepare(
+      `DELETE FROM guild_backups WHERE backup_code = ? AND owner_user_id = ?`
+    )
+    .run(String(code).trim().toUpperCase(), String(ownerUserId)).changes;
+}
+
+function codeExists(code) {
+  if (!code) return false;
+  return !!db
+    .prepare(`SELECT 1 FROM guild_backups WHERE backup_code = ?`)
+    .get(String(code).trim().toUpperCase());
+}
+
+// ------- Restores log -------
+
+function insertBackupRestore(row) {
+  const info = db
+    .prepare(
+      `INSERT INTO backup_restores
+        (backup_id, target_guild_id, triggered_by, mode, status, log)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      row.backup_id,
+      String(row.target_guild_id),
+      String(row.triggered_by),
+      row.mode,
+      row.status,
+      row.log ? JSON.stringify(row.log) : null
+    );
+  return info.lastInsertRowid;
+}
+
+function updateBackupRestore(id, patch) {
+  const fields = [];
+  const vals = [];
+  for (const k of ["status", "log"]) {
+    if (k in patch) {
+      fields.push(`${k} = ?`);
+      vals.push(k === "log" ? JSON.stringify(patch.log || {}) : patch[k]);
+    }
+  }
+  if (patch.finished) {
+    fields.push(`finished_at = CURRENT_TIMESTAMP`);
+  }
+  if (!fields.length) return;
+  vals.push(id);
+  db.prepare(
+    `UPDATE backup_restores SET ${fields.join(", ")} WHERE id = ?`
+  ).run(...vals);
 }
 
 function migrateGuildEmbedsTable() {
@@ -907,4 +1142,17 @@ module.exports = {
   insertGuildEmbed,
   updateGuildEmbed,
   deleteGuildEmbed,
+  listPremiumUsers,
+  getPremiumUser,
+  upsertPremiumUser,
+  deletePremiumUser,
+  insertGuildBackup,
+  getBackupByCode,
+  getBackupById,
+  listUserBackups,
+  countUserBackups,
+  deleteBackupByCodeFor,
+  codeExists,
+  insertBackupRestore,
+  updateBackupRestore,
 };
