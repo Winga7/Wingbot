@@ -4,7 +4,12 @@
  * .env :
  *   TOKEN (bot), CLIENT_ID
  *   DISCORD_CLIENT_SECRET — secret OAuth2 (Discord Developer Portal)
- *   DASHBOARD_PUBLIC_URL — ex. http://127.0.0.1:3847 (URL exacte du dashboard)
+ *   DASHBOARD_PUBLIC_URL — ex. http://127.0.0.1:3847 (URL par défaut, utilisée si
+ *     l'origine de la requête n'est pas dans DASHBOARD_ALLOWED_ORIGINS)
+ *   DASHBOARD_ALLOWED_ORIGINS — optionnel, liste CSV d'URLs autorisées pour l'OAuth
+ *     (ex. "http://127.0.0.1:3847,http://192.168.68.133:3847,https://dash.wingbot.fr").
+ *     Chacune de ces URLs doit aussi être enregistrée dans le portail Discord
+ *     (OAuth2 → Redirects → <origine>/api/auth/discord/callback).
  *   DASHBOARD_HOST — optionnel, IP d'écoute HTTP (défaut : 0.0.0.0)
  *   BOT_INVITE_PERMISSIONS — optionnel, entier permissions (défaut : 268438528)
  */
@@ -55,6 +60,9 @@ const {
 initDatabase();
 
 const app = express();
+// Respecte X-Forwarded-* si le dashboard est derrière un reverse proxy
+// (Traefik, nginx, Cloudflare…). Sans ça, req.protocol serait toujours "http".
+app.set("trust proxy", true);
 const PORT = Number(process.env.DASHBOARD_PORT) || 3847;
 const HOST = process.env.DASHBOARD_HOST || "0.0.0.0";
 const DISCORD_API = "https://discord.com/api/v10";
@@ -100,8 +108,52 @@ function publicBaseUrl() {
   return u.replace(/\/$/, "");
 }
 
-function oauthRedirectUri() {
-  return `${publicBaseUrl()}/api/auth/discord/callback`;
+/**
+ * Liste parsée une fois de toutes les origines autorisées (DASHBOARD_PUBLIC_URL
+ * + DASHBOARD_ALLOWED_ORIGINS). Utilisée pour choisir dynamiquement le
+ * redirect_uri OAuth en fonction de l'hôte sur lequel l'utilisateur navigue.
+ */
+const _allowedOriginsCache = (() => {
+  const raw = [
+    process.env.DASHBOARD_PUBLIC_URL,
+    ...(process.env.DASHBOARD_ALLOWED_ORIGINS || "").split(","),
+  ];
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const v = (item || "").trim().replace(/\/$/, "");
+    if (!v || seen.has(v)) continue;
+    try {
+      const u = new URL(v);
+      const key = `${u.protocol}//${u.host}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(key);
+    } catch {
+      /* URL invalide, on ignore */
+    }
+  }
+  return out;
+})();
+
+/**
+ * Retourne l'URL de base correspondant à la requête entrante si elle fait
+ * partie des origines autorisées ; sinon retombe sur DASHBOARD_PUBLIC_URL.
+ * Empêche un attaquant d'imposer un `redirect_uri` via un header Host bidouillé.
+ */
+function publicBaseUrlFor(req) {
+  if (!req) return publicBaseUrl();
+  const hostHeader = req.headers["x-forwarded-host"] || req.headers.host;
+  if (!hostHeader) return publicBaseUrl();
+  const proto =
+    (req.headers["x-forwarded-proto"] || req.protocol || "http").split(",")[0].trim();
+  const candidate = `${proto}://${hostHeader}`.replace(/\/$/, "");
+  if (_allowedOriginsCache.includes(candidate)) return candidate;
+  return publicBaseUrl();
+}
+
+function oauthRedirectUri(req) {
+  return `${publicBaseUrlFor(req)}/api/auth/discord/callback`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -747,7 +799,7 @@ app.get("/api/auth/discord/login", (req, res) => {
   }
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: oauthRedirectUri(),
+    redirect_uri: oauthRedirectUri(req),
     response_type: "code",
     scope: "identify guilds",
   });
@@ -756,14 +808,15 @@ app.get("/api/auth/discord/login", (req, res) => {
 
 /** Discord renvoie ici après autorisation */
 app.get("/api/auth/discord/callback", async (req, res) => {
+  const base = publicBaseUrlFor(req);
   try {
     const code = req.query.code;
     const err = req.query.error;
     if (err) {
-      return res.redirect(`${publicBaseUrl()}/?discord=error&reason=${encodeURIComponent(err)}`);
+      return res.redirect(`${base}/?discord=error&reason=${encodeURIComponent(err)}`);
     }
     if (!code) {
-      return res.redirect(`${publicBaseUrl()}/?discord=error`);
+      return res.redirect(`${base}/?discord=error`);
     }
     const clientId = process.env.CLIENT_ID;
     const clientSecret = process.env.DISCORD_CLIENT_SECRET;
@@ -772,7 +825,7 @@ app.get("/api/auth/discord/callback", async (req, res) => {
     }
     const tokenData = await fetchOAuthToken(
       code,
-      oauthRedirectUri(),
+      oauthRedirectUri(req),
       clientId,
       clientSecret
     );
@@ -783,11 +836,11 @@ app.get("/api/auth/discord/callback", async (req, res) => {
       userId: me.id,
       username: me.global_name || me.username,
     });
-    res.redirect(`${publicBaseUrl()}/?discord=connected`);
+    res.redirect(`${base}/?discord=connected`);
   } catch (e) {
     console.error(e);
     res.redirect(
-      `${publicBaseUrl()}/?discord=error&reason=${encodeURIComponent(String(e.message))}`
+      `${base}/?discord=error&reason=${encodeURIComponent(String(e.message))}`
     );
   }
 });
