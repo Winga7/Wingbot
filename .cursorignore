@@ -1,0 +1,19 @@
+# Empêche l'agent Cursor (et l'indexation) d'ouvrir ces fichiers.
+# Utile pour tout ce qui contient des secrets ou des données sensibles.
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Verrou d'instance (runtime)
+.wingbot-instance.lock
+
+# Base de données locale
+*.db
+*.db-shm
+*.db-wal
+wingbot.db
+
+# Logs bruts
+*.log
