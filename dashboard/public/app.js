@@ -1159,10 +1159,13 @@ async function loadData() {
   const config = await cfgRes.json();
   const stats = await statsRes.json();
   internalAccess = await accessRes.json();
-  const founderMenu = $("founder-menu");
-  if (founderMenu) founderMenu.hidden = !internalAccess?.founder;
+  const fondaBtn = $("btn-open-fonda");
+  if (fondaBtn) fondaBtn.hidden = !internalAccess?.founder;
   if (internalAccess?.founder) {
     loadGlobalBotSettings().catch(() => null);
+    startFondaDmPolling();
+  } else {
+    stopFondaDmPolling();
   }
 
   guilds = config.guilds || [];
@@ -1547,6 +1550,357 @@ $("btn-discord-logout")?.addEventListener("click", async () => {
 });
 
 $("save-global-bot")?.addEventListener("click", saveGlobalBotSettings);
+
+// ============================================================
+//  Fenêtre Fonda — onglets + Messages privés du bot
+// ============================================================
+
+const fondaState = {
+  open: false,
+  activeTab: "settings",
+  selectedUserId: null,
+  threads: [],
+  messages: [],
+  pollTimer: null,
+  threadPollTimer: null,
+};
+
+function openFondaModal(initialTab) {
+  const modal = $("fonda-modal");
+  if (!modal) return;
+  fondaState.open = true;
+  modal.hidden = false;
+  document.body.style.overflow = "hidden";
+  if (initialTab) switchFondaTab(initialTab);
+  refreshFondaThreads().catch(() => null);
+  startFondaThreadPolling();
+}
+
+function closeFondaModal() {
+  const modal = $("fonda-modal");
+  if (!modal) return;
+  fondaState.open = false;
+  modal.hidden = true;
+  document.body.style.overflow = "";
+  stopFondaThreadPolling();
+}
+
+function switchFondaTab(tabName) {
+  fondaState.activeTab = tabName;
+  document.querySelectorAll(".fonda-tab").forEach((b) => {
+    const active = b.dataset.fondaTab === tabName;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll(".fonda-tab-panel").forEach((p) => {
+    const active = p.dataset.fondaPanel === tabName;
+    p.classList.toggle("active", active);
+    p.hidden = !active;
+  });
+  if (tabName === "dms") {
+    refreshFondaThreads().catch(() => null);
+  }
+}
+
+async function refreshFondaThreads() {
+  if (!internalAccess?.founder) return;
+  try {
+    const res = await fetch(apiUrl("/api/dm/threads"), fetchOptsGet());
+    if (!res.ok) return;
+    const data = await res.json();
+    fondaState.threads = data.threads || [];
+    renderFondaThreads();
+    updateFondaUnreadBadges();
+  } catch {
+    // silencieux
+  }
+}
+
+function renderFondaThreads() {
+  const root = $("dm-thread-list");
+  if (!root) return;
+  if (!fondaState.threads.length) {
+    root.innerHTML =
+      '<p class="muted tiny dm-empty">Aucun message privé pour l’instant.</p>';
+    return;
+  }
+  root.innerHTML = "";
+  for (const t of fondaState.threads) {
+    const item = document.createElement("div");
+    item.className = "dm-thread-item";
+    if (t.user_id === fondaState.selectedUserId) item.classList.add("active");
+    const avatar = t.user_avatar || defaultAvatarFor(t.user_id);
+    const name =
+      t.user_tag || `Utilisateur ${String(t.user_id).slice(-4)}`;
+    const previewRaw = t.last_content || "";
+    const preview =
+      (t.last_direction === "out" ? "Toi : " : "") +
+      (previewRaw.length > 60 ? previewRaw.slice(0, 60) + "…" : previewRaw);
+    const time = formatRelativeTime(t.last_message_at);
+    item.innerHTML = `
+      <img class="dm-thread-avatar" src="${escapeAttr(avatar)}" alt="" onerror="this.style.visibility='hidden'" />
+      <div class="dm-thread-text">
+        <div class="dm-thread-name">${escapeHtml(name)}</div>
+        <div class="dm-thread-preview">${escapeHtml(preview || "—")}</div>
+      </div>
+      <div class="dm-thread-meta">
+        <span class="dm-thread-time">${escapeHtml(time)}</span>
+        ${t.unread > 0 ? `<span class="dm-thread-unread">${t.unread}</span>` : ""}
+      </div>
+    `;
+    item.addEventListener("click", () => selectFondaThread(t.user_id));
+    root.appendChild(item);
+  }
+}
+
+function updateFondaUnreadBadges() {
+  const totalUnread = fondaState.threads.reduce(
+    (s, t) => s + (Number(t.unread) || 0),
+    0
+  );
+  const tabBadge = $("fonda-tab-dms-badge");
+  if (tabBadge) {
+    tabBadge.hidden = totalUnread === 0;
+    tabBadge.textContent = String(totalUnread);
+  }
+  const btnDot = $("fonda-btn-dot");
+  if (btnDot) btnDot.hidden = totalUnread === 0;
+}
+
+async function selectFondaThread(userId) {
+  if (!userId) return;
+  fondaState.selectedUserId = userId;
+  renderFondaThreads();
+  $("dm-main-head").hidden = false;
+  $("dm-composer").hidden = false;
+  $("dm-messages").innerHTML =
+    '<p class="muted tiny dm-placeholder">Chargement…</p>';
+  await loadFondaThreadMessages();
+  // marque comme lu
+  try {
+    await fetch(apiUrl(`/api/dm/threads/${encodeURIComponent(userId)}/read`), {
+      method: "POST",
+      credentials: "include",
+    });
+    refreshFondaThreads().catch(() => null);
+  } catch {
+    /* ignore */
+  }
+  $("dm-composer-input")?.focus();
+}
+
+async function loadFondaThreadMessages() {
+  if (!fondaState.selectedUserId) return;
+  try {
+    const res = await fetch(
+      apiUrl(`/api/dm/threads/${encodeURIComponent(fondaState.selectedUserId)}`),
+      fetchOptsGet()
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    fondaState.messages = data.messages || [];
+    renderFondaMessages(data.thread);
+  } catch {
+    /* ignore */
+  }
+}
+
+function renderFondaMessages(thread) {
+  const root = $("dm-messages");
+  if (!root) return;
+  root.innerHTML = "";
+
+  if (thread) {
+    $("dm-current-name").textContent =
+      thread.user_tag || `Utilisateur ${String(thread.user_id).slice(-4)}`;
+    $("dm-current-id").textContent = thread.user_id;
+    const av = $("dm-current-avatar");
+    av.src = thread.user_avatar || defaultAvatarFor(thread.user_id);
+    av.onerror = () => {
+      av.style.visibility = "hidden";
+    };
+  }
+
+  if (!fondaState.messages.length) {
+    root.innerHTML =
+      '<p class="muted tiny dm-placeholder">Aucun message dans cette conversation.</p>';
+    return;
+  }
+
+  let lastDay = "";
+  for (const m of fondaState.messages) {
+    const d = new Date(m.created_at + (m.created_at?.endsWith("Z") ? "" : "Z"));
+    const dayKey = d.toLocaleDateString("fr-FR", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+    if (dayKey !== lastDay) {
+      const sep = document.createElement("div");
+      sep.className = "dm-day-sep";
+      sep.textContent = dayKey;
+      root.appendChild(sep);
+      lastDay = dayKey;
+    }
+    const bubble = document.createElement("div");
+    bubble.className = `dm-msg ${m.direction}`;
+    const time = d.toLocaleTimeString("fr-FR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    let attachmentsHtml = "";
+    if (Array.isArray(m.attachments)) {
+      for (const a of m.attachments) {
+        if (a?.url) {
+          attachmentsHtml += `<a class="dm-msg-attachment" href="${escapeAttr(
+            a.url
+          )}" target="_blank" rel="noopener noreferrer">📎 ${escapeHtml(
+            a.name || "Pièce jointe"
+          )}</a>`;
+        }
+      }
+    }
+    bubble.innerHTML = `
+      <div class="dm-msg-content">${escapeHtml(m.content || "")}</div>
+      ${attachmentsHtml}
+      <span class="dm-msg-time">${escapeHtml(time)}</span>
+    `;
+    root.appendChild(bubble);
+  }
+  root.scrollTop = root.scrollHeight;
+}
+
+async function sendFondaDm(content) {
+  if (!fondaState.selectedUserId) return;
+  const status = $("dm-composer-status");
+  const sendBtn = $("dm-send-btn");
+  if (sendBtn) sendBtn.disabled = true;
+  if (status) status.textContent = "Envoi…";
+  try {
+    const res = await fetch(
+      apiUrl(
+        `/api/dm/threads/${encodeURIComponent(
+          fondaState.selectedUserId
+        )}/messages`
+      ),
+      {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ content }),
+      }
+    );
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.message || j.error || "Échec de l’envoi");
+    }
+    if (status) status.textContent = "Envoyé ✓";
+    setTimeout(() => {
+      if (status) status.textContent = "";
+    }, 1500);
+    await loadFondaThreadMessages();
+    refreshFondaThreads().catch(() => null);
+    return true;
+  } catch (e) {
+    if (status) status.textContent = "❌ " + (e.message || "Erreur");
+    return false;
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+function startFondaThreadPolling() {
+  stopFondaThreadPolling();
+  fondaState.threadPollTimer = setInterval(() => {
+    if (!fondaState.open) return;
+    refreshFondaThreads().catch(() => null);
+    if (fondaState.selectedUserId && fondaState.activeTab === "dms") {
+      loadFondaThreadMessages().catch(() => null);
+    }
+  }, 6000);
+}
+
+function stopFondaThreadPolling() {
+  if (fondaState.threadPollTimer) {
+    clearInterval(fondaState.threadPollTimer);
+    fondaState.threadPollTimer = null;
+  }
+}
+
+function startFondaDmPolling() {
+  stopFondaDmPolling();
+  // Poll en arrière-plan (même modal fermée) pour mettre à jour la pastille rouge
+  refreshFondaThreads().catch(() => null);
+  fondaState.pollTimer = setInterval(() => {
+    refreshFondaThreads().catch(() => null);
+  }, 20000);
+}
+
+function stopFondaDmPolling() {
+  if (fondaState.pollTimer) {
+    clearInterval(fondaState.pollTimer);
+    fondaState.pollTimer = null;
+  }
+}
+
+function defaultAvatarFor(userId) {
+  const n = Number(BigInt(String(userId || "0")) % 5n);
+  return `https://cdn.discordapp.com/embed/avatars/${n}.png`;
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeAttr(s) {
+  return escapeHtml(s);
+}
+
+function formatRelativeTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + (iso.endsWith("Z") ? "" : "Z"));
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return "à l’instant";
+  if (diff < 3600) return Math.floor(diff / 60) + " min";
+  if (diff < 86400) return Math.floor(diff / 3600) + " h";
+  if (diff < 7 * 86400) return Math.floor(diff / 86400) + " j";
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+// --- listeners modal Fonda ---
+$("btn-open-fonda")?.addEventListener("click", () => openFondaModal());
+document.querySelectorAll("[data-close-fonda]").forEach((el) => {
+  el.addEventListener("click", closeFondaModal);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && fondaState.open) closeFondaModal();
+});
+document.querySelectorAll(".fonda-tab").forEach((b) => {
+  b.addEventListener("click", () => switchFondaTab(b.dataset.fondaTab));
+});
+$("btn-refresh-dms")?.addEventListener("click", () => {
+  refreshFondaThreads().catch(() => null);
+  if (fondaState.selectedUserId) loadFondaThreadMessages().catch(() => null);
+});
+$("dm-composer")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $("dm-composer-input");
+  const content = String(input.value || "").trim();
+  if (!content) return;
+  const ok = await sendFondaDm(content);
+  if (ok) input.value = "";
+});
+$("dm-composer-input")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    $("dm-composer").requestSubmit();
+  }
+});
 
 setDiscordOAuthHref();
 

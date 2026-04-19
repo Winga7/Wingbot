@@ -1,0 +1,55 @@
+# =============================================================================
+# Wingbot — bot Discord + dashboard.
+#
+# IMPORTANT : les deux services partagent un MEME volume "./data" qui contient
+# wingbot.db + wingbot.db-wal + wingbot.db-shm. Ne JAMAIS bind-mount un seul
+# fichier .db (le mode WAL utilise 3 fichiers, ils doivent tous être visibles
+# par les deux processus, sinon les écritures du dashboard ne sont jamais
+# vues par le bot — bug classique de SQLite WAL en multi-conteneurs).
+# =============================================================================
+
+services:
+  bot:
+    build: .
+    image: wingbot:latest
+    container_name: wingbot-bot
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - WINGBOT_DB_PATH=/app/data/wingbot.db
+      # Empêche le verrou anti-double-instance de bloquer un redémarrage docker
+      # quand un ancien PID traîne. Le verrou n'a pas de sens en conteneur (un
+      # seul process node par conteneur de toute façon).
+      - WINGBOT_ALLOW_MULTIPLE=1
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('fs').statSync('/app/data/wingbot.db')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  dashboard:
+    build: .
+    image: wingbot:latest
+    container_name: wingbot-dashboard
+    command: ["node", "dashboard/server.js"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - WINGBOT_DB_PATH=/app/data/wingbot.db
+    ports:
+      - "3847:3847"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - bot
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3847/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

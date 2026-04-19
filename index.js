@@ -7,6 +7,7 @@ const {
   Collection,
   Events,
   GatewayIntentBits,
+  Partials,
 } = require("discord.js");
 const {
   initDatabase,
@@ -15,6 +16,7 @@ const {
   isCommandEnabled,
   getCustomCommandReply,
   getBotGlobalSettings,
+  recordDmMessage,
 } = require("./database");
 const { expandCustomTemplate } = require("./customCommandTemplates");
 const { getCommandAccessDenial } = require("./commandAccessGate");
@@ -108,7 +110,10 @@ const client = new Client({
     GatewayIntentBits.GuildEmojisAndStickers,
     GatewayIntentBits.GuildModeration,
     GatewayIntentBits.GuildScheduledEvents,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.DirectMessageReactions,
   ],
+  partials: [Partials.Channel, Partials.Message],
 });
 
 // Initialisation de la collection de commandes
@@ -144,6 +149,9 @@ loadLogs(client);
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
+  const { DB_PATH } = require("./database");
+  console.log(`[Bot] PID ${process.pid} · cwd=${process.cwd()}`);
+  console.log(`[Bot] Lit/écrit la DB → ${DB_PATH}`);
 
   const activityTypeByKey = {
     Custom: ActivityType.Custom,
@@ -254,6 +262,39 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 // Événement pour les messages
 client.on(Events.MessageCreate, async (message) => {
+  // ----- DMs (panneau Fonda → Messages privés) -----
+  if (!message.guild) {
+    try {
+      const me = client.user;
+      const isFromBot = message.author.id === me?.id;
+      const otherUser = isFromBot
+        ? await message.channel.recipient?.fetch?.().catch(() => null) ||
+          message.channel.recipient ||
+          null
+        : message.author;
+      const otherId = otherUser?.id || (isFromBot ? null : message.author.id);
+      if (otherId) {
+        recordDmMessage({
+          user_id: otherId,
+          channel_id: message.channel?.id || null,
+          message_id: message.id,
+          direction: isFromBot ? "out" : "in",
+          author_id: message.author.id,
+          author_tag: message.author.tag,
+          content: message.content || "",
+          attachments: [...message.attachments.values()].map((a) => ({
+            name: a.name,
+            url: a.url,
+          })),
+          user_tag: otherUser?.tag || null,
+          user_avatar: otherUser?.displayAvatarURL?.({ size: 128 }) || null,
+        });
+      }
+    } catch (e) {
+      console.error("[DM] enregistrement échoué:", e?.message || e);
+    }
+  }
+
   // Ignorer les messages du bot lui-même
   if (message.author.bot) return;
 
