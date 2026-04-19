@@ -27,5 +27,7 @@ data/
 # Lock instance bot
 .wingbot-instance.lock
 
-# Backups SQL/JSON
-backup/
+# NOTE : on NE PAS exclure le dossier backup/ — il contient du code source
+# (captureGuild.js, restoreGuild.js, backupCode.js) requis par les commandes
+# premium. Si un jour des dumps SQL/JSON y sont déposés, exclure les fichiers
+# par extension uniquement, pas le dossier entier.
