@@ -14,6 +14,10 @@ services:
     image: wingbot:latest
     container_name: wingbot-bot
     restart: always
+    # Force le process à tourner avec UID/GID 1000 (= utilisateur Linux par
+    # défaut). Garantit que les fichiers du bind-mount ./data sont lisibles ET
+    # écrivables côté hôte ET côté conteneur sans devoir chown manuellement.
+    user: "1000:1000"
     env_file:
       - .env
     environment:
@@ -37,6 +41,7 @@ services:
     container_name: wingbot-dashboard
     command: ["node", "dashboard/server.js"]
     restart: unless-stopped
+    user: "1000:1000"
     env_file:
       - .env
     environment:

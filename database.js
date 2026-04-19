@@ -23,11 +23,29 @@ const DB_PATH = process.env.WINGBOT_DB_PATH
 
 // S'assurer que le dossier parent existe (utile au premier lancement Docker
 // si le volume est vide).
+const DB_DIR = path.dirname(DB_PATH);
 try {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  fs.mkdirSync(DB_DIR, { recursive: true });
 } catch {
-  /* ignore : si le dossier existe déjà ou si on n'a pas les droits, better-sqlite3
-     remontera une erreur claire à l'ouverture juste après. */
+  /* ignore : si le dossier existe déjà ou si on n'a pas les droits, on remonte
+     une erreur claire ci-dessous. */
+}
+
+// Vérifie qu'on peut écrire dans le dossier AVANT d'ouvrir la base, sinon
+// SQLite remonte un cryptique "attempt to write a readonly database" sur la
+// première migration. On préfère un message explicite.
+try {
+  fs.accessSync(DB_DIR, fs.constants.W_OK);
+} catch {
+  console.error(
+    `\n[DB] ❌ Le dossier "${DB_DIR}" n'est pas accessible en écriture pour ` +
+      `cet utilisateur (UID ${typeof process.getuid === "function" ? process.getuid() : "?"}).\n` +
+      `\n  Si tu es en Docker, fixe les permissions du bind-mount sur l'hôte :\n` +
+      `    sudo chown -R 1000:1000 ./data && chmod -R u+rwX ./data\n` +
+      `  ou rebuild l'image avec ton UID :\n` +
+      `    docker compose build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g)\n`,
+  );
+  process.exit(1);
 }
 
 const db = new Database(DB_PATH);

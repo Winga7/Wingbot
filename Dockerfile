@@ -30,9 +30,18 @@ ENV NODE_ENV=production \
 # Le port du dashboard (sera ignoré par le conteneur "bot" qui n'expose rien).
 EXPOSE 3847
 
-# Crée un user non-root pour le runtime — le volume /app/data sera monté
-# avec ces droits.
-RUN groupadd -r app && useradd -r -g app -d /app -s /usr/sbin/nologin app
+# Crée un user non-root pour le runtime avec UID/GID configurables.
+# Par défaut on fixe 1000:1000 pour matcher l'utilisateur Linux standard
+# (UID 1000 = premier user créé sur Ubuntu/Debian/etc.). Comme ça les fichiers
+# du bind-mount ./data: /app/data sont lisibles ET écrivables aussi bien depuis
+# l'hôte que depuis le conteneur, sans avoir à faire de chown.
+#
+# Si ton utilisateur sur l'hôte a un UID différent, tu peux le surcharger :
+#   docker compose build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g)
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN groupadd --gid ${APP_GID} app \
+    && useradd --uid ${APP_UID} --gid app --home-dir /app --shell /usr/sbin/nologin app
 
 WORKDIR /app
 
