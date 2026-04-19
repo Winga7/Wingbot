@@ -1583,6 +1583,7 @@ function closeFondaModal() {
   modal.hidden = true;
   document.body.style.overflow = "";
   stopFondaThreadPolling();
+  stopFondaDmPolling();
 }
 
 function switchFondaTab(tabName) {

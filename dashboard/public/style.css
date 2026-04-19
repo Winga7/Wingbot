@@ -764,6 +764,13 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   padding: 2rem;
 }
 
+/* Important : sans cette règle, `display: flex` ci-dessus écrase la règle UA
+   `[hidden] { display: none }` (priorité auteur > UA), et la modal reste
+   visible même quand le JS fait `modal.hidden = true`. */
+.fonda-modal[hidden] {
+  display: none;
+}
+
 .fonda-backdrop {
   position: absolute;
   inset: 0;
