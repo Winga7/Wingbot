@@ -30,18 +30,19 @@ ENV NODE_ENV=production \
 # Le port du dashboard (sera ignoré par le conteneur "bot" qui n'expose rien).
 EXPOSE 3847
 
-# Crée un user non-root pour le runtime avec UID/GID configurables.
-# Par défaut on fixe 1000:1000 pour matcher l'utilisateur Linux standard
-# (UID 1000 = premier user créé sur Ubuntu/Debian/etc.). Comme ça les fichiers
-# du bind-mount ./data: /app/data sont lisibles ET écrivables aussi bien depuis
-# l'hôte que depuis le conteneur, sans avoir à faire de chown.
+# UID/GID sous lesquels tournera le process. Par défaut 1000:1000 (= utilisateur
+# Linux standard sur l'hôte) pour que le bind-mount ./data:/app/data soit
+# lisible/écrivable des deux côtés sans chown manuel.
 #
-# Si ton utilisateur sur l'hôte a un UID différent, tu peux le surcharger :
+# Note : l'image node:20-bookworm-slim contient déjà un user "node" (UID 1000),
+# donc on n'essaie PAS d'en créer un nouveau — on réutilise simplement l'UID/GID
+# déjà présent. On référence le user par numéro (USER 1000:1000) pour éviter
+# tout conflit de nom.
+#
+# Pour utiliser un autre UID (rare) :
 #   docker compose build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g)
 ARG APP_UID=1000
 ARG APP_GID=1000
-RUN groupadd --gid ${APP_GID} app \
-    && useradd --uid ${APP_UID} --gid app --home-dir /app --shell /usr/sbin/nologin app
 
 WORKDIR /app
 
@@ -52,9 +53,9 @@ COPY . .
 # Le dossier data accueille wingbot.db + ses fichiers WAL associés. Ce dossier
 # est censé être un volume Docker partagé entre le conteneur bot et dashboard
 # (cf. docker-compose.yml).
-RUN mkdir -p /app/data && chown -R app:app /app
+RUN mkdir -p /app/data && chown -R ${APP_UID}:${APP_GID} /app
 
-USER app
+USER ${APP_UID}:${APP_GID}
 
 # Par défaut, le conteneur lance le bot. Le service "dashboard" du
 # docker-compose surcharge cette commande avec `npm run dashboard`.
