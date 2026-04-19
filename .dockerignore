@@ -1,0 +1,31 @@
+# Exclus du build context Docker pour images légères + builds rapides.
+
+node_modules
+npm-debug.log*
+
+# Bases SQLite locales (la prod doit utiliser le volume ./data, jamais
+# embarquer une DB dans l'image).
+wingbot.db
+wingbot.db-shm
+wingbot.db-wal
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Fichiers de dev / IDE
+.git
+.gitignore
+.cursorignore
+.vscode
+.idea
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Lock instance bot
+.wingbot-instance.lock
+
+# Backups SQL/JSON
+backup/

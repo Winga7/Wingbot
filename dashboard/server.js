@@ -36,6 +36,12 @@ const {
   upsertPremiumUser,
   deletePremiumUser,
   listUserBackups,
+  recordDmMessage,
+  listDmThreads,
+  getDmThread,
+  markDmThreadRead,
+  updateDmThreadProfile,
+  DB_PATH,
 } = require("../database");
 const {
   defaultEmbedPayload,
@@ -544,7 +550,14 @@ async function requireGuildManageAccess(req, res, next) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "wingbot-dashboard" });
+  res.json({
+    ok: true,
+    service: "wingbot-dashboard",
+    db_path: DB_PATH,
+    cwd: process.cwd(),
+    pid: process.pid,
+    node_env: process.env.NODE_ENV || null,
+  });
 });
 
 app.get("/api/bot/profile", async (_req, res) => {
@@ -629,6 +642,130 @@ app.put("/api/bot/global-settings", requireDiscordSession, requireFounder, async
     res.status(400).json({ error: String(e.message) });
   }
 });
+
+// ============================================================
+//  Messages privés du bot (founder-only) — vue Fonda → DMs
+// ============================================================
+
+function userAvatarUrlFromApi(user) {
+  if (!user?.id) return null;
+  if (!user.avatar) {
+    return `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator || 0) % 5}.png`;
+  }
+  const ext = String(user.avatar).startsWith("a_") ? "gif" : "png";
+  return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${ext}?size=128`;
+}
+
+app.get("/api/dm/threads", requireDiscordSession, requireFounder, (_req, res) => {
+  try {
+    res.json({ threads: listDmThreads(200) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get(
+  "/api/dm/threads/:userId",
+  requireDiscordSession,
+  requireFounder,
+  (req, res) => {
+    const id = normalizeSnowflakeId(req.params.userId);
+    if (!id) return res.status(400).json({ error: "user_id invalide" });
+    try {
+      const data = getDmThread(id, 500);
+      res.json(data);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/dm/threads/:userId/read",
+  requireDiscordSession,
+  requireFounder,
+  (req, res) => {
+    const id = normalizeSnowflakeId(req.params.userId);
+    if (!id) return res.status(400).json({ error: "user_id invalide" });
+    try {
+      markDmThreadRead(id);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/dm/threads/:userId/messages",
+  requireDiscordSession,
+  requireFounder,
+  async (req, res) => {
+    const id = normalizeSnowflakeId(req.params.userId);
+    if (!id) return res.status(400).json({ error: "user_id invalide" });
+    const content = String(req.body?.content || "").trim();
+    if (!content) return res.status(400).json({ error: "content_vide" });
+    if (content.length > 2000) {
+      return res.status(400).json({ error: "content_trop_long" });
+    }
+    try {
+      const dmChannel = await discordBotJson("POST", "/users/@me/channels", {
+        recipient_id: id,
+      });
+      if (!dmChannel?.id) {
+        return res.status(502).json({ error: "dm_channel_invalide" });
+      }
+      const sent = await discordBotJson(
+        "POST",
+        `/channels/${encodeURIComponent(dmChannel.id)}/messages`,
+        { content }
+      );
+      // Récupère un minimum d'info user pour bien remplir le thread
+      let userInfo = null;
+      try {
+        userInfo = await discordFetchJson(`/users/${encodeURIComponent(id)}`);
+      } catch {
+        /* tolère un échec de fetch user */
+      }
+      const bot = await fetchBotUser().catch(() => null);
+      recordDmMessage({
+        user_id: id,
+        channel_id: dmChannel.id,
+        message_id: sent?.id || null,
+        direction: "out",
+        author_id: bot?.id || null,
+        author_tag: bot ? `${bot.username}` : null,
+        content,
+        attachments: [],
+        user_tag: userInfo
+          ? userInfo.global_name || userInfo.username || null
+          : null,
+        user_avatar: userInfo ? userAvatarUrlFromApi(userInfo) : null,
+      });
+      updateDmThreadProfile(id, {
+        user_tag: userInfo
+          ? userInfo.global_name || userInfo.username || null
+          : null,
+        user_avatar: userInfo ? userAvatarUrlFromApi(userInfo) : null,
+        channel_id: dmChannel.id,
+      });
+      res.json({ ok: true, message_id: sent?.id || null });
+    } catch (e) {
+      console.error("[DM send]", e);
+      const status = e?.status === 403 ? 403 : 500;
+      res.status(status).json({
+        error: "send_failed",
+        message:
+          e?.status === 403
+            ? "Discord refuse l'envoi (utilisateur n'autorise pas les DMs ou n'a aucun serveur en commun avec le bot)."
+            : String(e.message || e),
+      });
+    }
+  }
+);
 
 app.put("/api/bot/avatar", requireDiscordSession, async (req, res) => {
   try {

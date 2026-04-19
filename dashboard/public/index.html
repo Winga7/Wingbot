@@ -119,9 +119,44 @@
             <select id="guild-select" class="guild-select-hidden" aria-hidden="true" tabindex="-1"></select>
           </div>
           <div class="main-actions">
-            <details id="founder-menu" class="founder-menu" hidden>
-              <summary class="btn secondary">Fonda</summary>
-              <div class="founder-menu-panel">
+            <button type="button" id="btn-open-fonda" class="btn secondary" hidden>
+              <span class="fonda-btn-dot" id="fonda-btn-dot" hidden></span>
+              Fonda
+            </button>
+          </div>
+        </header>
+
+        <!-- ================= Fenêtre Fonda (modal à onglets) ================= -->
+        <div class="fonda-modal" id="fonda-modal" hidden role="dialog" aria-modal="true" aria-labelledby="fonda-title">
+          <div class="fonda-backdrop" data-close-fonda></div>
+          <div class="fonda-window" role="document">
+            <header class="fonda-head">
+              <div class="fonda-title-wrap">
+                <h2 id="fonda-title">Console Fonda</h2>
+                <span class="muted tiny">Outils internes — réservé au compte fondateur</span>
+              </div>
+              <button type="button" class="fonda-close" data-close-fonda aria-label="Fermer">×</button>
+            </header>
+
+            <nav class="fonda-tabs" id="fonda-tabs" role="tablist">
+              <button type="button" class="fonda-tab active" data-fonda-tab="settings" role="tab" aria-selected="true">
+                <span class="fonda-tab-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+                </span>
+                Bot global
+              </button>
+              <button type="button" class="fonda-tab" data-fonda-tab="dms" role="tab" aria-selected="false">
+                <span class="fonda-tab-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+                </span>
+                Messages privés
+                <span class="fonda-tab-badge" id="fonda-tab-dms-badge" hidden>0</span>
+              </button>
+            </nav>
+
+            <div class="fonda-body">
+              <!-- ----- Onglet Bot global ----- -->
+              <section class="fonda-tab-panel active" data-fonda-panel="settings" role="tabpanel">
                 <h4>Paramètres globaux bot</h4>
                 <label class="field-row">
                   <span>Nom global du bot</span>
@@ -162,12 +197,57 @@
                 <p class="muted tiny" style="margin: 0 0 0.35rem">
                   Les changements sont appliqués par le bot en quelques secondes (lecture de la base).
                 </p>
-                <button type="button" class="btn primary" id="save-global-bot">Enregistrer global</button>
-                <span class="save-status" id="save-global-status"></span>
-              </div>
-            </details>
+                <div class="fonda-actions">
+                  <button type="button" class="btn primary" id="save-global-bot">Enregistrer global</button>
+                  <span class="save-status" id="save-global-status"></span>
+                </div>
+              </section>
+
+              <!-- ----- Onglet DMs ----- -->
+              <section class="fonda-tab-panel" data-fonda-panel="dms" role="tabpanel" hidden>
+                <div class="dm-layout">
+                  <aside class="dm-sidebar">
+                    <div class="dm-sidebar-head">
+                      <h4>Conversations</h4>
+                      <button type="button" class="btn ghost tiny" id="btn-refresh-dms" title="Rafraîchir">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10"/><path d="M20.49 15A9 9 0 015.64 18.36L1 14"/></svg>
+                      </button>
+                    </div>
+                    <div class="dm-thread-list" id="dm-thread-list">
+                      <p class="muted tiny dm-empty">Aucun message privé pour l’instant.</p>
+                    </div>
+                  </aside>
+                  <section class="dm-main">
+                    <header class="dm-main-head" id="dm-main-head" hidden>
+                      <img class="dm-avatar" id="dm-current-avatar" alt="" />
+                      <div class="dm-main-head-text">
+                        <strong id="dm-current-name">—</strong>
+                        <span class="muted tiny mono" id="dm-current-id">—</span>
+                      </div>
+                    </header>
+                    <div class="dm-messages" id="dm-messages">
+                      <p class="muted tiny dm-placeholder">
+                        Sélectionne une conversation à gauche pour la lire et y répondre <strong>en tant que le bot</strong>.
+                      </p>
+                    </div>
+                    <form class="dm-composer" id="dm-composer" hidden>
+                      <textarea
+                        id="dm-composer-input"
+                        rows="2"
+                        maxlength="2000"
+                        placeholder="Réponds en tant que le bot… (Entrée pour envoyer, Maj+Entrée pour saut de ligne)"
+                      ></textarea>
+                      <div class="dm-composer-actions">
+                        <span class="muted tiny" id="dm-composer-status"></span>
+                        <button type="submit" class="btn primary" id="dm-send-btn">Envoyer</button>
+                      </div>
+                    </form>
+                  </section>
+                </div>
+              </section>
+            </div>
           </div>
-        </header>
+        </div>
 
         <p class="discord-warn muted tiny" id="discord-warn-meta" hidden></p>
         <p class="discord-warn muted tiny" id="discord-warn-channels" hidden></p>

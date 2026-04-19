@@ -1,4 +1,5 @@
 const Database = require("better-sqlite3");
+const fs = require("node:fs");
 const path = require("path");
 const {
   ALL_KEYS,
@@ -13,11 +14,32 @@ const {
   COMMAND_GROUPS,
 } = require("./commandsManifest");
 
-// Créer ou ouvrir la base de données
-const db = new Database(path.join(__dirname, "wingbot.db"));
+// Chemin de la base : variable d'env prioritaire (utile en Docker pour pointer
+// sur un volume partagé entre les conteneurs bot + dashboard), sinon fichier
+// "wingbot.db" à la racine du projet (comportement local par défaut).
+const DB_PATH = process.env.WINGBOT_DB_PATH
+  ? path.resolve(process.env.WINGBOT_DB_PATH)
+  : path.join(__dirname, "wingbot.db");
+
+// S'assurer que le dossier parent existe (utile au premier lancement Docker
+// si le volume est vide).
+try {
+  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+} catch {
+  /* ignore : si le dossier existe déjà ou si on n'a pas les droits, better-sqlite3
+     remontera une erreur claire à l'ouverture juste après. */
+}
+
+const db = new Database(DB_PATH);
 
 // Activer le mode WAL pour de meilleures performances
 db.pragma("journal_mode = WAL");
+// IMPORTANT en multi-process (bot + dashboard) : on veut que chaque lecture voie
+// les écritures committées par l'autre process. NORMAL est déjà ce comportement
+// (les lecteurs voient toujours le dernier commit), on l'écrit explicitement.
+db.pragma("synchronous = NORMAL");
+
+console.log(`[DB] wingbot.db → ${DB_PATH}`);
 
 // Créer les tables si elles n'existent pas
 function initDatabase() {
@@ -74,8 +96,174 @@ function initDatabase() {
   migratePremiumUsersTable();
   migrateGuildBackupsTable();
   migrateBackupRestoresTable();
+  migrateDmMessagesTable();
 
   console.log("✅ Base de données initialisée");
+}
+
+// ============================================================
+//  DMs reçus / envoyés par le bot (vue Fonda → Messages privés)
+// ============================================================
+
+function migrateDmMessagesTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS dm_messages (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      TEXT NOT NULL,
+      channel_id   TEXT,
+      message_id   TEXT UNIQUE,
+      direction    TEXT NOT NULL CHECK(direction IN ('in','out')),
+      author_id    TEXT,
+      author_tag   TEXT,
+      content      TEXT,
+      attachments  TEXT,
+      created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_dm_messages_user ON dm_messages(user_id, created_at)`
+  ).run();
+
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS dm_threads (
+      user_id        TEXT PRIMARY KEY,
+      user_tag       TEXT,
+      user_avatar    TEXT,
+      channel_id     TEXT,
+      last_read_at   DATETIME,
+      last_message_at DATETIME
+    )
+    `
+  ).run();
+}
+
+function recordDmMessage({
+  user_id,
+  channel_id,
+  message_id,
+  direction,
+  author_id,
+  author_tag,
+  content,
+  attachments,
+  user_tag,
+  user_avatar,
+}) {
+  if (!user_id || !direction) return null;
+  const attJson = attachments
+    ? typeof attachments === "string"
+      ? attachments
+      : JSON.stringify(attachments)
+    : null;
+  const info = db
+    .prepare(
+      `INSERT OR IGNORE INTO dm_messages
+        (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      String(user_id),
+      channel_id ? String(channel_id) : null,
+      message_id ? String(message_id) : null,
+      direction,
+      author_id ? String(author_id) : null,
+      author_tag || null,
+      content || "",
+      attJson
+    );
+  // upsert thread
+  db.prepare(
+    `INSERT INTO dm_threads (user_id, user_tag, user_avatar, channel_id, last_message_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(user_id) DO UPDATE SET
+       user_tag        = COALESCE(excluded.user_tag, dm_threads.user_tag),
+       user_avatar     = COALESCE(excluded.user_avatar, dm_threads.user_avatar),
+       channel_id      = COALESCE(excluded.channel_id, dm_threads.channel_id),
+       last_message_at = CURRENT_TIMESTAMP`
+  ).run(
+    String(user_id),
+    user_tag || null,
+    user_avatar || null,
+    channel_id ? String(channel_id) : null
+  );
+  return info.lastInsertRowid || null;
+}
+
+function listDmThreads(limit = 100) {
+  const threads = db
+    .prepare(
+      `SELECT t.user_id, t.user_tag, t.user_avatar, t.channel_id,
+              t.last_read_at, t.last_message_at,
+              (SELECT content FROM dm_messages
+                 WHERE user_id = t.user_id ORDER BY id DESC LIMIT 1) AS last_content,
+              (SELECT direction FROM dm_messages
+                 WHERE user_id = t.user_id ORDER BY id DESC LIMIT 1) AS last_direction,
+              (SELECT COUNT(*) FROM dm_messages
+                 WHERE user_id = t.user_id
+                   AND direction = 'in'
+                   AND (t.last_read_at IS NULL OR created_at > t.last_read_at)) AS unread
+       FROM dm_threads t
+       ORDER BY t.last_message_at DESC
+       LIMIT ?`
+    )
+    .all(limit);
+  return threads;
+}
+
+function getDmThread(userId, limit = 200) {
+  if (!userId) return { thread: null, messages: [] };
+  const thread = db
+    .prepare(
+      `SELECT user_id, user_tag, user_avatar, channel_id, last_read_at, last_message_at
+       FROM dm_threads WHERE user_id = ?`
+    )
+    .get(String(userId));
+  const messages = db
+    .prepare(
+      `SELECT id, message_id, direction, author_id, author_tag, content, attachments, created_at
+       FROM dm_messages WHERE user_id = ? ORDER BY id ASC LIMIT ?`
+    )
+    .all(String(userId), limit)
+    .map((r) => ({
+      ...r,
+      attachments: r.attachments ? safeJsonParse(r.attachments, []) : [],
+    }));
+  return { thread: thread || null, messages };
+}
+
+function markDmThreadRead(userId) {
+  if (!userId) return;
+  db.prepare(
+    `UPDATE dm_threads SET last_read_at = CURRENT_TIMESTAMP WHERE user_id = ?`
+  ).run(String(userId));
+}
+
+function updateDmThreadProfile(userId, { user_tag, user_avatar, channel_id }) {
+  if (!userId) return;
+  db.prepare(
+    `INSERT INTO dm_threads (user_id, user_tag, user_avatar, channel_id, last_message_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(user_id) DO UPDATE SET
+       user_tag    = COALESCE(excluded.user_tag, dm_threads.user_tag),
+       user_avatar = COALESCE(excluded.user_avatar, dm_threads.user_avatar),
+       channel_id  = COALESCE(excluded.channel_id, dm_threads.channel_id)`
+  ).run(
+    String(userId),
+    user_tag || null,
+    user_avatar || null,
+    channel_id ? String(channel_id) : null
+  );
+}
+
+function safeJsonParse(s, fallback) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return fallback;
+  }
 }
 
 // ============================================================
@@ -1114,6 +1302,7 @@ function cleanOldMessages() {
 // Exporter les fonctions
 module.exports = {
   db,
+  DB_PATH,
   initDatabase,
   setLogChannel,
   getLogChannel,
@@ -1155,4 +1344,9 @@ module.exports = {
   codeExists,
   insertBackupRestore,
   updateBackupRestore,
+  recordDmMessage,
+  listDmThreads,
+  getDmThread,
+  markDmThreadRead,
+  updateDmThreadProfile,
 };
