@@ -152,6 +152,12 @@
                 Messages privés
                 <span class="fonda-tab-badge" id="fonda-tab-dms-badge" hidden>0</span>
               </button>
+              <button type="button" class="fonda-tab" data-fonda-tab="vip" role="tab" aria-selected="false">
+                <span class="fonda-tab-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 2l2.39 4.84L20 8l-4 3.9.94 5.5L12 14.77l-4.94 2.63L8 11.9 4 8l5.61-1.16L12 2z"/></svg>
+                </span>
+                VIP / Premium
+              </button>
             </nav>
 
             <div class="fonda-body">
@@ -243,6 +249,55 @@
                       </div>
                     </form>
                   </section>
+                </div>
+              </section>
+
+              <!-- ----- Onglet VIP / Premium ----- -->
+              <section class="fonda-tab-panel" data-fonda-panel="vip" role="tabpanel" hidden>
+                <h4>Gestion des accès VIP / Premium</h4>
+                <p class="muted tiny" style="margin: 0 0 0.9rem">
+                  Donne ou retire un accès <strong>VIP</strong> (offert) ou <strong>Premium</strong> (payant)
+                  à un utilisateur Discord. Les <strong>Founder</strong> définis dans le <code>.env</code>
+                  ne peuvent pas être modifiés ici.
+                </p>
+
+                <div class="vip-form">
+                  <label class="field-row">
+                    <span>ID Discord de l’utilisateur</span>
+                    <input type="text" id="vip-user-id" class="input-sm input-wide mono" placeholder="123456789012345678" />
+                  </label>
+                  <label class="field-row">
+                    <span>Tier</span>
+                    <select id="vip-tier" class="input-sm input-wide">
+                      <option value="vip">💎 VIP (offert)</option>
+                      <option value="premium">✨ Premium (payant)</option>
+                      <option value="founder">👑 Founder</option>
+                    </select>
+                  </label>
+                  <label class="field-row">
+                    <span>Expiration <span class="muted tiny">(optionnel)</span></span>
+                    <input type="datetime-local" id="vip-expires-at" class="input-sm input-wide" />
+                  </label>
+                  <label class="field-row">
+                    <span>Note <span class="muted tiny">(optionnel)</span></span>
+                    <input type="text" id="vip-note" maxlength="200" class="input-sm input-wide" placeholder="Ex: gagnant giveaway, abonnement Patreon…" />
+                  </label>
+                  <div class="fonda-actions">
+                    <button type="button" class="btn primary" id="vip-add-btn">Ajouter / mettre à jour</button>
+                    <span class="save-status" id="vip-save-status"></span>
+                  </div>
+                </div>
+
+                <hr class="section-sep" />
+
+                <div class="vip-list-head">
+                  <h4>Utilisateurs avec un accès actif</h4>
+                  <button type="button" class="btn ghost tiny" id="btn-refresh-vip" title="Rafraîchir">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10"/><path d="M20.49 15A9 9 0 015.64 18.36L1 14"/></svg>
+                  </button>
+                </div>
+                <div id="vip-list" class="vip-list">
+                  <p class="muted tiny">Chargement…</p>
                 </div>
               </section>
             </div>

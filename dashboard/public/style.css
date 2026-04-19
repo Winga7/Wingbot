@@ -1200,6 +1200,101 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   }
 }
 
+/* ========== Onglet VIP / Premium ========== */
+
+.vip-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.vip-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.4rem 0 0.6rem;
+}
+
+.vip-list-head h4 {
+  margin: 0;
+}
+
+.vip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-bottom: 0.5rem;
+}
+
+.vip-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.vip-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.vip-tier-badge.tier-founder {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+}
+
+.vip-tier-badge.tier-vip {
+  background: linear-gradient(135deg, #06b6d4, #0891b2);
+  color: #fff;
+}
+
+.vip-tier-badge.tier-premium {
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  color: #fff;
+}
+
+.vip-row-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.vip-row-id {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vip-row-meta {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.vip-row-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.vip-empty {
+  padding: 0.8rem;
+  text-align: center;
+  color: var(--text-dim);
+}
+
 /* ========== Titres & vues ========== */
 
 .views {

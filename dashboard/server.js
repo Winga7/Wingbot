@@ -1555,7 +1555,21 @@ app.get(
   }
 );
 
-app.use(express.static(path.join(__dirname, "public")));
+// Static avec cache-busting : on force la revalidation à chaque chargement pour
+// les assets fréquemment modifiés (html/js/css). Sinon le navigateur garde
+// l'ancienne version après un redéploiement et l'utilisateur voit "rien n'a
+// changé".
+app.use(
+  express.static(path.join(__dirname, "public"), {
+    etag: true,
+    lastModified: true,
+    setHeaders: (res, filePath) => {
+      if (/\.(html|js|css)$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
+      }
+    },
+  })
+);
 
 app.listen(PORT, HOST, () => {
   console.log(`📊 Dashboard Wingbot : ${publicBaseUrl()}/`);

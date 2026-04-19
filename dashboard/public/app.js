@@ -1600,6 +1600,137 @@ function switchFondaTab(tabName) {
   if (tabName === "dms") {
     refreshFondaThreads().catch(() => null);
   }
+  if (tabName === "vip") {
+    refreshVipList().catch(() => null);
+  }
+}
+
+// ----- Onglet VIP / Premium -----
+
+async function refreshVipList() {
+  if (!internalAccess?.founder) return;
+  const root = $("vip-list");
+  if (!root) return;
+  try {
+    const res = await fetch(apiUrl("/api/admin/premium"), fetchOptsGet());
+    if (!res.ok) {
+      root.innerHTML =
+        '<p class="muted tiny vip-empty">Impossible de charger la liste.</p>';
+      return;
+    }
+    const data = await res.json();
+    renderVipList(data.users || []);
+  } catch (e) {
+    root.innerHTML = `<p class="muted tiny vip-empty">${escapeHtml(
+      e.message || "Erreur"
+    )}</p>`;
+  }
+}
+
+function renderVipList(users) {
+  const root = $("vip-list");
+  if (!root) return;
+  if (!users.length) {
+    root.innerHTML =
+      '<p class="muted tiny vip-empty">Aucun utilisateur VIP / Premium pour l’instant.</p>';
+    return;
+  }
+  const tierLabel = {
+    founder: "👑 Founder",
+    vip: "💎 VIP",
+    premium: "✨ Premium",
+  };
+  root.innerHTML = "";
+  for (const u of users) {
+    const row = document.createElement("div");
+    row.className = "vip-row";
+    const tierClass = `tier-${u.tier}`;
+    const expires = u.expires_at
+      ? `Expire : ${new Date(u.expires_at).toLocaleString("fr-FR")}`
+      : "Pas d’expiration";
+    const granted = u.granted_at
+      ? `Ajouté : ${new Date(u.granted_at).toLocaleDateString("fr-FR")}`
+      : "Source : .env (founder)";
+    const note = u.note ? ` · ${escapeHtml(u.note)}` : "";
+    const fromEnv = !u.granted_at;
+    row.innerHTML = `
+      <span class="vip-tier-badge ${tierClass}">${tierLabel[u.tier] || u.tier}</span>
+      <div class="vip-row-info">
+        <span class="vip-row-id">${escapeHtml(u.user_id)}</span>
+        <span class="vip-row-meta">${escapeHtml(granted)} · ${escapeHtml(expires)}${note}</span>
+      </div>
+      <div class="vip-row-actions">
+        ${
+          fromEnv
+            ? '<span class="muted tiny" title="Défini dans .env, non modifiable ici">.env</span>'
+            : `<button type="button" class="btn ghost tiny" data-vip-remove="${escapeAttr(u.user_id)}">Supprimer</button>`
+        }
+      </div>
+    `;
+    root.appendChild(row);
+  }
+  root.querySelectorAll("[data-vip-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => removeVip(btn.dataset.vipRemove));
+  });
+}
+
+async function addOrUpdateVip() {
+  const userId = String($("vip-user-id").value || "").trim();
+  const tier = $("vip-tier").value;
+  const expiresLocal = $("vip-expires-at").value;
+  const note = String($("vip-note").value || "").trim();
+  const status = $("vip-save-status");
+  if (!userId) {
+    status.textContent = "❌ ID utilisateur requis";
+    return;
+  }
+  status.textContent = "Enregistrement…";
+  try {
+    const body = {
+      user_id: userId,
+      tier,
+      note: note || null,
+      expires_at: expiresLocal ? new Date(expiresLocal).toISOString() : null,
+    };
+    const res = await fetch(apiUrl("/api/admin/premium"), {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.message || j.error || "Échec");
+    }
+    status.textContent = "Enregistré ✓";
+    $("vip-user-id").value = "";
+    $("vip-expires-at").value = "";
+    $("vip-note").value = "";
+    await refreshVipList();
+    setTimeout(() => {
+      status.textContent = "";
+    }, 2000);
+  } catch (e) {
+    status.textContent = "❌ " + (e.message || "Erreur");
+  }
+}
+
+async function removeVip(userId) {
+  if (!userId) return;
+  if (!window.confirm(`Retirer l'accès de l'utilisateur ${userId} ?`)) return;
+  try {
+    const res = await fetch(
+      apiUrl(`/api/admin/premium/${encodeURIComponent(userId)}`),
+      { method: "DELETE", credentials: "include" }
+    );
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.message || j.error || "Échec");
+    }
+    await refreshVipList();
+  } catch (e) {
+    alert("Erreur : " + (e.message || e));
+  }
 }
 
 async function refreshFondaThreads() {
@@ -1900,6 +2031,12 @@ $("dm-composer-input")?.addEventListener("keydown", (e) => {
     e.preventDefault();
     $("dm-composer").requestSubmit();
   }
+});
+
+// --- listeners onglet VIP ---
+$("vip-add-btn")?.addEventListener("click", addOrUpdateVip);
+$("btn-refresh-vip")?.addEventListener("click", () => {
+  refreshVipList().catch(() => null);
 });
 
 setDiscordOAuthHref();
