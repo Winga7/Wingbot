@@ -33,8 +33,9 @@ const {
   insertGuildEmbed,
   updateGuildEmbed,
   deleteGuildEmbed,
-  upsertPremiumUser,
-  deletePremiumUser,
+  listPremiumGuilds,
+  upsertPremiumGuild,
+  deletePremiumGuild,
   listUserBackups,
   recordDmMessage,
   listDmThreads,
@@ -82,8 +83,8 @@ function csvSet(raw) {
   );
 }
 
-// Couche premium unifiée : lit l'env + la table premium_users.
-// La source de vérité unique est ./premiumGate.js, y compris pour le bot et les commandes slash.
+// Couche premium unifiée — lit l'env + les tables `premium_users` (founder
+// seulement) et `guild_premium`. Source de vérité unique pour bot + dashboard.
 const premiumGate = require("../premiumGate");
 
 function isFounderUser(userId) {
@@ -100,13 +101,8 @@ function requireFounder(req, res, next) {
   next();
 }
 
-function isPremiumUser(userId) {
-  return premiumGate.atLeast(userId, "premium");
-}
-
-function canUseFeature(userId, featureKey) {
-  if (isFounderUser(userId)) return true;
-  return premiumGate.canUseFeature(userId, featureKey);
+function canUseFeature(userId, guildId, featureKey) {
+  return premiumGate.canUseFeature(userId, guildId, featureKey);
 }
 
 function publicBaseUrl() {
@@ -581,9 +577,10 @@ app.get("/api/internal/access", requireDiscordSession, (req, res) => {
   const userId = req.discordSession.userId;
   res.json({
     user_id: userId,
-    tier: premiumGate.getUserTier(userId),
     founder: isFounderUser(userId),
-    premium: isPremiumUser(userId),
+    // Champ legacy conservé pour compat front : true si founder. La notion
+    // de "user premium" n'existe plus (premium est désormais par serveur).
+    premium: isFounderUser(userId),
   });
 });
 
@@ -769,10 +766,12 @@ app.post(
 
 app.put("/api/bot/avatar", requireDiscordSession, async (req, res) => {
   try {
-    if (!canUseFeature(req.discordSession.userId, "bot_avatar")) {
+    // bot_avatar est une feature globale (impacte tous les serveurs) : on
+    // n'a pas de guildId à passer, le check se réduit à "founder only".
+    if (!canUseFeature(req.discordSession.userId, null, "bot_avatar")) {
       return res.status(403).json({
         error: "feature_locked",
-        message: "Cette fonctionnalité n'est pas disponible pour ce compte.",
+        message: "Réservé au compte fondateur.",
       });
     }
     const manageableIds = await getManageableGuildIds(
@@ -860,16 +859,16 @@ app.put(
         });
       }
 
-      if (hasAvatar && !canUseFeature(req.discordSession.userId, "bot_avatar")) {
+      if (hasAvatar && !canUseFeature(req.discordSession.userId, guildId, "bot_avatar")) {
         return res.status(403).json({
           error: "feature_locked",
-          message: "Cette fonctionnalité n'est pas disponible pour ce compte.",
+          message: "Réservé au compte fondateur.",
         });
       }
-      if (hasNick && !canUseFeature(req.discordSession.userId, "bot_nickname")) {
+      if (hasNick && !canUseFeature(req.discordSession.userId, guildId, "bot_nickname")) {
         return res.status(403).json({
           error: "feature_locked",
-          message: "Cette fonctionnalité n'est pas disponible pour ce compte.",
+          message: "Réservé au compte fondateur.",
         });
       }
 
@@ -1494,38 +1493,69 @@ app.post(
 );
 
 // ============================================================
-// Admin VIP / Premium (founder-only)
+// Admin Premium par SERVEUR (founder-only)
 // ============================================================
+//
+// Endpoints :
+//   GET    /api/admin/guild-premium           → liste des serveurs premium
+//          (avec metadata Discord : nom, icone, owner) si dispo via le bot
+//   POST   /api/admin/guild-premium           → activer/mettre à jour
+//          { guild_id, source: 'paid'|'gift', expires_at?, notes? }
+//   DELETE /api/admin/guild-premium/:guildId  → désactiver
 
 app.get(
-  "/api/admin/premium",
+  "/api/admin/guild-premium",
   requireDiscordSession,
   requireFounder,
-  (_req, res) => {
-    res.json({ users: premiumGate.listActivePremiumUsers() });
+  async (_req, res) => {
+    const rows = listPremiumGuilds();
+    // On enrichit avec les noms/icones des serveurs où le bot est présent.
+    const enriched = await Promise.all(
+      rows.map(async (r) => {
+        let meta = null;
+        try {
+          meta = await discordFetchJson(
+            `/guilds/${encodeURIComponent(r.guild_id)}`
+          ).catch(() => null);
+        } catch {
+          /* bot pas dans ce serveur, on retourne juste l'id */
+        }
+        return {
+          ...r,
+          name: meta?.name || null,
+          icon_url: meta?.icon
+            ? `https://cdn.discordapp.com/icons/${r.guild_id}/${meta.icon}.png?size=64`
+            : null,
+          owner_id: meta?.owner_id || null,
+        };
+      })
+    );
+    res.json({ guilds: enriched });
   }
 );
 
 app.post(
-  "/api/admin/premium",
+  "/api/admin/guild-premium",
   requireDiscordSession,
   requireFounder,
   (req, res) => {
     try {
-      const { user_id, tier, expires_at, note } = req.body || {};
-      const id = premiumGate.normalizeSnowflakeId(user_id);
-      if (!id) return res.status(400).json({ error: "user_id invalide" });
-      if (!["founder", "vip", "premium"].includes(tier)) {
-        return res.status(400).json({ error: "tier invalide" });
+      const { guild_id, source, expires_at, notes } = req.body || {};
+      const id = premiumGate.normalizeSnowflakeId(guild_id);
+      if (!id) return res.status(400).json({ error: "guild_id invalide" });
+      if (!["paid", "gift"].includes(source)) {
+        return res
+          .status(400)
+          .json({ error: "source invalide (attendu : 'paid' | 'gift')" });
       }
-      const row = upsertPremiumUser({
-        user_id: id,
-        tier,
+      const row = upsertPremiumGuild({
+        guild_id: id,
+        source,
         granted_by: req.discordSession.userId,
         expires_at: expires_at || null,
-        note: note ? String(note).slice(0, 200) : null,
+        notes: notes ? String(notes).slice(0, 300) : null,
       });
-      res.json({ user: row });
+      res.json({ guild: row });
     } catch (e) {
       console.error(e);
       res.status(400).json({ error: String(e.message) });
@@ -1534,13 +1564,13 @@ app.post(
 );
 
 app.delete(
-  "/api/admin/premium/:userId",
+  "/api/admin/guild-premium/:guildId",
   requireDiscordSession,
   requireFounder,
   (req, res) => {
-    const id = premiumGate.normalizeSnowflakeId(req.params.userId);
-    if (!id) return res.status(400).json({ error: "user_id invalide" });
-    const changes = deletePremiumUser(id);
+    const id = premiumGate.normalizeSnowflakeId(req.params.guildId);
+    if (!id) return res.status(400).json({ error: "guild_id invalide" });
+    const changes = deletePremiumGuild(id);
     res.json({ ok: !!changes });
   }
 );

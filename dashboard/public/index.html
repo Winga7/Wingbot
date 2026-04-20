@@ -77,12 +77,13 @@
         </nav>
 
         <p class="sidebar-label tiny muted">Compte Discord</p>
-        <a class="btn secondary full" id="discord-oauth-link" href="#">Voir mes serveurs (admin)</a>
+        <a class="btn primary full" id="discord-oauth-link" href="#" hidden>
+          Se connecter avec Discord
+        </a>
+        <p id="discord-user-label" class="tiny muted" hidden></p>
         <button type="button" class="btn ghost full tiny" id="btn-discord-logout" hidden>
           Déconnecter Discord
         </button>
-        <p id="discord-user-label" class="tiny muted" hidden></p>
-        <button type="button" class="btn primary full" id="load">Actualiser</button>
 
         <p id="error" class="error" hidden></p>
 
@@ -252,26 +253,26 @@
                 </div>
               </section>
 
-              <!-- ----- Onglet VIP / Premium ----- -->
+              <!-- ----- Onglet VIP / Premium (par SERVEUR) ----- -->
               <section class="fonda-tab-panel" data-fonda-panel="vip" role="tabpanel" hidden>
-                <h4>Gestion des accès VIP / Premium</h4>
+                <h4>Serveurs avec accès Premium</h4>
                 <p class="muted tiny" style="margin: 0 0 0.9rem">
-                  Donne ou retire un accès <strong>VIP</strong> (offert) ou <strong>Premium</strong> (payant)
-                  à un utilisateur Discord. Les <strong>Founder</strong> définis dans le <code>.env</code>
-                  ne peuvent pas être modifiés ici.
+                  Le Premium est désormais lié à un <strong>serveur Discord</strong>, pas à un utilisateur.
+                  Active l'accès <strong>Payé</strong> (futur abonnement) ou <strong>Offert</strong> (gracieusement)
+                  pour qu'un serveur débloque toutes les features premium pour ses membres.
+                  Toi (Founder) tu as le bypass partout.
                 </p>
 
                 <div class="vip-form">
                   <label class="field-row">
-                    <span>ID Discord de l’utilisateur</span>
-                    <input type="text" id="vip-user-id" class="input-sm input-wide mono" placeholder="123456789012345678" />
+                    <span>ID du serveur Discord</span>
+                    <input type="text" id="vip-guild-id" class="input-sm input-wide mono" placeholder="123456789012345678" />
                   </label>
                   <label class="field-row">
-                    <span>Tier</span>
-                    <select id="vip-tier" class="input-sm input-wide">
-                      <option value="vip">💎 VIP (offert)</option>
-                      <option value="premium">✨ Premium (payant)</option>
-                      <option value="founder">👑 Founder</option>
+                    <span>Source</span>
+                    <select id="vip-source" class="input-sm input-wide">
+                      <option value="gift">🎁 Offert (gratuit)</option>
+                      <option value="paid">💳 Payé (abonnement)</option>
                     </select>
                   </label>
                   <label class="field-row">
@@ -279,11 +280,11 @@
                     <input type="datetime-local" id="vip-expires-at" class="input-sm input-wide" />
                   </label>
                   <label class="field-row">
-                    <span>Note <span class="muted tiny">(optionnel)</span></span>
-                    <input type="text" id="vip-note" maxlength="200" class="input-sm input-wide" placeholder="Ex: gagnant giveaway, abonnement Patreon…" />
+                    <span>Notes <span class="muted tiny">(optionnel)</span></span>
+                    <input type="text" id="vip-notes" maxlength="300" class="input-sm input-wide" placeholder="Ex: serveur partenaire, gagnant giveaway, abonnement n°…" />
                   </label>
                   <div class="fonda-actions">
-                    <button type="button" class="btn primary" id="vip-add-btn">Ajouter / mettre à jour</button>
+                    <button type="button" class="btn primary" id="vip-add-btn">Activer / mettre à jour</button>
                     <span class="save-status" id="vip-save-status"></span>
                   </div>
                 </div>
@@ -291,7 +292,7 @@
                 <hr class="section-sep" />
 
                 <div class="vip-list-head">
-                  <h4>Utilisateurs avec un accès actif</h4>
+                  <h4>Serveurs Premium actifs</h4>
                   <button type="button" class="btn ghost tiny" id="btn-refresh-vip" title="Rafraîchir">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10"/><path d="M20.49 15A9 9 0 015.64 18.36L1 14"/></svg>
                   </button>

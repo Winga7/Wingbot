@@ -1074,6 +1074,7 @@ async function refreshDiscordStatus() {
   const res = await fetch(apiUrl("/api/auth/discord/status"), fetchOptsGet());
   const u = $("discord-user-label");
   const lo = $("btn-discord-logout");
+  const li = $("discord-oauth-link");
   if (res.ok) {
     const j = await res.json();
     discordOAuthConnected = !!j.connected;
@@ -1081,9 +1082,11 @@ async function refreshDiscordStatus() {
       u.hidden = false;
       u.textContent = `Discord : ${j.username}`;
       if (lo) lo.hidden = false;
+      if (li) li.hidden = true;
     } else {
       u.hidden = true;
       if (lo) lo.hidden = true;
+      if (li) li.hidden = false;
     }
   }
 }
@@ -1109,9 +1112,11 @@ async function loadData() {
     $("stats-section").hidden = true;
     $("discord-user-label").hidden = true;
     $("btn-discord-logout").hidden = true;
+    const li = $("discord-oauth-link");
+    if (li) li.hidden = false;
     $("error").hidden = false;
     $("error").textContent =
-      "Connecte ton compte Discord avec « Voir mes serveurs (admin) ».";
+      "Connecte-toi avec Discord pour gérer tes serveurs.";
     return;
   }
 
@@ -1485,7 +1490,6 @@ async function saveGlobalBotSettings() {
   }
 }
 
-$("load").addEventListener("click", loadData);
 $("save").addEventListener("click", save);
 $("guild-select").addEventListener("change", onGuildChange);
 
@@ -1546,6 +1550,8 @@ $("btn-discord-logout")?.addEventListener("click", async () => {
   discordOAuthConnected = false;
   $("discord-user-label").hidden = true;
   $("btn-discord-logout").hidden = true;
+  const li = $("discord-oauth-link");
+  if (li) li.hidden = false;
   await loadData();
 });
 
@@ -1606,21 +1612,25 @@ function switchFondaTab(tabName) {
   }
 }
 
-// ----- Onglet VIP / Premium -----
+// ----- Onglet VIP / Premium (par SERVEUR) -----
+//
+// Le Premium est désormais lié au SERVEUR Discord, pas à l'utilisateur. Cet
+// onglet permet au founder d'activer le statut Premium sur un serveur via
+// son ID, en précisant la source ('paid' / 'gift').
 
 async function refreshVipList() {
   if (!internalAccess?.founder) return;
   const root = $("vip-list");
   if (!root) return;
   try {
-    const res = await fetch(apiUrl("/api/admin/premium"), fetchOptsGet());
+    const res = await fetch(apiUrl("/api/admin/guild-premium"), fetchOptsGet());
     if (!res.ok) {
       root.innerHTML =
         '<p class="muted tiny vip-empty">Impossible de charger la liste.</p>';
       return;
     }
     const data = await res.json();
-    renderVipList(data.users || []);
+    renderVipList(data.guilds || []);
   } catch (e) {
     root.innerHTML = `<p class="muted tiny vip-empty">${escapeHtml(
       e.message || "Erreur"
@@ -1628,44 +1638,44 @@ async function refreshVipList() {
   }
 }
 
-function renderVipList(users) {
+function renderVipList(guilds) {
   const root = $("vip-list");
   if (!root) return;
-  if (!users.length) {
+  if (!guilds.length) {
     root.innerHTML =
-      '<p class="muted tiny vip-empty">Aucun utilisateur VIP / Premium pour l’instant.</p>';
+      '<p class="muted tiny vip-empty">Aucun serveur Premium pour l’instant.</p>';
     return;
   }
-  const tierLabel = {
-    founder: "👑 Founder",
-    vip: "💎 VIP",
-    premium: "✨ Premium",
+  const sourceLabel = {
+    paid: "💳 Payé",
+    gift: "🎁 Offert",
   };
   root.innerHTML = "";
-  for (const u of users) {
+  for (const g of guilds) {
     const row = document.createElement("div");
     row.className = "vip-row";
-    const tierClass = `tier-${u.tier}`;
-    const expires = u.expires_at
-      ? `Expire : ${new Date(u.expires_at).toLocaleString("fr-FR")}`
+    const sourceClass = `tier-${g.source === "paid" ? "premium" : "vip"}`;
+    const expires = g.expires_at
+      ? `Expire : ${new Date(g.expires_at).toLocaleString("fr-FR")}`
       : "Pas d’expiration";
-    const granted = u.granted_at
-      ? `Ajouté : ${new Date(u.granted_at).toLocaleDateString("fr-FR")}`
-      : "Source : .env (founder)";
-    const note = u.note ? ` · ${escapeHtml(u.note)}` : "";
-    const fromEnv = !u.granted_at;
+    const granted = g.granted_at
+      ? `Activé : ${new Date(g.granted_at).toLocaleDateString("fr-FR")}`
+      : "—";
+    const notes = g.notes ? ` · ${escapeHtml(g.notes)}` : "";
+    const displayName = g.name
+      ? escapeHtml(g.name)
+      : `<span class="muted">(bot non présent)</span>`;
+    const icon = g.icon_url
+      ? `<img src="${escapeAttr(g.icon_url)}" alt="" width="24" height="24" style="border-radius:6px;margin-right:6px;vertical-align:middle" />`
+      : "";
     row.innerHTML = `
-      <span class="vip-tier-badge ${tierClass}">${tierLabel[u.tier] || u.tier}</span>
+      <span class="vip-tier-badge ${sourceClass}">${sourceLabel[g.source] || g.source}</span>
       <div class="vip-row-info">
-        <span class="vip-row-id">${escapeHtml(u.user_id)}</span>
-        <span class="vip-row-meta">${escapeHtml(granted)} · ${escapeHtml(expires)}${note}</span>
+        <span class="vip-row-id">${icon}${displayName} <span class="muted tiny mono">${escapeHtml(g.guild_id)}</span></span>
+        <span class="vip-row-meta">${escapeHtml(granted)} · ${escapeHtml(expires)}${notes}</span>
       </div>
       <div class="vip-row-actions">
-        ${
-          fromEnv
-            ? '<span class="muted tiny" title="Défini dans .env, non modifiable ici">.env</span>'
-            : `<button type="button" class="btn ghost tiny" data-vip-remove="${escapeAttr(u.user_id)}">Supprimer</button>`
-        }
+        <button type="button" class="btn ghost tiny" data-vip-remove="${escapeAttr(g.guild_id)}">Désactiver</button>
       </div>
     `;
     root.appendChild(row);
@@ -1676,24 +1686,24 @@ function renderVipList(users) {
 }
 
 async function addOrUpdateVip() {
-  const userId = String($("vip-user-id").value || "").trim();
-  const tier = $("vip-tier").value;
+  const guildId = String($("vip-guild-id").value || "").trim();
+  const source = $("vip-source").value;
   const expiresLocal = $("vip-expires-at").value;
-  const note = String($("vip-note").value || "").trim();
+  const notes = String($("vip-notes").value || "").trim();
   const status = $("vip-save-status");
-  if (!userId) {
-    status.textContent = "❌ ID utilisateur requis";
+  if (!guildId) {
+    status.textContent = "❌ ID du serveur requis";
     return;
   }
   status.textContent = "Enregistrement…";
   try {
     const body = {
-      user_id: userId,
-      tier,
-      note: note || null,
+      guild_id: guildId,
+      source,
+      notes: notes || null,
       expires_at: expiresLocal ? new Date(expiresLocal).toISOString() : null,
     };
-    const res = await fetch(apiUrl("/api/admin/premium"), {
+    const res = await fetch(apiUrl("/api/admin/guild-premium"), {
       method: "POST",
       headers: authHeaders(),
       credentials: "include",
@@ -1704,9 +1714,9 @@ async function addOrUpdateVip() {
       throw new Error(j.message || j.error || "Échec");
     }
     status.textContent = "Enregistré ✓";
-    $("vip-user-id").value = "";
+    $("vip-guild-id").value = "";
     $("vip-expires-at").value = "";
-    $("vip-note").value = "";
+    $("vip-notes").value = "";
     await refreshVipList();
     setTimeout(() => {
       status.textContent = "";
@@ -1716,12 +1726,12 @@ async function addOrUpdateVip() {
   }
 }
 
-async function removeVip(userId) {
-  if (!userId) return;
-  if (!window.confirm(`Retirer l'accès de l'utilisateur ${userId} ?`)) return;
+async function removeVip(guildId) {
+  if (!guildId) return;
+  if (!window.confirm(`Désactiver le Premium du serveur ${guildId} ?`)) return;
   try {
     const res = await fetch(
-      apiUrl(`/api/admin/premium/${encodeURIComponent(userId)}`),
+      apiUrl(`/api/admin/guild-premium/${encodeURIComponent(guildId)}`),
       { method: "DELETE", credentials: "include" }
     );
     if (!res.ok) {

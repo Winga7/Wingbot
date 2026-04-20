@@ -1,18 +1,37 @@
 /**
- * OAuth2 Discord : liste des serveurs où l’utilisateur peut gérer (admin / gérer le serveur).
- * Session en mémoire + cookie HttpOnly.
+ * OAuth2 Discord : liste des serveurs où l'utilisateur peut gérer
+ * (admin / gérer le serveur).
+ *
+ * Sessions persistées en SQLite (table `dashboard_sessions`) → survivent aux
+ * restarts du process et des conteneurs Docker. Avant on stockait dans une
+ * Map JS en mémoire, ce qui forçait à se reconnecter à chaque
+ * `docker compose up -d --build`.
  */
 const crypto = require("node:crypto");
+const {
+  createDashboardSession,
+  getDashboardSession,
+  deleteDashboardSession,
+  purgeExpiredDashboardSessions,
+} = require("../database");
 
 const DISCORD_API = "https://discord.com/api/v10";
 const OAUTH_AUTHORIZE = "https://discord.com/api/oauth2/authorize";
 const OAUTH_TOKEN = "https://discord.com/api/oauth2/token";
 
-/** @type {Map<string, { accessToken: string, expiresAt: number, userId: string, username: string }>} */
-const sessions = new Map();
-
 const SESSION_COOKIE = "wingbot_discord";
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Garbage collect des sessions expirées à intervalles réguliers (1× / heure).
+// Pas critique (getDashboardSession() purge aussi à la lecture), mais évite
+// une croissance lente de la table.
+setInterval(() => {
+  try {
+    purgeExpiredDashboardSessions();
+  } catch (e) {
+    console.error("[auth] purge sessions expirées :", e?.message || e);
+  }
+}, 60 * 60 * 1000).unref?.();
 
 function parseCookies(cookieHeader) {
   const out = {};
@@ -35,22 +54,28 @@ function getSessionIdFromReq(req) {
 function getSession(req) {
   const sid = getSessionIdFromReq(req);
   if (!sid) return null;
-  const s = sessions.get(sid);
-  if (!s || Date.now() > s.expiresAt) {
-    if (sid) sessions.delete(sid);
-    return null;
-  }
-  return { sessionId: sid, ...s };
+  const s = getDashboardSession(sid);
+  if (!s) return null;
+  return {
+    sessionId: s.sessionId,
+    accessToken: s.accessToken,
+    expiresAt: s.expiresAt,
+    userId: s.userId,
+    username: s.username,
+  };
 }
 
 function createSession(res, { accessToken, expiresInSec, userId, username }) {
   const sessionId = crypto.randomBytes(32).toString("hex");
-  const expiresAt = Date.now() + Math.min((expiresInSec || 604800) * 1000, SESSION_MAX_AGE_MS);
-  sessions.set(sessionId, {
-    accessToken,
-    expiresAt,
+  const expiresAt =
+    Date.now() + Math.min((expiresInSec || 604800) * 1000, SESSION_MAX_AGE_MS);
+
+  createDashboardSession({
+    sessionId,
     userId,
     username,
+    accessToken,
+    expiresAt,
   });
 
   const maxAgeSec = Math.floor((expiresAt - Date.now()) / 1000);
@@ -69,7 +94,7 @@ function clearSessionCookie(res) {
 
 function destroySession(req) {
   const sid = getSessionIdFromReq(req);
-  if (sid) sessions.delete(sid);
+  if (sid) deleteDashboardSession(sid);
 }
 
 /**

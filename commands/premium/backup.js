@@ -1,6 +1,10 @@
 /**
  * /backup — système de sauvegarde/restauration de serveur Discord.
- * Feature premium. Les founders + VIP ont accès illimité.
+ *
+ * Feature premium gated PAR SERVEUR : il faut que la guild ait un statut
+ * premium actif (table `guild_premium`) OU que l'auteur de la commande soit
+ * founder (bypass global). Le backup lui-même reste rattaché à l'utilisateur
+ * qui l'a créé (owner_user_id), pour les permissions de restauration.
  */
 
 const {
@@ -33,8 +37,9 @@ const {
 const {
   canUseFeature,
   getFeatureLimit,
-  getUserTier,
+  getEffectiveTier,
   isFounder,
+  isGuildPremium,
 } = require("../../premiumGate");
 const { hasModAdminBypass } = require("../../memberPerms");
 
@@ -185,17 +190,26 @@ function humanSize(b) {
 }
 
 function tierBadge(tier) {
-  return { founder: "👑 Founder", vip: "💎 VIP", premium: "✨ Premium", free: "Gratuit" }[tier] || tier;
+  return (
+    { founder: "👑 Founder", premium: "✨ Premium", free: "Gratuit" }[tier] ||
+    tier
+  );
+}
+
+function premiumDeniedMessage() {
+  return (
+    "Cette commande nécessite que **ce serveur** ait un accès Premium.\n" +
+    "Contacte un founder pour activer l'accès Premium sur ce serveur " +
+    "(payant ou offert)."
+  );
 }
 
 async function assertPremium(interaction, feature) {
-  if (canUseFeature(interaction.user.id, feature)) return true;
-  const tier = getUserTier(interaction.user.id);
+  const userId = interaction.user.id;
+  const guildId = interaction.guildId;
+  if (canUseFeature(userId, guildId, feature)) return true;
   await interaction.reply({
-    content:
-      `Cette commande nécessite un abonnement **Premium** (tu es actuellement ${tierBadge(
-        tier
-      )}).\nContacte un founder pour obtenir un accès VIP offert, ou attends l'ouverture de l'abonnement.`,
+    content: premiumDeniedMessage(),
     ephemeral: true,
   });
   return false;
@@ -212,12 +226,17 @@ async function handleCreate(interaction) {
     return interaction.reply({ content: "Commande utilisable en serveur uniquement.", ephemeral: true });
   }
 
-  const slotsLimit = getFeatureLimit(interaction.user.id, "backup_create", "slots");
+  const slotsLimit = getFeatureLimit(
+    interaction.user.id,
+    interaction.guildId,
+    "backup_create",
+    "slots"
+  );
   const used = countUserBackups(interaction.user.id);
   if (Number.isFinite(slotsLimit) && used >= slotsLimit) {
     return interaction.reply({
-      content: `Tu as atteint la limite de ${slotsLimit} backups pour ton tier (${tierBadge(
-        getUserTier(interaction.user.id)
+      content: `Tu as atteint la limite de ${slotsLimit} backups (${tierBadge(
+        getEffectiveTier(interaction.user.id, interaction.guildId)
       )}). Supprime-en un avec \`/backup delete\` pour libérer un slot.`,
       ephemeral: true,
     });
@@ -226,11 +245,13 @@ async function handleCreate(interaction) {
   const name = interaction.options.getString("nom") || `Backup de ${guild.name}`;
   const includeMessages = interaction.options.getBoolean("messages") ?? false;
   const requestedMsgCount = interaction.options.getInteger("nb_messages") ?? 25;
-  const maxPerChan = getFeatureLimit(
-    interaction.user.id,
-    "backup_create",
-    "max_messages_per_channel"
-  ) ?? 25;
+  const maxPerChan =
+    getFeatureLimit(
+      interaction.user.id,
+      interaction.guildId,
+      "backup_create",
+      "max_messages_per_channel"
+    ) ?? 25;
   const messagesPerChannel = Math.min(requestedMsgCount, maxPerChan);
 
   await interaction.deferReply({ ephemeral: true });
@@ -292,7 +313,11 @@ async function handleCreate(interaction) {
         inline: true,
       }
     )
-    .setFooter({ text: `Tier : ${tierBadge(getUserTier(interaction.user.id))}` })
+    .setFooter({
+      text: `Tier : ${tierBadge(
+        getEffectiveTier(interaction.user.id, interaction.guildId)
+      )}`,
+    })
     .setTimestamp();
 
   return interaction.editReply({ embeds: [embed] });
@@ -321,7 +346,12 @@ async function handleList(interaction) {
     .setDescription(lines.join("\n").slice(0, 4000))
     .setFooter({
       text: `Slots : ${rows.length} / ${
-        getFeatureLimit(interaction.user.id, "backup_create", "slots") ?? "∞"
+        getFeatureLimit(
+          interaction.user.id,
+          interaction.guildId,
+          "backup_create",
+          "slots"
+        ) ?? "∞"
       }`,
     });
   return interaction.reply({ embeds: [embed], ephemeral: true });
@@ -566,20 +596,21 @@ async function handleLoad(interaction) {
 // ============================================================
 
 function replyPremiumDenied(message) {
-  const tier = getUserTier(message.author.id);
-  return message.reply(
-    `Cette commande nécessite un abonnement **Premium** (tu es ${tierBadge(
-      tier
-    )}). Contacte un founder pour un accès VIP.`
-  );
+  return message.reply(premiumDeniedMessage());
 }
 
 async function msgCreate(message, args) {
-  if (!canUseFeature(message.author.id, "backup_create")) return replyPremiumDenied(message);
   const guild = message.guild;
   if (!guild) return;
+  if (!canUseFeature(message.author.id, guild.id, "backup_create"))
+    return replyPremiumDenied(message);
 
-  const slotsLimit = getFeatureLimit(message.author.id, "backup_create", "slots");
+  const slotsLimit = getFeatureLimit(
+    message.author.id,
+    guild.id,
+    "backup_create",
+    "slots"
+  );
   const used = countUserBackups(message.author.id);
   if (Number.isFinite(slotsLimit) && used >= slotsLimit) {
     return message.reply(
@@ -598,7 +629,12 @@ async function msgCreate(message, args) {
   }
   const name = nameParts.join(" ").trim() || `Backup de ${guild.name}`;
   const maxPerChan =
-    getFeatureLimit(message.author.id, "backup_create", "max_messages_per_channel") ?? 25;
+    getFeatureLimit(
+      message.author.id,
+      guild.id,
+      "backup_create",
+      "max_messages_per_channel"
+    ) ?? 25;
   const messagesPerChannel = Math.min(requestedMsgCount, maxPerChan);
 
   const status = await message.reply("⏳ Capture en cours…");
@@ -644,7 +680,8 @@ async function msgCreate(message, args) {
 }
 
 async function msgList(message) {
-  if (!canUseFeature(message.author.id, "backup_create")) return replyPremiumDenied(message);
+  if (!canUseFeature(message.author.id, message.guild?.id, "backup_create"))
+    return replyPremiumDenied(message);
   const rows = listUserBackups(message.author.id, 25);
   if (!rows.length) return message.reply("Aucun backup. Crée-en un : `backup create`.");
   const lines = rows.map((r) => {
@@ -655,7 +692,8 @@ async function msgList(message) {
 }
 
 function msgInfo(message, args) {
-  if (!canUseFeature(message.author.id, "backup_create")) return replyPremiumDenied(message);
+  if (!canUseFeature(message.author.id, message.guild?.id, "backup_create"))
+    return replyPremiumDenied(message);
   const code = normalizeCode(args[0]);
   if (!isValidCode(code)) return message.reply("Code invalide.");
   const row = getBackupByCode(code);
@@ -674,7 +712,8 @@ function msgInfo(message, args) {
 }
 
 function msgDelete(message, args) {
-  if (!canUseFeature(message.author.id, "backup_create")) return replyPremiumDenied(message);
+  if (!canUseFeature(message.author.id, message.guild?.id, "backup_create"))
+    return replyPremiumDenied(message);
   const code = normalizeCode(args[0]);
   if (!isValidCode(code)) return message.reply("Code invalide.");
   const n = deleteBackupByCodeFor(code, message.author.id);
@@ -682,9 +721,10 @@ function msgDelete(message, args) {
 }
 
 async function msgLoad(message, args) {
-  if (!canUseFeature(message.author.id, "backup_restore")) return replyPremiumDenied(message);
   const guild = message.guild;
   if (!guild) return;
+  if (!canUseFeature(message.author.id, guild.id, "backup_restore"))
+    return replyPremiumDenied(message);
 
   // Owner ou admin uniquement (double sécurité, même si prefix n'a pas le filtre slash)
   const isOwner = guild.ownerId === message.author.id;

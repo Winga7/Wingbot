@@ -112,11 +112,93 @@ function initDatabase() {
   migrateBotGlobalSettingsTable();
   migrateGuildEmbedsTable();
   migratePremiumUsersTable();
+  migrateGuildPremiumTable();
   migrateGuildBackupsTable();
   migrateBackupRestoresTable();
   migrateDmMessagesTable();
+  migrateDashboardSessionsTable();
 
   console.log("✅ Base de données initialisée");
+}
+
+// ============================================================
+//  Dashboard sessions (OAuth Discord persistées en DB)
+// ============================================================
+//
+// Avant : sessions stockées dans une Map JS en mémoire → vidées à chaque
+// restart du process Node (notamment chaque `docker compose up -d --build`),
+// obligeant les utilisateurs à se reconnecter.
+// Maintenant : persistées en SQLite dans le volume partagé `./data` →
+// survivent aux restarts.
+
+function migrateDashboardSessionsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS dashboard_sessions (
+      session_id    TEXT PRIMARY KEY,
+      user_id       TEXT NOT NULL,
+      username      TEXT,
+      access_token  TEXT NOT NULL,
+      expires_at    INTEGER NOT NULL,
+      created_at    INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
+    )
+    `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_user ON dashboard_sessions(user_id)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expires ON dashboard_sessions(expires_at)`
+  ).run();
+}
+
+function createDashboardSession({ sessionId, userId, username, accessToken, expiresAt }) {
+  db.prepare(
+    `INSERT OR REPLACE INTO dashboard_sessions
+       (session_id, user_id, username, access_token, expires_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(
+    String(sessionId),
+    String(userId),
+    username || null,
+    String(accessToken),
+    Number(expiresAt)
+  );
+}
+
+function getDashboardSession(sessionId) {
+  if (!sessionId) return null;
+  const row = db
+    .prepare(
+      `SELECT session_id, user_id, username, access_token, expires_at
+       FROM dashboard_sessions WHERE session_id = ?`
+    )
+    .get(String(sessionId));
+  if (!row) return null;
+  if (Number(row.expires_at) < Date.now()) {
+    deleteDashboardSession(sessionId);
+    return null;
+  }
+  return {
+    sessionId: row.session_id,
+    userId: row.user_id,
+    username: row.username,
+    accessToken: row.access_token,
+    expiresAt: Number(row.expires_at),
+  };
+}
+
+function deleteDashboardSession(sessionId) {
+  if (!sessionId) return 0;
+  return db
+    .prepare(`DELETE FROM dashboard_sessions WHERE session_id = ?`)
+    .run(String(sessionId)).changes;
+}
+
+function purgeExpiredDashboardSessions() {
+  return db
+    .prepare(`DELETE FROM dashboard_sessions WHERE expires_at < ?`)
+    .run(Date.now()).changes;
 }
 
 // ============================================================
@@ -289,6 +371,10 @@ function safeJsonParse(s, fallback) {
 // ============================================================
 
 function migratePremiumUsersTable() {
+  // Conservée pour compatibilité, mais le concept "user premium / vip" est
+  // déprécié. Seul le tier 'founder' est encore lu (pour offrir un bypass
+  // global à un compte). Les anciennes lignes vip/premium sont ignorées par
+  // premiumGate.js — on ne les drop pas pour préserver l'historique d'audit.
   db.prepare(
     `
     CREATE TABLE IF NOT EXISTS premium_users (
@@ -301,6 +387,87 @@ function migratePremiumUsersTable() {
     )
     `
   ).run();
+}
+
+// ============================================================
+//  Premium par SERVEUR (modèle actuel — depuis avril 2026)
+// ============================================================
+//
+// Un serveur Discord peut être marqué premium :
+//  - source = 'paid' : payé (futur : intégration paiement)
+//  - source = 'gift' : offert gracieusement par le founder ("VIP")
+//
+// All-or-nothing : un serveur premium → toutes les features premium dispo.
+// L'attribut est de la GUILD, pas de l'utilisateur (un user peut donc être
+// admin sur 5 serveurs dont 2 premium → seuls ces 2-là débloquent).
+
+function migrateGuildPremiumTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS guild_premium (
+      guild_id    TEXT PRIMARY KEY,
+      source      TEXT NOT NULL CHECK(source IN ('paid','gift')),
+      granted_by  TEXT,
+      granted_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at  DATETIME,
+      notes       TEXT
+    )
+    `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_guild_premium_expires ON guild_premium(expires_at)`
+  ).run();
+}
+
+function listPremiumGuilds() {
+  return db
+    .prepare(
+      `SELECT guild_id, source, granted_by, granted_at, expires_at, notes
+       FROM guild_premium ORDER BY granted_at DESC`
+    )
+    .all();
+}
+
+function getPremiumGuild(guildId) {
+  if (!guildId) return null;
+  return (
+    db
+      .prepare(
+        `SELECT guild_id, source, granted_by, granted_at, expires_at, notes
+         FROM guild_premium WHERE guild_id = ?`
+      )
+      .get(String(guildId)) || null
+  );
+}
+
+function upsertPremiumGuild({ guild_id, source, granted_by, expires_at, notes }) {
+  if (!guild_id || !source) throw new Error("guild_id et source requis");
+  if (!["paid", "gift"].includes(source)) {
+    throw new Error("source invalide (attendu : 'paid' | 'gift')");
+  }
+  db.prepare(
+    `INSERT INTO guild_premium (guild_id, source, granted_by, expires_at, notes)
+     VALUES (@guild_id, @source, @granted_by, @expires_at, @notes)
+     ON CONFLICT(guild_id) DO UPDATE SET
+       source     = excluded.source,
+       granted_by = excluded.granted_by,
+       expires_at = excluded.expires_at,
+       notes      = excluded.notes`
+  ).run({
+    guild_id: String(guild_id),
+    source,
+    granted_by: granted_by ? String(granted_by) : null,
+    expires_at: expires_at || null,
+    notes: notes || null,
+  });
+  return getPremiumGuild(guild_id);
+}
+
+function deletePremiumGuild(guildId) {
+  if (!guildId) return 0;
+  return db
+    .prepare(`DELETE FROM guild_premium WHERE guild_id = ?`)
+    .run(String(guildId)).changes;
 }
 
 function migrateGuildBackupsTable() {
@@ -1353,6 +1520,14 @@ module.exports = {
   getPremiumUser,
   upsertPremiumUser,
   deletePremiumUser,
+  listPremiumGuilds,
+  getPremiumGuild,
+  upsertPremiumGuild,
+  deletePremiumGuild,
+  createDashboardSession,
+  getDashboardSession,
+  deleteDashboardSession,
+  purgeExpiredDashboardSessions,
   insertGuildBackup,
   getBackupByCode,
   getBackupById,

@@ -1,18 +1,33 @@
 /**
- * Couche Premium / VIP : source de vérité unique pour les tiers utilisateurs.
+ * Couche Premium / VIP — source de vérité unique pour les accès payants.
  *
- * Tiers (ordre décroissant de pouvoir) :
- *   - founder : accès total, gère les autres tiers, bypass quotas
- *   - vip     : accès total aussi (offert par un founder)
- *   - premium : features payantes
- *   - free    : par défaut
+ * Modèle (depuis avril 2026) :
  *
- * Les founders sont définis dans .env (FOUNDER_DISCORD_IDS) ET peuvent
- * également exister en DB (avec tier='founder'). L'env sert de seed pour
- * qu'un admin ne puisse jamais se retrouver verrouillé hors du système.
+ *   - FOUNDER (par USER) : toi (et qui que tu mettes en founder via .env ou
+ *     la table `premium_users`). Bypass total partout, sur n'importe quel
+ *     serveur, sans limite. Le seul "privilège user-global" qui reste.
+ *
+ *   - PREMIUM (par GUILD) : un serveur Discord est marqué premium dans la
+ *     table `guild_premium`. Tous les membres de ce serveur profitent de
+ *     TOUTES les features premium (modèle "all-or-nothing").
+ *       • source = 'paid' : le serveur a payé (futur : intégration paiement)
+ *       • source = 'gift' : offert gracieusement par un founder (l'ancien
+ *         concept "VIP", mais désormais lié au serveur, pas à l'utilisateur).
+ *
+ *   - FREE : tout le reste.
+ *
+ * Pourquoi ce changement ? L'ancien modèle "user premium" permettait à un
+ * user payant de profiter du premium sur 50 serveurs où il était admin (un
+ * seul abonnement → 50 serveurs débloqués), ce qui n'était pas tenable
+ * commercialement. Désormais, le serveur paie, et seul ce serveur est
+ * débloqué — peu importe qui est admin dedans.
  */
 
-const { getPremiumUser, listPremiumUsers } = require("./database");
+const {
+  getPremiumUser,
+  getPremiumGuild,
+  listPremiumGuilds,
+} = require("./database");
 
 function csvSet(raw) {
   return new Set(
@@ -26,41 +41,42 @@ function csvSet(raw) {
 const ENV_FOUNDER_IDS = csvSet(
   process.env.FOUNDER_DISCORD_IDS || process.env.FOUNDER_DISCORD_ID
 );
-const ENV_PREMIUM_IDS = csvSet(process.env.PREMIUM_USER_IDS);
-
-const TIER_RANK = { free: 0, premium: 1, vip: 2, founder: 3 };
 
 /**
- * Matrice des features. Chaque entrée déclare le tier MINIMUM requis.
- * `limit` : valeur max associée au tier (ex. slots de backup, taille, etc.)
+ * Catalogue des features premium. Modèle all-or-nothing : si la guild est
+ * premium (ou si l'user est founder), TOUTES ces features sont accessibles.
+ *
+ * On garde le concept de `limits` par feature — utile pour les commandes
+ * qui ont des quotas (slots de backup, etc.). Désormais ces limites sont
+ * indexées par "tier de feature" (free / premium / founder), pas par tier
+ * utilisateur.
  */
 const FEATURES = {
-  // Branding
-  bot_avatar: { minTier: "founder" },
-  bot_nickname: { minTier: "founder" },
-  bot_global_profile: { minTier: "founder" },
+  // Branding global du bot — réservé strictement au founder (impacte tous
+  // les serveurs, ne peut pas être délégué).
+  bot_avatar: { founderOnly: true },
+  bot_nickname: { founderOnly: true },
+  bot_global_profile: { founderOnly: true },
 
-  // Backups
+  // Backups (la commande tourne dans une guild → on check la guild)
   backup_create: {
-    minTier: "premium",
     limits: {
-      premium: { slots: 15, max_messages_per_channel: 100 },
-      vip: { slots: 50, max_messages_per_channel: 250 },
+      free: { slots: 0, max_messages_per_channel: 0 },
+      premium: { slots: 50, max_messages_per_channel: 250 },
       founder: { slots: Infinity, max_messages_per_channel: 500 },
     },
   },
   backup_restore: {
-    minTier: "premium",
     limits: {
-      premium: { restores_per_day: 1 },
-      vip: { restores_per_day: 5 },
+      free: { restores_per_day: 0 },
+      premium: { restores_per_day: 5 },
       founder: { restores_per_day: Infinity },
     },
   },
-  backup_auto: { minTier: "vip" },
+  backup_auto: {},
 
-  // Custom commands (exemple d'upsell futur)
-  custom_commands_extended: { minTier: "premium" },
+  // Custom commands étendues (au-delà du quota free)
+  custom_commands_extended: {},
 };
 
 function normalizeSnowflakeId(x) {
@@ -74,84 +90,105 @@ function isExpired(row) {
   return Number.isFinite(t) && t < Date.now();
 }
 
+// ============================================================
+//  Founder (par USER)
+// ============================================================
+
 /**
- * Retourne le tier effectif d'un utilisateur : 'founder' | 'vip' | 'premium' | 'free'.
- * La valeur la plus élevée gagne entre .env et la DB (et on ignore les rangées expirées).
+ * `true` si l'utilisateur est founder (env OU DB tier='founder' non expiré).
+ * Le founder a le bypass total partout.
  */
-function getUserTier(userId) {
-  const id = normalizeSnowflakeId(userId);
-  if (!id) return "free";
-  if (ENV_FOUNDER_IDS.has(id)) return "founder";
-
-  const row = getPremiumUser(id);
-  const dbTier = row && !isExpired(row) ? row.tier : null;
-  const envTier = ENV_PREMIUM_IDS.has(id) ? "premium" : null;
-
-  let best = "free";
-  for (const t of [dbTier, envTier]) {
-    if (t && TIER_RANK[t] > TIER_RANK[best]) best = t;
-  }
-  return best;
-}
-
 function isFounder(userId) {
-  return getUserTier(userId) === "founder";
+  const id = normalizeSnowflakeId(userId);
+  if (!id) return false;
+  if (ENV_FOUNDER_IDS.has(id)) return true;
+  const row = getPremiumUser(id);
+  return !!(row && row.tier === "founder" && !isExpired(row));
 }
 
-/** true si l'utilisateur a au moins `minTier` */
-function atLeast(userId, minTier) {
-  return TIER_RANK[getUserTier(userId)] >= (TIER_RANK[minTier] ?? 99);
+// ============================================================
+//  Premium (par GUILD)
+// ============================================================
+
+/** `true` si le serveur a un accès premium actif. */
+function isGuildPremium(guildId) {
+  if (!guildId) return false;
+  const row = getPremiumGuild(String(guildId));
+  return !!(row && !isExpired(row));
 }
 
-function canUseFeature(userId, featureKey) {
+/**
+ * Tier effectif applicable à une (user, guild) :
+ *   - 'founder' si l'user est founder
+ *   - 'premium' si la guild est premium
+ *   - 'free'   sinon
+ */
+function getEffectiveTier(userId, guildId) {
+  if (isFounder(userId)) return "founder";
+  if (isGuildPremium(guildId)) return "premium";
+  return "free";
+}
+
+// ============================================================
+//  Vérifications de features
+// ============================================================
+
+/**
+ * `true` si (user, guild) peut utiliser la feature.
+ *  - founder : oui partout
+ *  - premium guild : oui sauf si la feature est `founderOnly`
+ *  - free : non
+ */
+function canUseFeature(userId, guildId, featureKey) {
   const f = FEATURES[featureKey];
-  if (!f) return true;
-  return atLeast(userId, f.minTier);
+  if (!f) return true; // feature inconnue → on n'empêche pas
+  if (isFounder(userId)) return true;
+  if (f.founderOnly) return false;
+  return isGuildPremium(guildId);
 }
 
-function getFeatureLimit(userId, featureKey, key) {
+/**
+ * Limite associée à une feature pour ce tier effectif.
+ * Ex : `getFeatureLimit(userId, guildId, "backup_create", "slots")` → 50.
+ */
+function getFeatureLimit(userId, guildId, featureKey, key) {
   const f = FEATURES[featureKey];
   if (!f?.limits) return undefined;
-  const tier = getUserTier(userId);
+  const tier = getEffectiveTier(userId, guildId);
   return f.limits[tier]?.[key];
 }
 
-/**
- * Liste les VIP/premium actifs (et inclut les founders .env sous forme synthétique
- * pour que l'UI dashboard puisse les afficher).
- */
-function listActivePremiumUsers() {
-  const rows = listPremiumUsers();
-  const seen = new Set();
+// ============================================================
+//  Listings (pour le dashboard / la console Fonda)
+// ============================================================
+
+/** Liste des serveurs premium actifs (filtre les expirés). */
+function listActivePremiumGuilds() {
+  return listPremiumGuilds().filter((r) => !isExpired(r));
+}
+
+/** Liste des founders (DB + .env), pour affichage admin. */
+function listFounders() {
   const out = [];
-  for (const r of rows) {
-    if (isExpired(r)) continue;
-    seen.add(r.user_id);
-    out.push({ ...r, source: "db" });
-  }
+  const seen = new Set();
   for (const id of ENV_FOUNDER_IDS) {
-    if (seen.has(id)) continue;
-    out.push({
-      user_id: id,
-      tier: "founder",
-      granted_by: null,
-      granted_at: null,
-      expires_at: null,
-      note: "Défini dans .env (FOUNDER_DISCORD_IDS)",
-      source: "env",
-    });
+    seen.add(id);
+    out.push({ user_id: id, source: "env", note: "Défini dans FOUNDER_DISCORD_IDS" });
   }
+  // On ne charge pas tous les users de la DB ici : c'est marginal et l'env
+  // est déjà la source principale en pratique. Si besoin d'admin user-side
+  // un jour, on rajoutera un listFoundersFromDb().
   return out;
 }
 
 module.exports = {
-  TIER_RANK,
   FEATURES,
-  getUserTier,
   isFounder,
-  atLeast,
+  isGuildPremium,
+  getEffectiveTier,
   canUseFeature,
   getFeatureLimit,
-  listActivePremiumUsers,
+  listActivePremiumGuilds,
+  listFounders,
   normalizeSnowflakeId,
 };
