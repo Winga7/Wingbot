@@ -762,11 +762,122 @@ function effectiveDisabledCommandCount() {
 
 function updateOverview() {
   if (!guildState) return;
-  $("ov-logs").textContent = guildState.logs_master_enabled
-    ? "Activé"
-    : "Désactivé";
+
+  // --- Cartes existantes ---
+  const logsOn = !!guildState.logs_master_enabled;
+  const ovLogs = $("ov-logs");
+  if (ovLogs) {
+    ovLogs.textContent = logsOn ? "Activé" : "Désactivé";
+    ovLogs.style.color = logsOn ? "#86efac" : "#fda4af";
+  }
+  const logChan = guildState.log_channel_id;
+  const ovLogsDetail = $("ov-logs-detail");
+  if (ovLogsDetail) {
+    if (logChan) {
+      const ch = (lastGuildChannelsList || []).find((c) => c.id === logChan);
+      ovLogsDetail.textContent = ch
+        ? `Salon : #${ch.name}`
+        : `Salon ID ${logChan}`;
+    } else {
+      ovLogsDetail.textContent = "Salon non configuré";
+    }
+  }
+
   $("ov-prefix").textContent = guildState.prefix || "$";
-  $("ov-cmd-off").textContent = String(effectiveDisabledCommandCount());
+
+  const totalCmds = (commandManifest.commands || []).length;
+  const off = effectiveDisabledCommandCount();
+  const active = Math.max(totalCmds - off, 0);
+  setText("ov-cmd-active", String(active));
+  setText("ov-cmd-total", `/ ${totalCmds || "—"}`);
+  setText("ov-cmd-off", String(off));
+  setText(
+    "ov-cmd-custom",
+    String((guildState.custom_commands || []).length || 0)
+  );
+
+  // --- Hero (nom + members + status bot) ---
+  const guild = (guildPickerList || []).find(
+    (g) => g.guild_id === selectedGuildId
+  );
+  setText("ov-hero-name", guild?.name || "Serveur sélectionné");
+  setText("ov-hero-id", `ID ${selectedGuildId || "—"}`);
+  const memberCount =
+    guild?.approximate_member_count ?? guild?.member_count ?? null;
+  setText(
+    "ov-hero-members",
+    memberCount != null ? `${memberCount} membres` : "Membres : —"
+  );
+  const heroIcon = $("ov-hero-icon");
+  if (heroIcon) {
+    if (guild?.icon_url) {
+      heroIcon.innerHTML = `<img src="${escapeAttr(guild.icon_url)}" alt="" />`;
+    } else {
+      heroIcon.textContent = (guild?.name || "?").slice(0, 1).toUpperCase();
+    }
+  }
+  const heroStatusText = $("ov-hero-status-text");
+  if (heroStatusText) {
+    const present = currentGuildHasBot();
+    heroStatusText.textContent = present ? "Bot en ligne" : "Bot absent";
+    const pill = $("ov-hero-status");
+    if (pill) pill.classList.toggle("is-off", !present);
+  }
+
+  // --- Catégories de logs actives ---
+  const flags = guildState.feature_flags || {};
+  const activeFlags = Object.values(flags).filter(Boolean).length;
+  setText("ov-feature-flags", String(activeFlags));
+
+  // --- DMs non lus (utilise le badge déjà calculé par refreshFondaThreads) ---
+  const unread = (fondaState?.threads || []).reduce(
+    (acc, t) => acc + (t.unread_count || 0),
+    0
+  );
+  setText("ov-dms-unread", String(unread));
+
+  // --- Embeds : on récupère la liste de manière non bloquante ---
+  loadOverviewEmbedsCount();
+}
+
+function setText(id, txt) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = txt;
+}
+
+let _ovEmbedsCache = { gid: null, count: null };
+async function loadOverviewEmbedsCount() {
+  const gid = selectedGuildId;
+  if (!gid || !currentGuildHasBot()) {
+    setText("ov-embeds", "—");
+    return;
+  }
+  if (_ovEmbedsCache.gid === gid && _ovEmbedsCache.count != null) {
+    setText("ov-embeds", String(_ovEmbedsCache.count));
+    return;
+  }
+  try {
+    const res = await fetch(apiUrl(`/api/guilds/${encodeURIComponent(gid)}/embeds`), {
+      ...fetchOptsGet(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    const j = await res.json();
+    const list = Array.isArray(j.embeds) ? j.embeds : [];
+    _ovEmbedsCache = { gid, count: list.length };
+    setText("ov-embeds", String(list.length));
+    const published = list.filter((e) => e.message_id).length;
+    setText(
+      "ov-embeds-detail",
+      published
+        ? `${published} publié${published > 1 ? "s" : ""} sur Discord`
+        : list.length
+        ? "Tous en brouillon"
+        : "Aucun pour le moment"
+    );
+  } catch {
+    setText("ov-embeds", "—");
+  }
 }
 
 function fillGuildSelect() {
@@ -1857,6 +1968,12 @@ async function loadFondaThreadMessages() {
 function renderFondaMessages(thread) {
   const root = $("dm-messages");
   if (!root) return;
+
+  // Smart scroll : si l'user était déjà en bas (à 60px près), on re-scrolle.
+  // Sinon on respecte sa position de lecture (notamment pendant le polling).
+  const wasAtBottom =
+    root.scrollHeight - root.scrollTop - root.clientHeight < 60;
+
   root.innerHTML = "";
 
   if (thread) {
@@ -1876,30 +1993,65 @@ function renderFondaMessages(thread) {
     return;
   }
 
-  let lastDay = "";
-  for (const m of fondaState.messages) {
+  const userAvatar = thread?.user_avatar || defaultAvatarFor(thread?.user_id);
+  const GROUP_WINDOW_MS = 5 * 60 * 1000;
+
+  // 1) Annoter chaque message avec la position dans son groupe (first/last)
+  //    et le séparateur de jour le précédant éventuellement.
+  const items = fondaState.messages.map((m) => {
     const d = new Date(m.created_at + (m.created_at?.endsWith("Z") ? "" : "Z"));
-    const dayKey = d.toLocaleDateString("fr-FR", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-    });
-    if (dayKey !== lastDay) {
+    return { m, d };
+  });
+
+  let lastDayKey = "";
+  let prev = null;
+  for (let i = 0; i < items.length; i++) {
+    const cur = items[i];
+    const dayKey = cur.d.toDateString();
+    cur.daySep = dayKey !== lastDayKey ? cur.d : null;
+    lastDayKey = dayKey;
+
+    const sameGroupAsPrev =
+      prev &&
+      prev.m.direction === cur.m.direction &&
+      !cur.daySep &&
+      cur.d - prev.d < GROUP_WINDOW_MS;
+
+    cur.firstOfGroup = !sameGroupAsPrev;
+    if (sameGroupAsPrev) prev.lastOfGroup = false;
+    cur.lastOfGroup = true;
+    prev = cur;
+  }
+
+  // 2) Rendu
+  for (const it of items) {
+    if (it.daySep) {
       const sep = document.createElement("div");
       sep.className = "dm-day-sep";
-      sep.textContent = dayKey;
+      sep.innerHTML = `<span>${escapeHtml(formatDaySep(it.d))}</span>`;
       root.appendChild(sep);
-      lastDay = dayKey;
     }
-    const bubble = document.createElement("div");
-    bubble.className = `dm-msg ${m.direction}`;
-    const time = d.toLocaleTimeString("fr-FR", {
+
+    const row = document.createElement("div");
+    row.className = `dm-row ${it.m.direction}`;
+    if (it.firstOfGroup) row.classList.add("group-first");
+    if (it.lastOfGroup) row.classList.add("group-last");
+
+    const time = it.d.toLocaleTimeString("fr-FR", {
       hour: "2-digit",
       minute: "2-digit",
     });
+    const fullTs = it.d.toLocaleString("fr-FR", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
     let attachmentsHtml = "";
-    if (Array.isArray(m.attachments)) {
-      for (const a of m.attachments) {
+    if (Array.isArray(it.m.attachments)) {
+      for (const a of it.m.attachments) {
         if (a?.url) {
           attachmentsHtml += `<a class="dm-msg-attachment" href="${escapeAttr(
             a.url
@@ -1909,14 +2061,46 @@ function renderFondaMessages(thread) {
         }
       }
     }
-    bubble.innerHTML = `
-      <div class="dm-msg-content">${escapeHtml(m.content || "")}</div>
-      ${attachmentsHtml}
-      <span class="dm-msg-time">${escapeHtml(time)}</span>
+
+    // Avatar uniquement sur le dernier message du groupe (côté `in`).
+    // Pour `out`, on ne met pas d'avatar (le bot s'en passe), ça allège l'UI.
+    const avatarSlot =
+      it.m.direction === "in"
+        ? `<div class="dm-row-avatar">${
+            it.lastOfGroup
+              ? `<img src="${escapeAttr(userAvatar)}" alt="" />`
+              : ""
+          }</div>`
+        : "";
+
+    row.innerHTML = `
+      ${avatarSlot}
+      <div class="dm-bubble" title="${escapeAttr(fullTs)}">
+        <div class="dm-msg-content">${escapeHtml(it.m.content || "")}</div>
+        ${attachmentsHtml}
+      </div>
+      ${it.lastOfGroup ? `<span class="dm-row-time">${escapeHtml(time)}</span>` : ""}
     `;
-    root.appendChild(bubble);
+    root.appendChild(row);
   }
-  root.scrollTop = root.scrollHeight;
+
+  if (wasAtBottom) {
+    root.scrollTop = root.scrollHeight;
+  }
+}
+
+function formatDaySep(d) {
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return "Aujourd'hui";
+  const y = new Date(now);
+  y.setDate(now.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return "Hier";
+  return d.toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
 }
 
 async function sendFondaDm(content) {
@@ -2074,4 +2258,13 @@ document.querySelectorAll(".nav-link").forEach((a) => {
   a.addEventListener("click", () => {
     setTimeout(navigate, 0);
   });
+});
+
+// Boutons d'actions rapides depuis la vue d'ensemble.
+document.addEventListener("click", (ev) => {
+  const btn = ev.target.closest(".ov-quick-btn[data-go]");
+  if (!btn) return;
+  const target = btn.dataset.go;
+  if (!target) return;
+  location.hash = `#${target}`;
 });

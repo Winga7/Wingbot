@@ -211,11 +211,14 @@ function toDiscordEmbedObject(payload) {
 /**
  * Substitue les tokens dynamiques d'un texte avant envoi Discord.
  * ctx : { guild: {id,name,member_count}, channel: {id,name}, locale? }
+ *
+ * Les deux syntaxes sont acceptées : `{token}` ET `{{token}}` (alignées avec
+ * le moteur des commandes perso, voir customCommandTemplates.js).
  */
 function substituteTokens(text, ctx = {}) {
   if (text == null || text === "") return text;
   const s = String(text);
-  if (!s.includes("{") && !s.includes("<t:{")) return s;
+  if (!s.includes("{")) return s;
   const now = Math.floor(Date.now() / 1000);
   const g = ctx.guild || {};
   const c = ctx.channel || {};
@@ -225,19 +228,30 @@ function substituteTokens(text, ctx = {}) {
   const timeStr = d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   const members =
     g.member_count ?? g.approximate_member_count ?? g.memberCount ?? "";
-  return s
-    .replace(/\{now\}/g, String(now))
-    .replace(/\{date\}/g, dateStr)
-    .replace(/\{time\}/g, timeStr)
-    .replace(/\{guild\.members\}/g, String(members))
-    .replace(/\{members\}/g, String(members))
-    .replace(/\{guild\.id\}/g, String(g.id || ""))
-    .replace(/\{guild\.name\}/g, String(g.name || ""))
-    .replace(/\{guild\}/g, String(g.name || ""))
-    .replace(/\{server\}/g, String(g.name || ""))
-    .replace(/\{channel\.id\}/g, String(c.id || ""))
-    .replace(/\{channel\.name\}/g, String(c.name || ""))
-    .replace(/\{channel\}/g, c.id ? `<#${c.id}>` : "");
+  const tokens = [
+    ["now", String(now)],
+    ["date", dateStr],
+    ["time", timeStr],
+    ["guild.members", String(members)],
+    ["members", String(members)],
+    ["guild.id", String(g.id || "")],
+    ["guild.name", String(g.name || "")],
+    ["guild", String(g.name || "")],
+    ["server.id", String(g.id || "")],
+    ["server", String(g.name || "")],
+    ["channel.id", String(c.id || "")],
+    ["channel.name", String(c.name || "")],
+    ["channel", c.id ? `<#${c.id}>` : ""],
+  ];
+  let out = s;
+  for (const [token, value] of tokens) {
+    const re = new RegExp(
+      `\\{\\{?\\s*${token.replace(/\./g, "\\.")}\\s*\\}\\}?`,
+      "g"
+    );
+    out = out.replace(re, value);
+  }
+  return out;
 }
 
 function substituteEmbedPayload(payload, ctx = {}) {

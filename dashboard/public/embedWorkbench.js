@@ -208,6 +208,32 @@
       .replace(/"/g, "&quot;");
   }
 
+  /* Format proche de l'embed Discord :
+     - Aujourd'hui      → "Aujourd'hui à 14:32"
+     - Hier             → "Hier à 14:32"
+     - Cette année      → "12 mars 2025 14:32"
+     - Sinon date longue */
+  function formatPreviewTimestamp(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = d.toDateString() === yesterday.toDateString();
+    const time = d.toLocaleTimeString("fr-FR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    if (sameDay) return `Aujourd'hui à ${time}`;
+    if (isYesterday) return `Hier à ${time}`;
+    return d.toLocaleDateString("fr-FR", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }) + ` ${time}`;
+  }
+
   function readFormToPayload() {
     const p = defaultPayload();
     p.content = $("emb-content")?.value ?? "";
@@ -334,7 +360,8 @@
     let fieldsHtml = "";
     (e.fields || []).forEach((f) => {
       if (!f.name && !f.value) return;
-      fieldsHtml += `<div class="d-emb-field"><span class="d-emb-fn">${esc(f.name) || " "}</span><div class="d-emb-fv">${esc(f.value).replace(/\n/g, "<br/>")}</div></div>`;
+      const cls = "d-emb-field" + (f.inline ? " is-inline" : "");
+      fieldsHtml += `<div class="${cls}"><span class="d-emb-fn">${esc(f.name) || " "}</span><div class="d-emb-fv">${esc(f.value).replace(/\n/g, "<br/>")}</div></div>`;
     });
     const auth =
       e.author_name || e.author_icon_url
@@ -350,10 +377,14 @@
     const desc = e.description
       ? `<div class="d-emb-desc">${esc(e.description).replace(/\n/g, "<br/>")}</div>`
       : "";
-    const foot =
-      e.footer_text || e.footer_icon_url
-        ? `<div class="d-emb-foot">${e.footer_icon_url ? `<img class="d-emb-fimg" src="${esc(e.footer_icon_url)}" alt="" />` : ""}<span>${esc(e.footer_text)}</span></div>`
-        : "";
+    const tsText = e.timestamp ? formatPreviewTimestamp(e.timestamp) : "";
+    const hasFooter = !!(e.footer_text || e.footer_icon_url || tsText);
+    const sep = (e.footer_text || e.footer_icon_url) && tsText
+      ? `<span class="d-emb-foot-sep">•</span>`
+      : "";
+    const foot = hasFooter
+      ? `<div class="d-emb-foot">${e.footer_icon_url ? `<img class="d-emb-fimg" src="${esc(e.footer_icon_url)}" alt="" />` : ""}${e.footer_text ? `<span>${esc(e.footer_text)}</span>` : ""}${sep}${tsText ? `<span class="d-emb-ts">${esc(tsText)}</span>` : ""}</div>`
+      : "";
 
     mount.innerHTML = `
       <div class="d-emb-wrap">
@@ -655,10 +686,7 @@
             </label>
           </div>
           <label class="field-row"><span>Description (markdown Discord)</span><textarea id="emb-desc" class="input-sm input-wide" rows="5" maxlength="4096"></textarea></label>
-          <div class="emb-grid2">
-            <label class="field-row"><span>Lien du titre (URL)</span><input type="url" id="emb-url" class="input-sm input-wide mono" placeholder="https://…" /></label>
-            <label class="field-row"><span>Horodatage</span><span class="emb-ts-row"><input type="checkbox" id="emb-ts" /> <input type="datetime-local" id="emb-ts-val" class="input-sm" /></span></label>
-          </div>`,
+          <label class="field-row"><span>Lien du titre (URL)</span><input type="url" id="emb-url" class="input-sm input-wide mono" placeholder="https://…" /></label>`,
       })}
 
       ${section({
@@ -690,12 +718,23 @@
         id: "footer",
         icon: "footer",
         title: "Pied de page",
-        subtitle: "Texte discret en bas de l’embed",
+        subtitle: "Texte discret + horodatage en bas de l’embed",
         body: `
           <div class="emb-grid2">
             <label class="field-row"><span>Texte</span><input type="text" id="emb-footer-t" class="input-sm input-wide" maxlength="2048" /></label>
             <label class="field-row"><span>Icône (URL)</span><input type="url" id="emb-footer-i" class="input-sm input-wide mono" /></label>
-          </div>`,
+          </div>
+          <label class="field-row">
+            <span>Horodatage <small class="muted">(date/heure affichée à côté du footer)</small></span>
+            <span class="emb-ts-row">
+              <label class="emb-ts-toggle">
+                <input type="checkbox" id="emb-ts" />
+                <span>Afficher</span>
+              </label>
+              <input type="datetime-local" id="emb-ts-val" class="input-sm" />
+              <button type="button" class="btn link emb-ts-now" id="emb-ts-now">Maintenant</button>
+            </span>
+          </label>`,
       })}
 
       ${section({
@@ -760,6 +799,20 @@
     $("emb-save").addEventListener("click", saveDraft);
     $("emb-send").addEventListener("click", sendDiscord);
     $("emb-del").addEventListener("click", deleteEmbed);
+    const tsNow = $("emb-ts-now");
+    if (tsNow) {
+      tsNow.addEventListener("click", () => {
+        const tsCheck = $("emb-ts");
+        const tsVal = $("emb-ts-val");
+        if (!tsCheck || !tsVal) return;
+        tsCheck.checked = true;
+        const d = new Date();
+        d.setSeconds(0, 0);
+        const pad = (n) => String(n).padStart(2, "0");
+        tsVal.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        schedulePreview();
+      });
+    }
     setupColorPicker();
     renderFieldRows([]);
     markClean();
@@ -809,7 +862,14 @@
     if (!bar) return;
     const dirty =
       savedSnapshot === null || currentSnapshot() !== savedSnapshot;
-    bar.classList.toggle("is-visible", dirty);
+    bar.classList.toggle("is-dirty", dirty);
+    const saveBtn = $("emb-save");
+    if (saveBtn) {
+      saveBtn.disabled = !dirty;
+      saveBtn.textContent = dirty
+        ? "Enregistrer le brouillon •"
+        : "Brouillon enregistré";
+    }
   }
 
   async function refresh() {

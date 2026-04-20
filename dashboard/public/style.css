@@ -797,12 +797,18 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   flex-direction: column;
   width: min(1100px, 100%);
   height: min(760px, 92vh);
-  background: var(--surface-solid);
+  background:
+    radial-gradient(circle at top right, rgba(139, 92, 246, 0.10), transparent 55%),
+    radial-gradient(circle at bottom left, rgba(99, 102, 241, 0.08), transparent 60%),
+    var(--surface-solid);
   border: 1px solid var(--border-strong);
-  border-radius: 18px;
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  border-radius: 20px;
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 0 60px -20px rgba(139, 92, 246, 0.35);
   overflow: hidden;
-  animation: fondaWindowIn 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: fondaWindowIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 @keyframes fondaWindowIn {
@@ -815,60 +821,74 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.25rem 0.8rem;
+  padding: 1.05rem 1.4rem 0.95rem;
   border-bottom: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    rgba(139, 92, 246, 0.06) 0%,
+    transparent 100%
+  );
 }
 
 .fonda-title-wrap h2 {
-  margin: 0 0 0.2rem;
-  font-size: 1.15rem;
+  margin: 0 0 0.15rem;
+  font-size: 1.2rem;
   font-weight: 700;
   letter-spacing: -0.01em;
+  background: linear-gradient(135deg, #fff 0%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .fonda-close {
   appearance: none;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
   color: var(--text);
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
-  font-size: 1.2rem;
+  font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .fonda-close:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--border-strong);
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  transform: rotate(90deg);
 }
 
 .fonda-tabs {
   display: flex;
-  gap: 0.25rem;
-  padding: 0.5rem 1rem 0;
+  gap: 0.3rem;
+  padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .fonda-tab {
   appearance: none;
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-dim);
-  padding: 0.55rem 0.9rem;
-  font-size: 0.92rem;
+  padding: 0.5rem 0.95rem;
+  font-size: 0.9rem;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  border-radius: 10px 10px 0 0;
+  gap: 0.5rem;
+  border-radius: 10px;
   cursor: pointer;
   position: relative;
-  bottom: -1px;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 
 .fonda-tab:hover {
@@ -877,10 +897,14 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
 }
 
 .fonda-tab.active {
-  color: var(--text);
-  background: var(--surface-solid);
-  border: 1px solid var(--border);
-  border-bottom: 1px solid var(--surface-solid);
+  color: #fff;
+  background: linear-gradient(
+    135deg,
+    rgba(99, 102, 241, 0.22),
+    rgba(139, 92, 246, 0.22)
+  );
+  border-color: rgba(139, 92, 246, 0.4);
+  box-shadow: 0 0 18px -8px rgba(139, 92, 246, 0.6);
 }
 
 .fonda-tab-ico {
@@ -1107,13 +1131,21 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   font-size: 0.95rem;
 }
 
+/* ========== Conversation type Messenger ==========
+   - `.dm-row` : ligne horizontale (avatar | bulle | timestamp)
+   - Les messages consécutifs du même côté + dans la même fenêtre de 5 min
+     sont regroupés : seul le dernier porte un avatar et un timestamp.
+   - Le rayon des coins varie selon la position dans le groupe pour donner
+     l'effet "queue" caractéristique de Messenger. */
+
 .dm-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 0.85rem 0.9rem 0.6rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 2px;
+  scroll-behavior: smooth;
 }
 
 .dm-placeholder {
@@ -1122,36 +1154,83 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   max-width: 320px;
 }
 
-.dm-msg {
-  max-width: 78%;
-  padding: 0.55rem 0.75rem;
-  border-radius: 12px;
-  font-size: 0.92rem;
-  line-height: 1.35;
+.dm-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  max-width: 100%;
+}
+
+.dm-row.in { justify-content: flex-start; }
+.dm-row.out { justify-content: flex-end; }
+
+.dm-row.group-first { margin-top: 0.55rem; }
+.dm-row.group-first:first-child { margin-top: 0; }
+
+.dm-row-avatar {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
+.dm-row-avatar img {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.dm-bubble {
+  max-width: 70%;
+  padding: 0.4rem 0.7rem;
+  border-radius: 18px;
+  font-size: 0.9rem;
+  line-height: 1.32;
   word-wrap: break-word;
   white-space: pre-wrap;
   position: relative;
 }
 
-.dm-msg.in {
-  align-self: flex-start;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
+.dm-row.in .dm-bubble {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text);
 }
 
-.dm-msg.out {
-  align-self: flex-end;
+.dm-row.out .dm-bubble {
   background: linear-gradient(135deg, #6366f1, #8b5cf6);
   color: #fff;
-  border-bottom-right-radius: 4px;
+  box-shadow: 0 1px 0 rgba(99, 102, 241, 0.25);
 }
 
-.dm-msg-time {
-  display: block;
+/* Coins "groupés" : un message qui n'est pas isolé voit son angle interne
+   se rapprocher du voisin (style Messenger / iMessage). */
+.dm-row.in:not(.group-first) .dm-bubble  { border-top-left-radius: 6px; }
+.dm-row.in:not(.group-last)  .dm-bubble  { border-bottom-left-radius: 6px; }
+.dm-row.out:not(.group-first) .dm-bubble { border-top-right-radius: 6px; }
+.dm-row.out:not(.group-last)  .dm-bubble { border-bottom-right-radius: 6px; }
+
+/* Timestamp discret en marge. Visible uniquement sur le dernier du groupe.
+   Au survol du groupe entier, on bump l'opacité. */
+.dm-row-time {
   font-size: 0.68rem;
-  opacity: 0.7;
-  margin-top: 0.25rem;
+  color: var(--text-dim);
+  opacity: 0.55;
+  align-self: flex-end;
+  padding: 0 0.15rem 0.15rem;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.dm-row:hover .dm-row-time { opacity: 0.95; }
+
+/* Sur les messages `in`, le slot avatar (vide quand pas dernier du groupe)
+   garde sa largeur pour que les bulles restent alignées verticalement. */
+.dm-row.in .dm-row-avatar:empty,
+.dm-row.in .dm-row-avatar:not(:has(img)) {
+  background: transparent;
 }
 
 .dm-msg-attachment {
@@ -1163,43 +1242,68 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
 }
 
 .dm-day-sep {
-  align-self: center;
-  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0.9rem 0 0.4rem;
+  position: relative;
+}
+
+.dm-day-sep span {
+  font-size: 0.7rem;
   color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 0.2rem 0.6rem;
-  background: rgba(255, 255, 255, 0.04);
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.7rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  margin: 0.4rem 0;
 }
 
 .dm-composer {
   border-top: 1px solid var(--border);
-  padding: 0.6rem 0.75rem 0.75rem;
+  padding: 0.55rem 0.7rem 0.7rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  background: rgba(0, 0, 0, 0.15);
+  gap: 0.45rem;
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .dm-composer textarea {
   width: 100%;
-  resize: vertical;
-  min-height: 44px;
-  max-height: 200px;
-  padding: 0.55rem 0.75rem;
-  border-radius: 10px;
-  background: var(--surface);
+  resize: none;
+  min-height: 40px;
+  max-height: 180px;
+  padding: 0.55rem 0.85rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
   color: var(--text);
   font: inherit;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .dm-composer textarea:focus {
   outline: none;
-  border-color: var(--nebula-violet, #8b5cf6);
+  border-color: rgba(139, 92, 246, 0.6);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+#dm-send-btn {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  border: none;
+  font-weight: 600;
+  padding: 0.45rem 1.1rem;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px -4px rgba(139, 92, 246, 0.6);
+}
+
+#dm-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .dm-composer-actions {
@@ -1429,6 +1533,187 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   background: var(--accent-soft);
   border-radius: 0 10px 10px 0;
   color: var(--text-dim);
+}
+
+/* ========== Vue d'ensemble — hero + cartes + actions rapides ========== */
+
+.ov-hero {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  padding: 1.1rem 1.3rem;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(139, 92, 246, 0.16), transparent 55%),
+    radial-gradient(circle at 100% 100%, rgba(34, 211, 238, 0.10), transparent 55%),
+    var(--surface);
+  border: 1px solid var(--border);
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow-md);
+}
+
+.ov-hero-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.7rem;
+  font-weight: 700;
+  overflow: hidden;
+  box-shadow: 0 6px 18px -8px rgba(139, 92, 246, 0.7);
+}
+
+.ov-hero-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ov-hero-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.ov-hero-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.66rem;
+  margin-bottom: 0.15rem;
+}
+
+.ov-hero-name {
+  margin: 0 0 0.5rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.ov-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #86efac;
+}
+
+.ov-pill.subtle {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border);
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.ov-pill.is-off {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.ov-pill.is-off .ov-dot { background: #f87171; }
+
+.ov-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.18);
+}
+
+.ov-cards .ov-card {
+  padding: 1rem 1.15rem 1.1rem;
+}
+
+.ov-card-sub {
+  font-size: 1rem;
+  color: var(--text-dim);
+  font-weight: 500;
+  margin-left: 0.2rem;
+}
+
+.ov-quick {
+  margin-top: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.ov-quick-title {
+  margin: 0 0 0.7rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.ov-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.7rem;
+}
+
+.ov-quick-btn {
+  appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.ov-quick-btn:hover {
+  transform: translateY(-2px);
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 8px 22px -10px rgba(139, 92, 246, 0.55);
+}
+
+.ov-quick-ico {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(139, 92, 246, 0.12);
+  color: #c4b5fd;
+  margin-bottom: 0.35rem;
+}
+
+.ov-quick-ico svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ov-quick-label {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.ov-quick-sub {
+  margin: 0;
 }
 
 /* ========== Formulaires ========== */
@@ -2789,33 +3074,64 @@ code {
   flex-wrap: wrap;
 }
 
+.emb-ts-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.emb-ts-toggle input {
+  accent-color: var(--accent);
+}
+
+.emb-ts-now {
+  font-size: 0.78rem;
+}
+
 .emb-add-field-btn {
   margin-top: 0.7rem;
 }
 
-/* Barre d’actions sticky en bas — cachée si aucun changement */
+/* Barre d’actions sticky en bas — TOUJOURS visible. La classe `is-dirty`
+   ajoute juste un halo + libelle "modifié" pour signaler des changements
+   non sauvegardés. Avant : la barre disparaissait après sauvegarde, donc
+   plus aucun bouton "Enregistrer" / "Publier" / "Supprimer" — UX cassé. */
 
 .emb-actions {
   position: sticky;
   bottom: 1.1rem;
   z-index: 4;
-  display: none;
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.65rem;
   padding: 0.8rem 1rem;
   background: rgba(13, 16, 38, 0.97);
-  border: 1px solid rgba(167, 139, 250, 0.35);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow:
-    var(--shadow-md),
-    0 0 24px -10px rgba(167, 139, 250, 0.55);
+  box-shadow: var(--shadow-md);
   margin-top: 0.5rem;
-  animation: emb-actions-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.emb-actions.is-visible {
-  display: flex;
+.emb-actions.is-dirty {
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow:
+    var(--shadow-md),
+    0 0 28px -10px rgba(167, 139, 250, 0.65);
+}
+
+.emb-actions.is-dirty #emb-save {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  border-color: transparent;
 }
 
 .emb-actions .emb-actions-spacer {
@@ -2993,13 +3309,24 @@ code {
 
 .d-emb-fields {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 0.6rem 0.9rem;
   margin-top: 0.45rem;
 }
 
 .d-emb-field {
   min-width: 0;
+  grid-column: 1 / -1;
+}
+
+.d-emb-field.is-inline {
+  grid-column: span 4;
+}
+
+@media (max-width: 520px) {
+  .d-emb-field.is-inline {
+    grid-column: span 6;
+  }
 }
 
 .d-emb-fn {
@@ -3030,6 +3357,15 @@ code {
   gap: 0.45rem;
   margin-top: 0.55rem;
   font-size: 0.74rem;
+  color: #949ba4;
+  flex-wrap: wrap;
+}
+
+.d-emb-foot-sep {
+  opacity: 0.6;
+}
+
+.d-emb-ts {
   color: #949ba4;
 }
 
