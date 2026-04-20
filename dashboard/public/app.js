@@ -1106,12 +1106,19 @@ async function loadData() {
   const status = await st.json();
   if (!status.connected) {
     discordOAuthConnected = false;
+    internalAccess = null;
     $("workspace").hidden = true;
     $("main-top").hidden = true;
     $("views").hidden = true;
     $("stats-section").hidden = true;
     $("discord-user-label").hidden = true;
     $("btn-discord-logout").hidden = true;
+    const fondaBtn = $("btn-open-fonda");
+    if (fondaBtn) fondaBtn.hidden = true;
+    const banner = $("invite-banner");
+    if (banner) banner.hidden = true;
+    const picker = $("guild-picker");
+    if (picker) picker.hidden = true;
     const li = $("discord-oauth-link");
     if (li) li.hidden = false;
     $("error").hidden = false;

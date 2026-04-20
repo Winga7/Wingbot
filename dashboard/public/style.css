@@ -4,6 +4,17 @@
    champ d'étoiles, glass, typographie moderne.
    =========================================================== */
 
+/* ----------------------------------------------------------
+   Règle globale : l'attribut HTML `hidden` doit TOUJOURS gagner.
+   Sans `!important`, des règles auteur comme `.btn { display: inline-flex }`
+   ou `.workspace { display: flex }` écrasent la règle UA `[hidden] { display: none }`,
+   ce qui fait que mettre `el.hidden = true` côté JS ne masque rien
+   (bug observé : Fonda visible déconnecté, invite banner permanente, etc.).
+   ---------------------------------------------------------- */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   /* Surfaces & fonds (alpha plus élevée = pas besoin de blur derrière) */
   --bg: #02030a;
