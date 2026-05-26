@@ -206,6 +206,17 @@ function buildInviteUrl(guildId, clientId, permissionsStr) {
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
 }
 
+/** Lien d’invitation générique (choix du serveur sur Discord). */
+function buildGenericInviteUrl(clientId, permissionsStr) {
+  const perms = permissionsStr || "268438528";
+  const params = new URLSearchParams({
+    client_id: clientId,
+    permissions: perms,
+    scope: "bot applications.commands",
+  });
+  return `https://discord.com/oauth2/authorize?${params.toString()}`;
+}
+
 module.exports = {
   SESSION_COOKIE,
   parseCookies,
@@ -220,4 +231,5 @@ module.exports = {
   fetchOAuthToken,
   fetchDiscordMe,
   buildInviteUrl,
+  buildGenericInviteUrl,
 };

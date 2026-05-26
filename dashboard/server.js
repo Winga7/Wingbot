@@ -62,6 +62,7 @@ const {
   fetchOAuthToken,
   fetchDiscordMe,
   buildInviteUrl,
+  buildGenericInviteUrl,
 } = require("./discordAuth");
 
 initDatabase();
@@ -571,6 +572,15 @@ app.get("/api/bot/profile", async (_req, res) => {
     console.error(e);
     res.status(500).json({ error: String(e.message) });
   }
+});
+
+app.get("/api/bot/invite", (_req, res) => {
+  const clientId = process.env.DISCORD_CLIENT_ID || process.env.CLIENT_ID;
+  if (!clientId) {
+    return res.status(503).json({ error: "DISCORD_CLIENT_ID manquant" });
+  }
+  const perms = process.env.BOT_INVITE_PERMISSIONS || "268438528";
+  res.json({ invite_url: buildGenericInviteUrl(clientId, perms) });
 });
 
 app.get("/api/internal/access", requireDiscordSession, (req, res) => {

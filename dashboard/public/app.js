@@ -1,6 +1,113 @@
 const $ = (id) => document.getElementById(id);
 
-const VIEWS = ["overview", "settings", "logs", "commands", "custom", "embeds", "moderation"];
+/** Vues routables (#hash) */
+const VIEWS = new Set([
+  "overview",
+  "settings",
+  "premium",
+  "logs",
+  "moderation",
+  "embeds",
+  "custom",
+  "commands",
+  "permissions",
+  "announcements",
+  "templates",
+  "autoresponses",
+  "actions",
+  "autothreads",
+  "ticketing",
+  "giveaways",
+  "levels",
+  "leaderboard",
+  "stats",
+  "tempvoice",
+  "starboard",
+  "birthdays",
+  "social",
+]);
+
+/** Onglets pas encore implémentés */
+const PLACEHOLDER_VIEWS = {
+  premium: {
+    title: "Premium",
+    desc: "Abonnement par serveur pour débloquer les fonctionnalités avancées — arrive bientôt.",
+  },
+  announcements: {
+    title: "Annonces",
+    desc: "Publie des annonces planifiées dans les salons de ton choix.",
+  },
+  templates: {
+    title: "Modèles",
+    desc: "Enregistre et réutilise des modèles de messages et d’embeds.",
+  },
+  autoresponses: {
+    title: "Réponses auto",
+    desc: "Réponds aux mots-clés ou expressions dans les messages du serveur.",
+  },
+  actions: {
+    title: "Actions auto",
+    desc: "Déclenche des actions quand un événement se produit sur le serveur.",
+  },
+  autothreads: {
+    title: "Fils auto",
+    desc: "Ouvre un fil de discussion sur chaque message d’un salon.",
+  },
+  ticketing: {
+    title: "Tickets",
+    desc: "Support et modération via un système de tickets.",
+  },
+  giveaways: {
+    title: "Giveaways",
+    desc: "Concours et tirages au sort intégrés à Discord.",
+  },
+  levels: {
+    title: "Niveaux",
+    desc: "Récompense l’activité des membres avec de l’expérience.",
+  },
+  leaderboard: {
+    title: "Classement",
+    desc: "Podium des membres les plus actifs.",
+  },
+  stats: {
+    title: "Statistiques",
+    desc: "Graphiques et métriques d’activité du serveur.",
+  },
+  tempvoice: {
+    title: "Vocaux temp.",
+    desc: "Crée des vocaux à la demande, supprimés quand ils sont vides.",
+  },
+  starboard: {
+    title: "Starboard",
+    desc: "Met en avant les messages les plus appréciés.",
+  },
+  birthdays: {
+    title: "Anniversaires",
+    desc: "Souhaite l’anniversaire de tes membres automatiquement.",
+  },
+  social: {
+    title: "Réseaux sociaux",
+    desc: "Alertes Twitch, YouTube et autres intégrations.",
+  },
+};
+
+const PLACEHOLDER_SET = new Set(Object.keys(PLACEHOLDER_VIEWS));
+
+/** Cache DOM navigation (évite querySelectorAll à chaque changement d’onglet) */
+const viewEls = new Map();
+const navLinkEls = new Map();
+let currentViewName = null;
+let embedsLastGuildId = null;
+
+function initViewNavCache() {
+  document.querySelectorAll(".view[id^='view-']").forEach((el) => {
+    const key = el.id === "view-coming-soon" ? "coming-soon" : el.id.slice(5);
+    viewEls.set(key, el);
+  });
+  document.querySelectorAll(".nav-link[data-view]").forEach((a) => {
+    navLinkEls.set(a.dataset.view, a);
+  });
+}
 
 let manifest = { groups: [] };
 let commandManifest = { groups: [], commands: [] };
@@ -39,6 +146,8 @@ const LS_LAST_GUILD_KEY = "wingbot.lastGuildId";
 let selectedGuildId = null;
 let dirty = false;
 let discordOAuthConnected = false;
+let appMode = "loading"; // loading | landing | dashboard
+let loadDataGen = 0;
 let internalAccess = null; // prévu pour futur premium/fondateur (section non visible)
 let botProfileState = { avatar_url: "", nickname: "" };
 
@@ -93,27 +202,242 @@ function setDirty(v) {
 
 function getHashView() {
   const h = (location.hash || "#overview").slice(1);
-  return VIEWS.includes(h) ? h : "overview";
+  return VIEWS.has(h) ? h : "overview";
 }
 
-function navigate() {
+function isPlaceholderView(name) {
+  return PLACEHOLDER_SET.has(name);
+}
+
+function renderComingSoon(name) {
+  const meta = PLACEHOLDER_VIEWS[name];
+  if (!meta) return;
+  const title = $("coming-soon-title");
+  const desc = $("coming-soon-desc");
+  const badge = $("coming-soon-badge");
+  if (title) title.textContent = meta.title;
+  if (desc) desc.textContent = meta.desc;
+  if (badge) {
+    badge.hidden = false;
+    badge.textContent = "Bientôt";
+    badge.className = "coming-soon-badge soon";
+  }
+}
+
+function navigate(force = false) {
   const name = getHashView();
-  document.querySelectorAll(".view").forEach((v) => {
-    v.hidden = v.id !== `view-${name}`;
-  });
-  document.querySelectorAll(".nav-link").forEach((a) => {
-    a.classList.toggle("active", a.dataset.view === name);
-  });
-  if (name === "embeds" && window.wingbotEmbedWorkbench) {
-    window.wingbotEmbedWorkbench.refresh();
+  if (!force && name === currentViewName) return;
+  currentViewName = name;
+
+  const isPlaceholder = isPlaceholderView(name);
+  const comingSoon = viewEls.get("coming-soon");
+  const targetId = isPlaceholder ? "coming-soon" : name;
+
+  for (const [key, el] of viewEls) {
+    if (key === "coming-soon") {
+      el.hidden = !isPlaceholder;
+    } else {
+      el.hidden = isPlaceholder || key !== targetId;
+    }
+  }
+
+  if (isPlaceholder) renderComingSoon(name);
+
+  for (const [view, link] of navLinkEls) {
+    link.classList.toggle("active", view === name);
+  }
+
+  if (name === "embeds" && window.wingbotEmbedWorkbench && selectedGuildId) {
+    const gid = selectedGuildId;
+    queueMicrotask(() => {
+      if (embedsLastGuildId !== gid) {
+        embedsLastGuildId = gid;
+        window.wingbotEmbedWorkbench.refresh();
+      }
+    });
   }
 }
 
 window.addEventListener("hashchange", navigate);
 
 function setDiscordOAuthHref() {
+  const url = apiUrl("/api/auth/discord/login");
   const a = $("discord-oauth-link");
-  if (a) a.href = apiUrl("/api/auth/discord/login");
+  if (a) a.href = url;
+  const landingLogin = $("landing-login-btn");
+  if (landingLogin) landingLogin.href = url;
+}
+
+function setSidebarNavVisible(visible) {
+  const nav = $("sidebar-nav");
+  if (!nav) return;
+  if (visible) nav.removeAttribute("hidden");
+  else nav.setAttribute("hidden", "");
+}
+
+function showLandingPage() {
+  appMode = "landing";
+  try {
+    sessionStorage.removeItem("wingbot.dashboard");
+  } catch {
+    /* ignore */
+  }
+  document.documentElement.classList.remove("dash-boot");
+  const app = $("app");
+  app?.classList.remove("app--dashboard");
+  app?.classList.add("app--landing");
+  $("landing-page")?.removeAttribute("hidden");
+  $("workspace")?.setAttribute("hidden", "");
+  setSidebarNavVisible(false);
+  $("stats-section")?.setAttribute("hidden", "");
+  $("save-dock")?.setAttribute("hidden", "");
+  document.querySelector(".foot")?.setAttribute("hidden", "");
+  initLandingEffects();
+}
+
+function showDashboard() {
+  appMode = "dashboard";
+  try {
+    sessionStorage.setItem("wingbot.dashboard", "1");
+  } catch {
+    /* ignore */
+  }
+  document.documentElement.classList.add("dash-boot");
+  stopLandingEffects();
+  const app = $("app");
+  app?.classList.add("app--dashboard");
+  app?.classList.remove("app--landing");
+  $("landing-page")?.setAttribute("hidden", "");
+  $("workspace")?.removeAttribute("hidden");
+  $("save-dock")?.removeAttribute("hidden");
+  document.querySelector(".foot")?.removeAttribute("hidden");
+}
+
+async function refreshLandingInvite() {
+  try {
+    const r = await fetch(apiUrl("/api/bot/invite"), fetchOptsGet());
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j?.invite_url) return;
+    const btn = $("landing-invite-btn");
+    if (btn) btn.href = j.invite_url;
+  } catch {
+    /* silencieux */
+  }
+}
+
+function initNavSections() {
+  document.querySelectorAll(".nav-section").forEach((section) => {
+    const key = section.dataset.navSection;
+    const head = section.querySelector(".nav-section-head");
+    if (!head) return;
+
+    const lsKey = `wingbot.navSection.${key}`;
+    let collapsed = section.classList.contains("collapsed");
+    try {
+      const stored = localStorage.getItem(lsKey);
+      if (stored === "collapsed") collapsed = true;
+      else if (stored === "open") collapsed = false;
+    } catch {
+      /* garde l’état HTML par défaut */
+    }
+    section.classList.toggle("collapsed", collapsed);
+    head.setAttribute("aria-expanded", collapsed ? "false" : "true");
+
+    head.addEventListener("click", () => {
+      const nowCollapsed = !section.classList.contains("collapsed");
+      section.classList.toggle("collapsed", nowCollapsed);
+      head.setAttribute("aria-expanded", nowCollapsed ? "false" : "true");
+      try {
+        localStorage.setItem(lsKey, nowCollapsed ? "collapsed" : "open");
+      } catch {
+        /* ignore */
+      }
+    });
+  });
+}
+
+const landingFx = {
+  active: false,
+  typeIdx: 0,
+  charIdx: 0,
+  typeTimer: null,
+  phrases: [
+    "Configuration enregistrée depuis le dashboard.",
+    "Log envoyé · Membre expulsé par @Admin",
+    "Commande /ban activée pour ce serveur.",
+    "$règles → réponse envoyée avec succès.",
+  ],
+  onMove: null,
+};
+
+function stopLandingEffects() {
+  if (!landingFx.active) return;
+  landingFx.active = false;
+  if (landingFx.typeTimer) clearTimeout(landingFx.typeTimer);
+  landingFx.typeTimer = null;
+  if (landingFx.onMove) {
+    document.removeEventListener("mousemove", landingFx.onMove);
+    landingFx.onMove = null;
+  }
+}
+
+function landingTypewriterTick() {
+  if (!landingFx.active) return;
+  const el = $("landing-typewriter");
+  if (!el) return;
+
+  const phrase = landingFx.phrases[landingFx.typeIdx % landingFx.phrases.length];
+  el.classList.remove("done");
+  el.textContent = phrase.slice(0, landingFx.charIdx);
+
+  if (landingFx.charIdx < phrase.length) {
+    landingFx.charIdx += 1;
+    landingFx.typeTimer = setTimeout(landingTypewriterTick, 28 + Math.random() * 32);
+    return;
+  }
+
+  el.classList.add("done");
+  landingFx.typeTimer = setTimeout(() => {
+    landingFx.typeIdx += 1;
+    landingFx.charIdx = 0;
+    landingTypewriterTick();
+  }, 2400);
+}
+
+function initLandingEffects() {
+  if (landingFx.active) return;
+  if (!$("landing-page") || $("landing-page").hidden) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const el = $("landing-typewriter");
+    if (el) el.textContent = landingFx.phrases[0];
+    return;
+  }
+
+  landingFx.active = true;
+  landingFx.typeIdx = 0;
+  landingFx.charIdx = 0;
+  landingTypewriterTick();
+
+  const spotlight = $("landing-spotlight");
+  const showcase = $("landing-showcase");
+
+  landingFx.onMove = (e) => {
+    if (spotlight) {
+      spotlight.style.setProperty("--spot-x", `${e.clientX}px`);
+      spotlight.style.setProperty("--spot-y", `${e.clientY}px`);
+    }
+    if (showcase) {
+      const rect = showcase.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const dx = (e.clientX - cx) / rect.width;
+      const dy = (e.clientY - cy) / rect.height;
+      showcase.style.transform = `rotateY(${dx * 6}deg) rotateX(${-dy * 4}deg)`;
+    }
+  };
+
+  document.addEventListener("mousemove", landingFx.onMove);
 }
 
 async function refreshBotBranding() {
@@ -125,6 +449,12 @@ async function refreshBotBranding() {
 
     const logo = $("sidebar-logo-img");
     if (logo) logo.src = b.avatar_url;
+
+    const landingAvatar = $("landing-bot-avatar");
+    if (landingAvatar) landingAvatar.src = b.avatar_url;
+
+    const landingNavLogo = $("landing-nav-logo");
+    if (landingNavLogo) landingNavLogo.src = b.avatar_url;
 
     const fav = $("site-favicon");
     if (fav) {
@@ -980,6 +1310,7 @@ function showGuildPicker() {
   const picker = $("guild-picker");
   const top = $("main-top");
   const views = $("views");
+  setSidebarNavVisible(false);
   if (picker) {
     picker.hidden = false;
     renderGuildPickerGrid();
@@ -994,6 +1325,7 @@ function hideGuildPicker() {
   const picker = $("guild-picker");
   const top = $("main-top");
   const views = $("views");
+  setSidebarNavVisible(true);
   if (picker) picker.hidden = true;
   if (top) top.hidden = false;
   if (views) views.hidden = false;
@@ -1024,16 +1356,17 @@ function syncSettingsInputs() {
 }
 
 function setViewsDisabled(noBot) {
-  const ids = [
-    "view-settings",
-    "view-logs",
-    "view-commands",
-    "view-custom",
-    "view-embeds",
-    "view-moderation",
+  const keys = [
+    "settings",
+    "logs",
+    "commands",
+    "permissions",
+    "custom",
+    "embeds",
+    "moderation",
   ];
-  for (const id of ids) {
-    const el = $(id);
+  for (const key of keys) {
+    const el = viewEls.get(key);
     if (!el) continue;
     el.style.opacity = noBot ? "0.45" : "";
     el.style.pointerEvents = noBot ? "none" : "";
@@ -1203,12 +1536,14 @@ async function refreshDiscordStatus() {
 }
 
 async function loadData() {
+  const gen = ++loadDataGen;
   $("error").hidden = true;
   $("error").textContent = "";
   setDiscordOAuthHref();
-  await refreshBotBranding();
+  await Promise.all([refreshBotBranding(), refreshLandingInvite().catch(() => null)]);
 
   const st = await fetch(apiUrl("/api/auth/discord/status"), fetchOptsGet());
+  if (gen !== loadDataGen) return;
   if (!st.ok) {
     $("error").hidden = false;
     $("error").textContent = "Impossible de vérifier la session Discord.";
@@ -1218,10 +1553,9 @@ async function loadData() {
   if (!status.connected) {
     discordOAuthConnected = false;
     internalAccess = null;
-    $("workspace").hidden = true;
+    showLandingPage();
     $("main-top").hidden = true;
     $("views").hidden = true;
-    $("stats-section").hidden = true;
     $("discord-user-label").hidden = true;
     $("btn-discord-logout").hidden = true;
     const fondaBtn = $("btn-open-fonda");
@@ -1232,9 +1566,8 @@ async function loadData() {
     if (picker) picker.hidden = true;
     const li = $("discord-oauth-link");
     if (li) li.hidden = false;
-    $("error").hidden = false;
-    $("error").textContent =
-      "Connecte-toi avec Discord pour gérer tes serveurs.";
+    $("error").hidden = true;
+    $("error").textContent = "";
     return;
   }
 
@@ -1245,6 +1578,7 @@ async function loadData() {
     fetch(apiUrl("/api/stats"), fetchOptsGet()),
     fetch(apiUrl("/api/internal/access"), fetchOptsGet()),
   ]);
+  if (gen !== loadDataGen) return;
 
   if (!manRes.ok || !cmdManRes.ok || !cfgRes.ok || !statsRes.ok || !accessRes.ok) {
     const bad = !manRes.ok
@@ -1282,6 +1616,9 @@ async function loadData() {
   const config = await cfgRes.json();
   const stats = await statsRes.json();
   internalAccess = await accessRes.json();
+  if (gen !== loadDataGen) return;
+  discordOAuthConnected = true;
+
   const fondaBtn = $("btn-open-fonda");
   if (fondaBtn) fondaBtn.hidden = !internalAccess?.founder;
   if (internalAccess?.founder) {
@@ -1320,8 +1657,11 @@ async function loadData() {
   if (guildPickerList.length === 0) {
     $("error").hidden = false;
     $("error").textContent =
-      "Aucun serveur : connecte Discord (bouton « mes serveurs ») pour voir les serveurs où tu es admin, ou configure le bot une première fois sur un serveur.";
-    $("workspace").hidden = true;
+      "Aucun serveur administrable trouvé. Ajoute d’abord Wingbot sur un serveur, puis actualise.";
+    showDashboard();
+    $("views").hidden = true;
+    $("main-top").hidden = true;
+    setSidebarNavVisible(false);
     return;
   }
 
@@ -1341,13 +1681,17 @@ async function loadData() {
     }
   }
 
-  $("workspace").hidden = false;
+  showDashboard();
+  $("views").hidden = false;
 
   fillGuildSelect();
 
-  if (!location.hash) {
-    location.hash = "#overview";
+  if (!location.hash || !VIEWS.has(location.hash.slice(1))) {
+    history.replaceState(null, "", "#overview");
   }
+
+  currentViewName = null;
+  navigate();
 
   const params = new URLSearchParams(location.search);
   if (params.get("discord") === "connected") {
@@ -1412,6 +1756,7 @@ async function onGuildChange(opts = {}) {
   }
 
   selectedGuildId = id;
+  embedsLastGuildId = null;
   try {
     localStorage.setItem(LS_LAST_GUILD_KEY, id);
   } catch {
@@ -2242,6 +2587,19 @@ $("btn-refresh-vip")?.addEventListener("click", () => {
 });
 
 setDiscordOAuthHref();
+initViewNavCache();
+initNavSections();
+
+$("sidebar-nav")?.addEventListener("click", (e) => {
+  const a = e.target.closest(".nav-link[data-view]");
+  if (!a) return;
+  const view = a.dataset.view;
+  if (!view) return;
+  if (location.hash === `#${view}`) {
+    e.preventDefault();
+    navigate(true);
+  }
+});
 
 window.wingbotDashboard = {
   apiUrl,
@@ -2254,13 +2612,6 @@ window.wingbotDashboard = {
 
 loadData();
 
-document.querySelectorAll(".nav-link").forEach((a) => {
-  a.addEventListener("click", () => {
-    setTimeout(navigate, 0);
-  });
-});
-
-// Boutons d'actions rapides depuis la vue d'ensemble.
 document.addEventListener("click", (ev) => {
   const btn = ev.target.closest(".ov-quick-btn[data-go]");
   if (!btn) return;

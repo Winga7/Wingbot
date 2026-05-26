@@ -1,22 +1,22 @@
-/* ===========================================================
-   Wingbot — Dashboard
-   Thème : Espace profond. Nébuleuses violet/cyan/rose,
-   champ d'étoiles, glass, typographie moderne.
+﻿/* ===========================================================
+   Wingbot â€” Dashboard
+   ThÃ¨me : Espace profond. NÃ©buleuses violet/cyan/rose,
+   champ d'Ã©toiles, glass, typographie moderne.
    =========================================================== */
 
 /* ----------------------------------------------------------
-   Règle globale : l'attribut HTML `hidden` doit TOUJOURS gagner.
-   Sans `!important`, des règles auteur comme `.btn { display: inline-flex }`
-   ou `.workspace { display: flex }` écrasent la règle UA `[hidden] { display: none }`,
-   ce qui fait que mettre `el.hidden = true` côté JS ne masque rien
-   (bug observé : Fonda visible déconnecté, invite banner permanente, etc.).
+   RÃ¨gle globale : l'attribut HTML `hidden` doit TOUJOURS gagner.
+   Sans `!important`, des rÃ¨gles auteur comme `.btn { display: inline-flex }`
+   ou `.workspace { display: flex }` Ã©crasent la rÃ¨gle UA `[hidden] { display: none }`,
+   ce qui fait que mettre `el.hidden = true` cÃ´tÃ© JS ne masque rien
+   (bug observÃ© : Fonda visible dÃ©connectÃ©, invite banner permanente, etc.).
    ---------------------------------------------------------- */
 [hidden] {
   display: none !important;
 }
 
 :root {
-  /* Surfaces & fonds (alpha plus élevée = pas besoin de blur derrière) */
+  /* Surfaces & fonds (alpha plus Ã©levÃ©e = pas besoin de blur derriÃ¨re) */
   --bg: #02030a;
   --bg-2: #060816;
   --surface: rgba(16, 20, 42, 0.88);
@@ -34,7 +34,7 @@
   --text-dim: #aab0cf;
   --muted: #757a96;
 
-  /* Palette nébuleuse */
+  /* Palette nÃ©buleuse */
   --nebula-violet: #a78bfa;
   --nebula-indigo: #818cf8;
   --nebula-pink: #f472b6;
@@ -59,7 +59,7 @@
   --shadow-md: 0 16px 40px -16px rgba(0, 0, 0, 0.85);
   --shadow-glow: 0 0 40px -10px rgba(167, 139, 250, 0.35);
 
-  --font: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 * {
@@ -87,8 +87,8 @@ body {
 
 /* ========== Galaxie statique ==========
    Trois calques peints UNE SEULE FOIS par le navigateur :
-   - body::before → nébuleuses colorées (nuages de poussière)
-   - body::after  → champ d'étoiles fixe
+   - body::before â†’ nÃ©buleuses colorÃ©es (nuages de poussiÃ¨re)
+   - body::after  â†’ champ d'Ã©toiles fixe
    Pas d'animation, pas de will-change, pas de transform.
    Le GPU garde chaque calque en texture et n'y touche plus.
    =========================================================== */
@@ -100,22 +100,22 @@ body::before {
   z-index: 0;
   pointer-events: none;
   background:
-    /* Cœur violet brillant (haut droite) */
+    /* CÅ“ur violet brillant (haut droite) */
     radial-gradient(ellipse 55% 45% at 82% 8%, rgba(167, 139, 250, 0.38), transparent 62%),
     /* Nuage indigo (haut gauche) */
     radial-gradient(ellipse 45% 40% at 12% 18%, rgba(129, 140, 248, 0.26), transparent 66%),
-    /* Nébuleuse rose magenta (centre droite) */
+    /* NÃ©buleuse rose magenta (centre droite) */
     radial-gradient(ellipse 42% 36% at 98% 48%, rgba(244, 114, 182, 0.24), transparent 66%),
     /* Gaz cyan (bas gauche) */
     radial-gradient(ellipse 55% 42% at -5% 105%, rgba(34, 211, 238, 0.3), transparent 62%),
-    /* Dégradé voie lactée diagonale */
+    /* DÃ©gradÃ© voie lactÃ©e diagonale */
     linear-gradient(118deg,
       transparent 28%,
       rgba(167, 139, 250, 0.06) 44%,
       rgba(244, 114, 182, 0.09) 50%,
       rgba(167, 139, 250, 0.06) 56%,
       transparent 72%),
-    /* Touche dorée chaude (bas droite) */
+    /* Touche dorÃ©e chaude (bas droite) */
     radial-gradient(ellipse 32% 28% at 92% 98%, rgba(252, 211, 77, 0.1), transparent 70%),
     /* Nuage rose centre */
     radial-gradient(ellipse 70% 50% at 50% 60%, rgba(244, 114, 182, 0.05), transparent 78%);
@@ -164,6 +164,50 @@ body::after {
   .app {
     grid-template-columns: 1fr;
   }
+}
+
+/* Mode accueil public : pas de sidebar, contenu centrÃ© pleine largeur */
+.app.app--landing {
+  grid-template-columns: 1fr;
+  max-width: none;
+}
+
+.app.app--landing .sidebar {
+  display: none !important;
+}
+
+.app.app--landing .landing-page {
+  padding: 0;
+}
+
+.app.app--landing .landing-inner {
+  max-width: 1140px;
+}
+
+/* Session dashboard active : ne jamais laisser transparaître la landing */
+.app.app--dashboard .landing-page {
+  display: none !important;
+}
+
+.app.app--dashboard .workspace {
+  display: flex !important;
+}
+
+html.dash-boot #app {
+  grid-template-columns: 272px minmax(0, 1fr);
+  max-width: 1680px;
+}
+
+html.dash-boot #app .sidebar {
+  display: flex !important;
+}
+
+html.dash-boot #landing-page {
+  display: none !important;
+}
+
+html.dash-boot #workspace {
+  display: flex !important;
 }
 
 /* ========== Sidebar ========== */
@@ -259,6 +303,16 @@ body::after {
   transition: color 0.15s, background 0.15s, border-color 0.15s, transform 0.15s;
 }
 
+.view-head a {
+  color: var(--nebula-violet);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.view-head a:hover {
+  text-decoration: underline;
+}
+
 .nav-link:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.035);
@@ -308,6 +362,114 @@ body::after {
   color: var(--nebula-violet);
 }
 
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-badge {
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.12rem 0.38rem;
+  border-radius: 5px;
+  line-height: 1.3;
+}
+
+.nav-badge.new {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.22);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.nav-badge.beta {
+  color: #fdba74;
+  background: rgba(249, 115, 22, 0.18);
+  border: 1px solid rgba(249, 115, 22, 0.35);
+}
+
+.nav-badge.soon {
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.32);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 0.6rem;
+}
+
+/* Sections de navigation repliables */
+.sidebar-nav {
+  gap: 0.5rem;
+}
+
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.nav-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-section-head:hover {
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.nav-section-chevron {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.7;
+  transition: transform 0.2s;
+}
+
+.nav-section.collapsed .nav-section-chevron {
+  transform: rotate(-90deg);
+}
+
+.nav-section.collapsed .nav-section-body {
+  display: none;
+}
+
+.nav-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+  padding-left: 0.15rem;
+}
+
+.nav-section-body .nav-link {
+  font-size: 0.86rem;
+  padding: 0.52rem 0.65rem;
+}
+
 .sidebar-label {
   font-size: 0.64rem;
   color: var(--muted);
@@ -336,6 +498,15 @@ body::after {
 .pill b {
   color: #fff;
   font-weight: 600;
+}
+
+/* ========== Colonne principale ========== */
+
+.main-column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
 /* ========== Workspace ========== */
@@ -427,7 +598,7 @@ body::after {
   text-overflow: ellipsis;
 }
 
-/* Ancien select désormais caché : la sélection se fait via .guild-card.
+/* Ancien select dÃ©sormais cachÃ© : la sÃ©lection se fait via .guild-card.
    On garde le node dans le DOM pour la compat du code existant. */
 .guild-select-hidden {
   position: absolute !important;
@@ -763,7 +934,7 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   50% { box-shadow: 0 0 0 6px rgba(248, 113, 113, 0); }
 }
 
-/* ========== Fenêtre Fonda (modal à onglets) ========== */
+/* ========== FenÃªtre Fonda (modal Ã  onglets) ========== */
 
 .fonda-modal {
   position: fixed;
@@ -775,9 +946,9 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   padding: 2rem;
 }
 
-/* Important : sans cette règle, `display: flex` ci-dessus écrase la règle UA
-   `[hidden] { display: none }` (priorité auteur > UA), et la modal reste
-   visible même quand le JS fait `modal.hidden = true`. */
+/* Important : sans cette rÃ¨gle, `display: flex` ci-dessus Ã©crase la rÃ¨gle UA
+   `[hidden] { display: none }` (prioritÃ© auteur > UA), et la modal reste
+   visible mÃªme quand le JS fait `modal.hidden = true`. */
 .fonda-modal[hidden] {
   display: none;
 }
@@ -1133,10 +1304,10 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
 
 /* ========== Conversation type Messenger ==========
    - `.dm-row` : ligne horizontale (avatar | bulle | timestamp)
-   - Les messages consécutifs du même côté + dans la même fenêtre de 5 min
-     sont regroupés : seul le dernier porte un avatar et un timestamp.
+   - Les messages consÃ©cutifs du mÃªme cÃ´tÃ© + dans la mÃªme fenÃªtre de 5 min
+     sont regroupÃ©s : seul le dernier porte un avatar et un timestamp.
    - Le rayon des coins varie selon la position dans le groupe pour donner
-     l'effet "queue" caractéristique de Messenger. */
+     l'effet "queue" caractÃ©ristique de Messenger. */
 
 .dm-messages {
   flex: 1;
@@ -1205,7 +1376,7 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   box-shadow: 0 1px 0 rgba(99, 102, 241, 0.25);
 }
 
-/* Coins "groupés" : un message qui n'est pas isolé voit son angle interne
+/* Coins "groupÃ©s" : un message qui n'est pas isolÃ© voit son angle interne
    se rapprocher du voisin (style Messenger / iMessage). */
 .dm-row.in:not(.group-first) .dm-bubble  { border-top-left-radius: 6px; }
 .dm-row.in:not(.group-last)  .dm-bubble  { border-bottom-left-radius: 6px; }
@@ -1213,7 +1384,7 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
 .dm-row.out:not(.group-last)  .dm-bubble { border-bottom-right-radius: 6px; }
 
 /* Timestamp discret en marge. Visible uniquement sur le dernier du groupe.
-   Au survol du groupe entier, on bump l'opacité. */
+   Au survol du groupe entier, on bump l'opacitÃ©. */
 .dm-row-time {
   font-size: 0.68rem;
   color: var(--text-dim);
@@ -1227,7 +1398,7 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
 .dm-row:hover .dm-row-time { opacity: 0.95; }
 
 /* Sur les messages `in`, le slot avatar (vide quand pas dernier du groupe)
-   garde sa largeur pour que les bulles restent alignées verticalement. */
+   garde sa largeur pour que les bulles restent alignÃ©es verticalement. */
 .dm-row.in .dm-row-avatar:empty,
 .dm-row.in .dm-row-avatar:not(:has(img)) {
   background: transparent;
@@ -1535,7 +1706,7 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   color: var(--text-dim);
 }
 
-/* ========== Vue d'ensemble — hero + cartes + actions rapides ========== */
+/* ========== Vue d'ensemble â€” hero + cartes + actions rapides ========== */
 
 .ov-hero {
   display: flex;
@@ -1976,7 +2147,7 @@ textarea::placeholder {
   opacity: 0.9;
 }
 
-/* ========== Panel accès — nouvelle version chips ========== */
+/* ========== Panel accÃ¨s â€” nouvelle version chips ========== */
 
 .command-access-root {
   margin-top: 2rem;
@@ -2258,7 +2429,7 @@ textarea::placeholder {
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--chip-accent) 35%, transparent);
 }
 
-/* ========== Commandes personnalisées ========== */
+/* ========== Commandes personnalisÃ©es ========== */
 
 .custom-guide {
   margin: 0.9rem 0 1.1rem;
@@ -2530,8 +2701,8 @@ code {
 }
 
 /* ===========================================================
-   Constructeur d’embeds — palette espace, sections repliables,
-   aperçu en haut sticky, actions sticky en bas.
+   Constructeur dâ€™embeds â€” palette espace, sections repliables,
+   aperÃ§u en haut sticky, actions sticky en bas.
    =========================================================== */
 
 .embed-builder-root {
@@ -2707,7 +2878,7 @@ code {
   font-size: 0.78rem;
 }
 
-/* Section dépliable */
+/* Section dÃ©pliable */
 
 .emb-section {
   border: 1px solid var(--border);
@@ -3099,10 +3270,10 @@ code {
   margin-top: 0.7rem;
 }
 
-/* Barre d’actions sticky en bas — TOUJOURS visible. La classe `is-dirty`
-   ajoute juste un halo + libelle "modifié" pour signaler des changements
-   non sauvegardés. Avant : la barre disparaissait après sauvegarde, donc
-   plus aucun bouton "Enregistrer" / "Publier" / "Supprimer" — UX cassé. */
+/* Barre dâ€™actions sticky en bas â€” TOUJOURS visible. La classe `is-dirty`
+   ajoute juste un halo + libelle "modifiÃ©" pour signaler des changements
+   non sauvegardÃ©s. Avant : la barre disparaissait aprÃ¨s sauvegarde, donc
+   plus aucun bouton "Enregistrer" / "Publier" / "Supprimer" â€” UX cassÃ©. */
 
 .emb-actions {
   position: sticky;
@@ -3223,7 +3394,7 @@ code {
   min-height: 1.1em;
 }
 
-/* ========== Aperçu type Discord ========== */
+/* ========== AperÃ§u type Discord ========== */
 
 .d-emb-wrap {
   font-size: 0.9rem;
@@ -3374,4 +3545,80 @@ code {
   height: 20px;
   border-radius: 50%;
   object-fit: cover;
+}
+/* ========== Vue « bientôt disponible » ========== */
+
+.coming-soon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 320px;
+  padding: 3rem 2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.coming-soon-icon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+}
+
+.coming-soon-icon svg {
+  width: 28px;
+  height: 28px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.coming-soon h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.35rem;
+}
+
+.coming-soon p {
+  margin: 0;
+  max-width: 42ch;
+}
+
+.coming-soon-badge {
+  margin-top: 1rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+}
+
+.coming-soon-badge.new {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.22);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.coming-soon-badge.beta {
+  color: #fdba74;
+  background: rgba(249, 115, 22, 0.18);
+  border: 1px solid rgba(249, 115, 22, 0.35);
+}
+
+.coming-soon-badge.soon {
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.32);
+  text-transform: none;
+  letter-spacing: 0.02em;
 }
