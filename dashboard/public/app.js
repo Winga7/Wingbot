@@ -275,6 +275,31 @@ function setSidebarNavVisible(visible) {
   else nav.setAttribute("hidden", "");
 }
 
+function shouldBootDashboard() {
+  try {
+    if (sessionStorage.getItem("wingbot.dashboard") === "1") return true;
+    if (/[?&]discord=connected(?:&|$)/.test(location.search)) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** Affiche le shell dashboard sans attendre les API (évite le flash landing au refresh). */
+function restoreDashboardShellIfCached() {
+  if (!shouldBootDashboard()) return;
+  appMode = "dashboard";
+  document.documentElement.classList.add("dash-boot");
+  const app = $("app");
+  app?.classList.add("app--dashboard");
+  app?.classList.remove("app--landing");
+  $("landing-page")?.setAttribute("hidden", "");
+  $("workspace")?.removeAttribute("hidden");
+  $("save-dock")?.removeAttribute("hidden");
+  document.querySelector(".foot")?.removeAttribute("hidden");
+  stopLandingEffects();
+}
+
 function showLandingPage() {
   appMode = "landing";
   try {
@@ -1540,7 +1565,6 @@ async function loadData() {
   $("error").hidden = true;
   $("error").textContent = "";
   setDiscordOAuthHref();
-  await Promise.all([refreshBotBranding(), refreshLandingInvite().catch(() => null)]);
 
   const st = await fetch(apiUrl("/api/auth/discord/status"), fetchOptsGet());
   if (gen !== loadDataGen) return;
@@ -1570,6 +1594,14 @@ async function loadData() {
     $("error").textContent = "";
     return;
   }
+
+  showDashboard();
+  discordOAuthConnected = true;
+
+  const brandingP = Promise.all([
+    refreshBotBranding(),
+    refreshLandingInvite().catch(() => null),
+  ]);
 
   const [manRes, cmdManRes, cfgRes, statsRes, accessRes] = await Promise.all([
     fetch(apiUrl("/api/manifest"), fetchOptsGet()),
@@ -1617,7 +1649,8 @@ async function loadData() {
   const stats = await statsRes.json();
   internalAccess = await accessRes.json();
   if (gen !== loadDataGen) return;
-  discordOAuthConnected = true;
+
+  brandingP.catch(() => null);
 
   const fondaBtn = $("btn-open-fonda");
   if (fondaBtn) fondaBtn.hidden = !internalAccess?.founder;
@@ -1658,7 +1691,6 @@ async function loadData() {
     $("error").hidden = false;
     $("error").textContent =
       "Aucun serveur administrable trouvé. Ajoute d’abord Wingbot sur un serveur, puis actualise.";
-    showDashboard();
     $("views").hidden = true;
     $("main-top").hidden = true;
     setSidebarNavVisible(false);
@@ -1681,7 +1713,6 @@ async function loadData() {
     }
   }
 
-  showDashboard();
   $("views").hidden = false;
 
   fillGuildSelect();
@@ -2589,6 +2620,7 @@ $("btn-refresh-vip")?.addEventListener("click", () => {
 setDiscordOAuthHref();
 initViewNavCache();
 initNavSections();
+restoreDashboardShellIfCached();
 
 $("sidebar-nav")?.addEventListener("click", (e) => {
   const a = e.target.closest(".nav-link[data-view]");
