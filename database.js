@@ -998,47 +998,10 @@ const COMMAND_CATEGORY_BY_ID = Object.fromEntries(
   COMMANDS.map((c) => [c.id, c.category])
 );
 
-function defaultCommandAccess() {
-  return {
-    ignore_channel_ids: [],
-    block_role_ids: [],
-    allow_role_ids: [],
-    staff_role_ids: [],
-  };
-}
-
-function normalizeSnowflakeList(arr, max = 60) {
-  if (!Array.isArray(arr)) return [];
-  const out = [];
-  const seen = new Set();
-  for (const x of arr) {
-    const id = String(x ?? "")
-      .replace(/\D/g, "")
-      .trim();
-    if (!/^\d{17,20}$/.test(id) || seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-    if (out.length >= max) break;
-  }
-  return out;
-}
-
-function parseCommandAccess(raw) {
-  const base = defaultCommandAccess();
-  if (raw == null || String(raw).trim() === "") return base;
-  try {
-    const o = JSON.parse(raw);
-    if (!o || typeof o !== "object") return base;
-    return {
-      ignore_channel_ids: normalizeSnowflakeList(o.ignore_channel_ids),
-      block_role_ids: normalizeSnowflakeList(o.block_role_ids),
-      allow_role_ids: normalizeSnowflakeList(o.allow_role_ids),
-      staff_role_ids: normalizeSnowflakeList(o.staff_role_ids),
-    };
-  } catch {
-    return base;
-  }
-}
+const {
+  parseCommandAccess,
+  mergeCommandAccessPatch,
+} = require("./lib/commandAccessConfig");
 
 function getCommandAccessConfig(guildId) {
   const row = db
@@ -1532,22 +1495,10 @@ function applyGuildSettingsPatch(guildId, patch) {
     if (typeof patch.command_access !== "object" || patch.command_access === null) {
       throw new Error("command_access invalide");
     }
-    const cur = getCommandAccessConfig(guildId);
-    const next = { ...cur };
-    for (const key of [
-      "ignore_channel_ids",
-      "block_role_ids",
-      "allow_role_ids",
-      "staff_role_ids",
-    ]) {
-      if (Object.prototype.hasOwnProperty.call(patch.command_access, key)) {
-        const v = patch.command_access[key];
-        if (!Array.isArray(v)) {
-          throw new Error(`command_access.${key} doit être un tableau d’IDs`);
-        }
-        next[key] = normalizeSnowflakeList(v);
-      }
-    }
+    const next = mergeCommandAccessPatch(
+      getCommandAccessConfig(guildId),
+      patch.command_access
+    );
     db.prepare(
       "UPDATE guild_config SET command_access = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
     ).run(JSON.stringify(next), guildId);

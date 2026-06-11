@@ -134,9 +134,12 @@ let guildMeta = {};
  *   command_groups_disabled: string[],
  *   command_access: {
  *     ignore_channel_ids: string[],
+ *     allow_channel_ids: string[],
  *     block_role_ids: string[],
  *     allow_role_ids: string[],
- *     staff_role_ids: string[],
+ *     moderation_role_ids: string[],
+ *     admin_role_ids: string[],
+ *     premium_role_ids: string[],
  *   },
  *   custom_commands: { id?: number, trigger: string, response: string }[]
  * } | null} */
@@ -747,7 +750,7 @@ function renderAccessChips(container, items, key, getLabel, getColor) {
     const sp = document.createElement("span");
     sp.className = "muted tiny access-empty";
     sp.textContent =
-      key === "ignore_channel_ids"
+      key === "ignore_channel_ids" || key === "allow_channel_ids"
         ? "Aucun salon listé (bot absent, TOKEN manquant, ou erreur API)."
         : "Aucun rôle listé.";
     container.appendChild(sp);
@@ -905,23 +908,35 @@ function renderCommandAccessPanel() {
     </summary>
     <div class="access-intro-body muted tiny">
       <p><strong>Salons sans commandes</strong> — aucune commande (y compris <code>help</code>) dans ces salons.</p>
+      <p><strong>Salons autorisés</strong> — au moins un coché = les commandes ne marchent <em>que</em> dans ces salons.</p>
       <p><strong>Rôles sans commandes</strong> — ces rôles ne peuvent rien lancer sauf <code>help</code>.</p>
-      <p><strong>Rôles autorisés</strong> — au moins une case = liste blanche (eux + admin + propriétaire seulement).</p>
-      <p><strong>Staff modération</strong> — au moins une case = commandes modération/admin exigent en plus un de ces rôles.</p>
-      <p>Administrateur ou propriétaire Discord : toujours prioritaires sur ces règles.</p>
+      <p><strong>Rôles autorisés (global)</strong> — au moins un coché = liste blanche pour toutes les commandes ( + admin + propriétaire ).</p>
+      <p><strong>Modération / Administration / Premium</strong> — au moins un rôle coché = seuls ces rôles (+ admin + propriétaire) peuvent utiliser les commandes de la catégorie.</p>
+      <p>Les permissions Discord natives (ex. <code>KickMembers</code>) s'appliquent toujours en plus de ces règles.</p>
     </div>
   `;
   root.appendChild(intro);
 
   root.appendChild(
     renderAccessSection({
-      id: "channels",
+      id: "channels-block",
       title: "Salons sans commandes",
       hint: "Aucune commande du bot dans les salons cochés.",
       key: "ignore_channel_ids",
       items: lastGuildChannelsList,
       getLabel: (ch) => `#${ch.name}`,
       open: true,
+    })
+  );
+
+  root.appendChild(
+    renderAccessSection({
+      id: "channels-allow",
+      title: "Salons autorisés (liste blanche)",
+      hint: "Vide = partout (sauf salons interdits ci-dessus). Au moins un coché = commandes uniquement dans ces salons.",
+      key: "allow_channel_ids",
+      items: lastGuildChannelsList,
+      getLabel: (ch) => `#${ch.name}`,
     })
   );
 
@@ -951,15 +966,66 @@ function renderCommandAccessPanel() {
 
   root.appendChild(
     renderAccessSection({
-      id: "staff",
-      title: "Rôles staff (modération & administration)",
-      hint: "Au moins un coché = commandes modération/admin exigent en plus un de ces rôles (ou admin / propriétaire).",
-      key: "staff_role_ids",
+      id: "mod-roles",
+      title: "Rôles modération",
+      hint: "kick, ban, warn, timeout, clear… — au moins un coché = réservé à ces rôles (+ admin / propriétaire).",
+      key: "moderation_role_ids",
+      items: lastGuildRolesList,
+      getLabel: (r) => r.name,
+      getColor: roleColorCss,
+      open: true,
+    })
+  );
+
+  root.appendChild(
+    renderAccessSection({
+      id: "admin-roles",
+      title: "Rôles administration",
+      hint: "setlogchannel, togglelog, logconfig… — au moins un coché = réservé à ces rôles (+ admin / propriétaire).",
+      key: "admin_role_ids",
       items: lastGuildRolesList,
       getLabel: (r) => r.name,
       getColor: roleColorCss,
     })
   );
+
+  root.appendChild(
+    renderAccessSection({
+      id: "premium-roles",
+      title: "Rôles premium",
+      hint: "backup… — au moins un coché = réservé à ces rôles (+ admin / propriétaire).",
+      key: "premium_role_ids",
+      items: lastGuildRolesList,
+      getLabel: (r) => r.name,
+      getColor: roleColorCss,
+    })
+  );
+
+  const cats = document.createElement("div");
+  cats.className = "panel-block access-cat-ref";
+  const byCat = {};
+  for (const c of commandManifest.commands || []) {
+    if (c.id === "help") continue;
+    const cat = c.category || "utility";
+    if (!byCat[cat]) byCat[cat] = [];
+    byCat[cat].push(c.label || c.id);
+  }
+  const catLabels = {
+    utility: "Utilitaires",
+    moderation: "Modération",
+    admin: "Administration",
+    premium: "Premium",
+  };
+  cats.innerHTML = `<h3 class="muted tiny" style="margin:0 0 0.5rem">Référence des catégories</h3>`;
+  const ul = document.createElement("ul");
+  ul.className = "mod-doc-list muted tiny";
+  for (const [cat, cmds] of Object.entries(byCat)) {
+    const li = document.createElement("li");
+    li.innerHTML = `<strong>${escapeHtml(catLabels[cat] || cat)}</strong> — <span class="mono">${escapeHtml(cmds.join(", "))}</span>`;
+    ul.appendChild(li);
+  }
+  cats.appendChild(ul);
+  root.appendChild(cats);
 }
 
 function renderCommands() {
@@ -1759,9 +1825,18 @@ async function applyGuildData(data) {
       : [],
     command_access: {
       ignore_channel_ids: normalizeSnowflakeArrayUi(ac.ignore_channel_ids),
+      allow_channel_ids: normalizeSnowflakeArrayUi(ac.allow_channel_ids),
       block_role_ids: normalizeSnowflakeArrayUi(ac.block_role_ids),
       allow_role_ids: normalizeSnowflakeArrayUi(ac.allow_role_ids),
-      staff_role_ids: normalizeSnowflakeArrayUi(ac.staff_role_ids),
+      moderation_role_ids: normalizeSnowflakeArrayUi(
+        ac.moderation_role_ids?.length
+          ? ac.moderation_role_ids
+          : ac.staff_role_ids
+      ),
+      admin_role_ids: normalizeSnowflakeArrayUi(
+        ac.admin_role_ids?.length ? ac.admin_role_ids : ac.staff_role_ids
+      ),
+      premium_role_ids: normalizeSnowflakeArrayUi(ac.premium_role_ids),
     },
     custom_commands: Array.isArray(data.custom_commands)
       ? data.custom_commands.map((r) => ({

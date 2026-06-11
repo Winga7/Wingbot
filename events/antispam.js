@@ -5,6 +5,7 @@ const {
   getLogChannel,
   isLogEnabled,
 } = require("../database");
+const { staffRolesUnion } = require("../lib/commandAccessConfig");
 const { hasModAdminBypass } = require("../memberPerms");
 const { issueWarning } = require("../lib/warnService");
 const { getWarnConfig, countGuildWarnings } = require("../database");
@@ -187,7 +188,7 @@ function memberIsImmune(member, cfg, access) {
   if (hasModAdminBypass(member)) return true;
   const immune = new Set([
     ...(cfg.immune_role_ids || []),
-    ...(access.staff_role_ids || []),
+    ...staffRolesUnion(access),
   ]);
   for (const roleId of member.roles.cache.keys()) {
     if (immune.has(roleId)) return true;
