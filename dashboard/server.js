@@ -51,8 +51,14 @@ const {
   insertScheduledMessage,
   updateScheduledMessage,
   deleteScheduledMessage,
+  listReactionRolePanels,
+  getReactionRolePanel,
+  insertReactionRolePanel,
+  updateReactionRolePanel,
+  deleteReactionRolePanel,
   DB_PATH,
 } = require("../database");
+const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
 const {
   defaultEmbedPayload,
   mergeEmbedPayload,
@@ -1410,6 +1416,184 @@ app.delete(
       if (!deleteScheduledMessage(id, guildId)) {
         return res.status(404).json({ error: "not_found" });
       }
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+function normalizeReactionEntriesInput(raw) {
+  if (!Array.isArray(raw)) throw new Error("entries doit être un tableau");
+  const out = [];
+  const seenEmoji = new Set();
+  const seenRole = new Set();
+  for (const e of raw) {
+    const emoji = parseEmojiInput(e?.emoji);
+    const role_id = normalizeSnowflakeId(e?.role_id);
+    if (!emoji || !role_id) continue;
+    if (seenEmoji.has(emoji) || seenRole.has(role_id)) continue;
+    seenEmoji.add(emoji);
+    seenRole.add(role_id);
+    out.push({ emoji, role_id });
+    if (out.length >= 20) break;
+  }
+  if (!out.length) {
+    throw new Error("Au moins une paire emoji → rôle valide requise");
+  }
+  return out;
+}
+
+function buildReactionRoleMessageBody(body) {
+  const merged = mergeEmbedPayload(defaultEmbedPayload(), {
+    content: body?.content ?? "",
+    embed: body?.embed && typeof body.embed === "object" ? body.embed : {},
+  });
+  const e = merged.embed || {};
+  const hasText = String(merged.content || "").trim().length > 0;
+  const hasEmbed = !!(
+    e.title ||
+    e.description ||
+    e.image_url ||
+    e.thumbnail_url ||
+    (e.fields && e.fields.length)
+  );
+  if (!hasText && !hasEmbed) {
+    throw new Error("Contenu ou embed requis pour le message");
+  }
+  return payloadToDiscordMessageBody(merged);
+}
+
+async function discordAddReaction(channelId, messageId, emojiKey) {
+  const path = `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${emojiKeyToApiPath(emojiKey)}/@me`;
+  await discordBotJson("PUT", path);
+}
+
+async function publishReactionRoleMessage(guildId, channelId, body, entries) {
+  await assertGuildTextChannel(guildId, channelId);
+  const apiBody = buildReactionRoleMessageBody(body);
+  const msg = await discordBotJson(
+    "POST",
+    `/channels/${encodeURIComponent(channelId)}/messages`,
+    apiBody
+  );
+  const messageId = String(msg.id);
+  for (const entry of entries) {
+    await discordAddReaction(channelId, messageId, entry.emoji);
+    await new Promise((r) => setTimeout(r, 350));
+  }
+  return messageId;
+}
+
+app.get(
+  "/api/guilds/:guildId/reaction-roles",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      res.json({ panels: listReactionRolePanels(guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/reaction-roles",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      const channelId = normalizeSnowflakeId(req.body?.channel_id);
+      if (!channelId) {
+        return res.status(400).json({ error: "channel_id requis" });
+      }
+      const entries = normalizeReactionEntriesInput(req.body?.entries);
+      const mode = req.body?.mode === "unique" ? "unique" : "normal";
+      const embed =
+        req.body?.embed && typeof req.body.embed === "object"
+          ? req.body.embed
+          : null;
+      const messageId = await publishReactionRoleMessage(
+        guildId,
+        channelId,
+        { content: req.body?.content, embed },
+        entries
+      );
+      const row = insertReactionRolePanel(guildId, {
+        channel_id: channelId,
+        message_id: messageId,
+        label: req.body?.label || "",
+        content: String(req.body?.content || ""),
+        embed,
+        mode,
+        entries,
+        enabled: true,
+      });
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/reaction-roles/:panelId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.panelId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      if (!getReactionRolePanel(id, guildId)) {
+        return res.status(404).json({ error: "not_found" });
+      }
+      const patch = {};
+      if (req.body?.label != null) patch.label = req.body.label;
+      if (req.body?.enabled != null) patch.enabled = !!req.body.enabled;
+      if (req.body?.mode != null) {
+        patch.mode = req.body.mode === "unique" ? "unique" : "normal";
+      }
+      const row = updateReactionRolePanel(id, guildId, patch);
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.delete(
+  "/api/guilds/:guildId/reaction-roles/:panelId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.panelId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      const row = getReactionRolePanel(id, guildId);
+      if (!row) return res.status(404).json({ error: "not_found" });
+      if (req.query.delete_message === "1" && row.channel_id && row.message_id) {
+        await discordDeleteMessage(row.channel_id, row.message_id);
+      }
+      deleteReactionRolePanel(id, guildId);
       res.json({ ok: true });
     } catch (e) {
       console.error(e);

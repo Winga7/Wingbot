@@ -113,7 +113,7 @@ const client = new Client({
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.DirectMessageReactions,
   ],
-  partials: [Partials.Channel, Partials.Message],
+  partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
 // Initialisation de la collection de commandes
@@ -151,6 +151,9 @@ loadAntispam(client);
 
 const loadScheduledMessages = require("./events/scheduledMessages");
 loadScheduledMessages(client);
+
+const loadReactionRoles = require("./events/reactionRoles");
+loadReactionRoles(client);
 
 // Événement quand le bot est prêt
 client.once("ready", () => {

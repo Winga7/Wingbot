@@ -52,6 +52,12 @@
                 </span>
                 <span class="nav-label">Paramètres</span>
               </a>
+              <a href="#reactionroles" class="nav-link" data-view="reactionroles">
+                <span class="nav-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                </span>
+                <span class="nav-label">Réactions rôles</span>
+              </a>
               <a href="#premium" class="nav-link" data-view="premium">
                 <span class="nav-ico" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><path d="M12 2l2.4 4.8L20 8l-4 3.8.8 4.7L12 14.5 7.2 16.5 8 11.8 4 8l5.6-1.2L12 2z"/></svg>
@@ -645,6 +651,66 @@
                 Ces options sont appliquées quand tu cliques sur <strong>Enregistrer</strong>.
               </p>
               <div id="premium-internal-panel" hidden aria-hidden="true"></div>
+            </div>
+          </section>
+
+          <section class="view" id="view-reactionroles" hidden>
+            <div class="view-head">
+              <h2>Réactions rôles</h2>
+              <p class="muted tiny">Publie un message avec des réactions : les membres obtiennent ou perdent des rôles en cliquant.</p>
+            </div>
+            <div class="panel-block" id="rr-form-panel">
+              <h3>Nouveau panneau</h3>
+              <label class="field-row">
+                <span>Nom interne</span>
+                <input type="text" id="rr-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Rôles jeux" />
+              </label>
+              <label class="field-row">
+                <span>Salon</span>
+                <select id="rr-channel" class="input-sm input-wide"></select>
+              </label>
+              <label class="field-row">
+                <span>Mode</span>
+                <select id="rr-mode" class="input-sm">
+                  <option value="normal">Normal — plusieurs rôles possibles</option>
+                  <option value="unique">Unique — un seul rôle du panneau à la fois</option>
+                </select>
+              </label>
+              <label class="field-row">
+                <span>Message</span>
+                <textarea id="rr-content" class="input-sm input-wide" rows="3" placeholder="Choisis tes rôles en réagissant ci-dessous !"></textarea>
+              </label>
+              <details class="custom-guide">
+                <summary>Embed (optionnel)</summary>
+                <div class="custom-guide-body">
+                  <label class="field-row">
+                    <span>Titre</span>
+                    <input type="text" id="rr-embed-title" class="input-sm input-wide" maxlength="256" />
+                  </label>
+                  <label class="field-row">
+                    <span>Description</span>
+                    <textarea id="rr-embed-desc" class="input-sm input-wide" rows="2" maxlength="4096"></textarea>
+                  </label>
+                  <label class="field-row">
+                    <span>Couleur</span>
+                    <input type="text" id="rr-embed-color" class="input-sm mono" value="#5865f2" maxlength="7" />
+                  </label>
+                </div>
+              </details>
+              <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Paires emoji → rôle</h4>
+              <p class="muted tiny">Emoji Unicode (<code>✅</code>) ou custom (<code>&lt;:nom:123&gt;</code>). Le bot doit être au-dessus des rôles dans la hiérarchie.</p>
+              <div id="rr-entries-root"></div>
+              <button type="button" class="btn secondary tiny" id="btn-rr-add-entry">+ Ajouter une réaction</button>
+              <div class="fonda-actions" style="margin-top:0.75rem">
+                <button type="button" class="btn primary" id="btn-rr-publish">Publier le panneau</button>
+              </div>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
+                <h3 style="margin:0">Panneaux actifs</h3>
+                <button type="button" class="btn ghost tiny" id="btn-rr-refresh">Rafraîchir</button>
+              </div>
+              <div id="rr-list" class="muted tiny">Charge un serveur pour voir les panneaux.</div>
             </div>
           </section>
 

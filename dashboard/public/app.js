@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 const VIEWS = new Set([
   "overview",
   "settings",
+  "reactionroles",
   "premium",
   "logs",
   "moderation",
@@ -263,6 +264,10 @@ function navigate(force = false) {
 
   if (name === "announcements" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadScheduledMessagesList());
+  }
+
+  if (name === "reactionroles" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadReactionRolesList());
   }
 }
 
@@ -1355,6 +1360,258 @@ function renderWarnConfigPanel() {
 
 let schedEditingId = null;
 
+function addRrEntryRow(emoji = "", roleId = "") {
+  const root = $("rr-entries-root");
+  if (!root) return;
+  const row = document.createElement("div");
+  row.className = "rr-entry-row";
+  row.style.cssText =
+    "display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin-bottom:0.5rem";
+  const emojiInput = document.createElement("input");
+  emojiInput.type = "text";
+  emojiInput.className = "input-sm mono rr-entry-emoji";
+  emojiInput.placeholder = "✅ ou <:nom:id>";
+  emojiInput.value = emoji;
+  emojiInput.style.maxWidth = "140px";
+  const roleSel = document.createElement("select");
+  roleSel.className = "input-sm rr-entry-role";
+  roleSel.style.flex = "1";
+  roleSel.style.minWidth = "160px";
+  const opt0 = document.createElement("option");
+  opt0.value = "";
+  opt0.textContent = "— Rôle —";
+  roleSel.appendChild(opt0);
+  for (const r of lastGuildRolesList) {
+    if (r.managed && r.name !== "@everyone") continue;
+    const opt = document.createElement("option");
+    opt.value = r.id;
+    opt.textContent = r.name;
+    if (r.id === roleId) opt.selected = true;
+    roleSel.appendChild(opt);
+  }
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "btn ghost tiny";
+  del.textContent = "×";
+  del.addEventListener("click", () => row.remove());
+  row.appendChild(emojiInput);
+  row.appendChild(roleSel);
+  row.appendChild(del);
+  root.appendChild(row);
+}
+
+function resetRrForm() {
+  $("rr-label").value = "";
+  $("rr-channel").value = "";
+  $("rr-content").value = "";
+  $("rr-embed-title").value = "";
+  $("rr-embed-desc").value = "";
+  $("rr-embed-color").value = "#5865f2";
+  $("rr-mode").value = "normal";
+  const root = $("rr-entries-root");
+  if (root) root.innerHTML = "";
+  addRrEntryRow();
+  addRrEntryRow();
+}
+
+function fillRrChannelSelect() {
+  const sel = $("rr-channel");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "— Choisir un salon —";
+  sel.appendChild(empty);
+  for (const ch of lastGuildChannelsList) {
+    const opt = document.createElement("option");
+    opt.value = ch.id;
+    opt.textContent = `#${ch.name}`;
+    sel.appendChild(opt);
+  }
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+}
+
+function collectRrEntriesFromForm() {
+  const rows = document.querySelectorAll(".rr-entry-row");
+  const out = [];
+  for (const row of rows) {
+    const emoji = row.querySelector(".rr-entry-emoji")?.value || "";
+    const role_id = row.querySelector(".rr-entry-role")?.value || "";
+    if (!emoji.trim() || !role_id) continue;
+    out.push({ emoji: emoji.trim(), role_id });
+  }
+  return out;
+}
+
+async function loadReactionRolesList() {
+  const list = $("rr-list");
+  if (!list || !selectedGuildId || !currentGuildHasBot()) return;
+  fillRrChannelSelect();
+  const entriesRoot = $("rr-entries-root");
+  if (entriesRoot && !entriesRoot.children.length) resetRrForm();
+  list.textContent = "Chargement…";
+  try {
+    const res = await fetch(
+      apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/reaction-roles`),
+      fetchOptsGet()
+    );
+    if (!res.ok) {
+      list.textContent = "Impossible de charger les panneaux.";
+      return;
+    }
+    const data = await res.json();
+    renderReactionRolesList(data.panels || []);
+  } catch {
+    list.textContent = "Erreur réseau.";
+  }
+}
+
+function renderReactionRolesList(panels) {
+  const list = $("rr-list");
+  if (!list) return;
+  if (!panels.length) {
+    list.textContent = "Aucun panneau publié.";
+    return;
+  }
+  list.innerHTML = "";
+  for (const p of panels) {
+    const ch = lastGuildChannelsList.find((c) => c.id === p.channel_id);
+    const chName = ch ? `#${ch.name}` : p.channel_id;
+    const link =
+      p.message_id && selectedGuildId
+        ? `https://discord.com/channels/${selectedGuildId}/${p.channel_id}/${p.message_id}`
+        : null;
+    const div = document.createElement("div");
+    div.className = "warn-row";
+    div.style.cssText =
+      "border:1px solid var(--border, #333);border-radius:8px;padding:0.65rem 0.75rem;margin-bottom:0.5rem;";
+    const modeLabel = p.mode === "unique" ? "Unique" : "Normal";
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;align-items:center">
+        <strong>${escapeHtml(p.label || `Panneau #${p.id}`)}</strong>
+        <span class="muted tiny">${p.enabled ? "Actif" : "Pause"} · ${modeLabel} · ${p.entries.length} réaction(s)</span>
+      </div>
+      <div class="muted tiny" style="margin-top:0.35rem">${escapeHtml(chName)}${link ? ` · <a href="${escapeAttr(link)}" target="_blank" rel="noopener noreferrer">Voir le message</a>` : ""}</div>
+      <div style="margin-top:0.45rem;display:flex;gap:0.35rem;flex-wrap:wrap">
+        <button type="button" class="btn link tiny btn-rr-toggle" data-id="${p.id}" data-on="${p.enabled ? "1" : "0"}">${p.enabled ? "Pause" : "Activer"}</button>
+        <select class="input-sm tiny btn-rr-mode" data-id="${p.id}" style="max-width:130px">
+          <option value="normal" ${p.mode === "normal" ? "selected" : ""}>Normal</option>
+          <option value="unique" ${p.mode === "unique" ? "selected" : ""}>Unique</option>
+        </select>
+        <button type="button" class="btn link tiny btn-rr-del" data-id="${p.id}">Supprimer</button>
+      </div>
+    `;
+    list.appendChild(div);
+  }
+  list.querySelectorAll(".btn-rr-toggle").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.id);
+      const enabled = btn.dataset.on !== "1";
+      await fetch(
+        apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/reaction-roles/${id}`
+        ),
+        {
+          method: "PUT",
+          headers: authHeaders(),
+          credentials: "include",
+          body: JSON.stringify({ enabled }),
+        }
+      );
+      loadReactionRolesList();
+    });
+  });
+  list.querySelectorAll(".btn-rr-mode").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      const id = Number(sel.dataset.id);
+      await fetch(
+        apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/reaction-roles/${id}`
+        ),
+        {
+          method: "PUT",
+          headers: authHeaders(),
+          credentials: "include",
+          body: JSON.stringify({ mode: sel.value }),
+        }
+      );
+    });
+  });
+  list.querySelectorAll(".btn-rr-del").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.id);
+      const delMsg = confirm(
+        "Supprimer aussi le message Discord ?\n\nOK = supprimer le message\nAnnuler = garder le message"
+      );
+      const q = delMsg ? "?delete_message=1" : "";
+      if (!confirm(`Confirmer la suppression du panneau #${id} ?`)) return;
+      await fetch(
+        apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/reaction-roles/${id}${q}`
+        ),
+        { method: "DELETE", credentials: "include" }
+      );
+      loadReactionRolesList();
+    });
+  });
+}
+
+async function publishReactionRolePanel() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  const channelId = $("rr-channel").value;
+  if (!channelId) {
+    alert("Choisis un salon.");
+    return;
+  }
+  const entries = collectRrEntriesFromForm();
+  if (!entries.length) {
+    alert("Ajoute au moins une paire emoji → rôle.");
+    return;
+  }
+  const title = String($("rr-embed-title").value || "").trim();
+  const description = String($("rr-embed-desc").value || "").trim();
+  const color = parseEmbedColorInput($("rr-embed-color").value);
+  const embed =
+    title || description ? { title, description, color, fields: [] } : null;
+  const body = {
+    label: $("rr-label").value,
+    channel_id: channelId,
+    content: $("rr-content").value,
+    embed,
+    mode: $("rr-mode").value,
+    entries,
+  };
+  const btn = $("btn-rr-publish");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Publication…";
+  }
+  try {
+    const res = await fetch(
+      apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/reaction-roles`),
+      {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify(body),
+      }
+    );
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error || "Échec de la publication.");
+      return;
+    }
+    resetRrForm();
+    loadReactionRolesList();
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Publier le panneau";
+    }
+  }
+}
+
 function parseEmbedColorInput(raw) {
   const s = String(raw || "").trim();
   if (/^#?[0-9a-fA-F]{6}$/.test(s)) {
@@ -1997,6 +2254,7 @@ function setViewsDisabled(noBot) {
     "moderation",
     "warns",
     "announcements",
+    "reactionroles",
   ];
   for (const key of keys) {
     const el = viewEls.get(key);
@@ -2116,6 +2374,7 @@ async function applyGuildData(data) {
   await loadBotProfileForGuild(data.guild_id);
   renderCommandAccessPanel();
   if (getHashView() === "announcements") loadScheduledMessagesList();
+  if (getHashView() === "reactionroles") loadReactionRolesList();
   if (getHashView() === "embeds" && window.wingbotEmbedWorkbench) {
     window.wingbotEmbedWorkbench.refresh();
   }
@@ -3230,6 +3489,10 @@ document.addEventListener("keydown", (e) => {
 document.querySelectorAll(".fonda-tab").forEach((b) => {
   b.addEventListener("click", () => switchFondaTab(b.dataset.fondaTab));
 });
+$("btn-rr-add-entry")?.addEventListener("click", () => addRrEntryRow());
+$("btn-rr-publish")?.addEventListener("click", () => publishReactionRolePanel());
+$("btn-rr-refresh")?.addEventListener("click", () => loadReactionRolesList());
+
 $("btn-sched-save")?.addEventListener("click", () => saveScheduledMessage());
 $("btn-sched-cancel")?.addEventListener("click", () => resetSchedForm());
 $("btn-sched-refresh")?.addEventListener("click", () => loadScheduledMessagesList());

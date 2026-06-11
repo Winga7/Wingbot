@@ -119,6 +119,7 @@ function initDatabase() {
   migrateDashboardSessionsTable();
   migrateGuildWarningsTable();
   migrateScheduledMessagesTable();
+  migrateReactionRolePanelsTable();
 
   console.log("✅ Base de données initialisée");
 }
@@ -319,6 +320,176 @@ function listDueScheduledMessages(isoNow) {
     )
     .all(isoNow);
   return rows.map(formatScheduledRow);
+}
+
+function migrateReactionRolePanelsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS reaction_role_panels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      message_id TEXT,
+      label TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      embed_json TEXT,
+      mode TEXT NOT NULL DEFAULT 'normal',
+      entries TEXT NOT NULL DEFAULT '[]',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_rr_panels_guild ON reaction_role_panels(guild_id)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_rr_panels_message ON reaction_role_panels(guild_id, message_id)`
+  ).run();
+}
+
+const RR_MODES = new Set(["normal", "unique"]);
+
+function parseReactionEntries(raw) {
+  try {
+    const arr = JSON.parse(raw || "[]");
+    if (!Array.isArray(arr)) return [];
+    const out = [];
+    const seenEmoji = new Set();
+    const seenRole = new Set();
+    for (const e of arr) {
+      if (!e || typeof e !== "object") continue;
+      const emoji = String(e.emoji || "").trim();
+      const role_id = String(e.role_id || "").replace(/\D/g, "");
+      if (!emoji || !/^\d{17,20}$/.test(role_id)) continue;
+      if (seenEmoji.has(emoji) || seenRole.has(role_id)) continue;
+      seenEmoji.add(emoji);
+      seenRole.add(role_id);
+      out.push({ emoji, role_id });
+      if (out.length >= 20) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function formatReactionPanelRow(row) {
+  if (!row) return null;
+  let embed = null;
+  if (row.embed_json) {
+    try {
+      embed = JSON.parse(row.embed_json);
+    } catch {
+      embed = null;
+    }
+  }
+  return {
+    id: row.id,
+    guild_id: row.guild_id,
+    channel_id: row.channel_id,
+    message_id: row.message_id || null,
+    label: row.label || "",
+    content: row.content || "",
+    embed,
+    mode: RR_MODES.has(row.mode) ? row.mode : "normal",
+    entries: parseReactionEntries(row.entries),
+    enabled: !!row.enabled,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function listReactionRolePanels(guildId) {
+  const rows = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, message_id, label, content, embed_json, mode, entries, enabled, created_at, updated_at
+       FROM reaction_role_panels WHERE guild_id = ? ORDER BY id DESC`
+    )
+    .all(guildId);
+  return rows.map(formatReactionPanelRow);
+}
+
+function getReactionRolePanel(id, guildId) {
+  const row = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, message_id, label, content, embed_json, mode, entries, enabled, created_at, updated_at
+       FROM reaction_role_panels WHERE id = ? AND guild_id = ?`
+    )
+    .get(id, guildId);
+  return formatReactionPanelRow(row);
+}
+
+function getReactionRolePanelByMessage(guildId, messageId) {
+  const row = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, message_id, label, content, embed_json, mode, entries, enabled, created_at, updated_at
+       FROM reaction_role_panels WHERE guild_id = ? AND message_id = ? AND enabled = 1`
+    )
+    .get(guildId, String(messageId));
+  return formatReactionPanelRow(row);
+}
+
+function insertReactionRolePanel(guildId, data) {
+  const mode = RR_MODES.has(data.mode) ? data.mode : "normal";
+  const entries = parseReactionEntries(JSON.stringify(data.entries || []));
+  if (!entries.length) throw new Error("Au moins une paire emoji → rôle requise");
+  const r = db
+    .prepare(
+      `INSERT INTO reaction_role_panels
+        (guild_id, channel_id, message_id, label, content, embed_json, mode, entries, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      guildId,
+      data.channel_id,
+      data.message_id || null,
+      String(data.label || "").slice(0, 80),
+      String(data.content || ""),
+      data.embed ? JSON.stringify(data.embed) : null,
+      mode,
+      JSON.stringify(entries),
+      data.enabled === false ? 0 : 1
+    );
+  return getReactionRolePanel(r.lastInsertRowid, guildId);
+}
+
+function updateReactionRolePanel(id, guildId, patch) {
+  const cur = getReactionRolePanel(id, guildId);
+  if (!cur) return null;
+  const fields = [];
+  const vals = [];
+  if (patch.label != null) {
+    fields.push("label = ?");
+    vals.push(String(patch.label).slice(0, 80));
+  }
+  if (patch.enabled != null) {
+    fields.push("enabled = ?");
+    vals.push(patch.enabled ? 1 : 0);
+  }
+  if (patch.mode != null && RR_MODES.has(patch.mode)) {
+    fields.push("mode = ?");
+    vals.push(patch.mode);
+  }
+  if (patch.message_id != null) {
+    fields.push("message_id = ?");
+    vals.push(patch.message_id);
+  }
+  if (!fields.length) return cur;
+  fields.push("updated_at = CURRENT_TIMESTAMP");
+  vals.push(id, guildId);
+  db.prepare(
+    `UPDATE reaction_role_panels SET ${fields.join(", ")} WHERE id = ? AND guild_id = ?`
+  ).run(...vals);
+  return getReactionRolePanel(id, guildId);
+}
+
+function deleteReactionRolePanel(id, guildId) {
+  const r = db
+    .prepare(`DELETE FROM reaction_role_panels WHERE id = ? AND guild_id = ?`)
+    .run(id, guildId);
+  return r.changes > 0;
 }
 
 function advanceScheduledMessageAfterSend(id, guildId, sentAtIso) {
@@ -1887,4 +2058,10 @@ module.exports = {
   deleteScheduledMessage,
   listDueScheduledMessages,
   advanceScheduledMessageAfterSend,
+  listReactionRolePanels,
+  getReactionRolePanel,
+  getReactionRolePanelByMessage,
+  insertReactionRolePanel,
+  updateReactionRolePanel,
+  deleteReactionRolePanel,
 };
