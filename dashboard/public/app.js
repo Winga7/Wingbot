@@ -7,6 +7,7 @@ const VIEWS = new Set([
   "premium",
   "logs",
   "moderation",
+  "warns",
   "embeds",
   "custom",
   "commands",
@@ -257,7 +258,7 @@ function navigate(force = false) {
     });
   }
 
-  if (name === "moderation" && selectedGuildId && currentGuildHasBot()) {
+  if (name === "warns" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadWarningsList());
   }
 }
@@ -1050,10 +1051,14 @@ function renderCommands() {
   });
 }
 
+function isDashboardFounder() {
+  return !!internalAccess?.founder;
+}
+
 function defaultAntispamState() {
   return {
     enabled: false,
-    test_mode: true,
+    test_mode: false,
     cross_channel: true,
     trusted_member_days: 14,
     url_spam: {
@@ -1085,20 +1090,25 @@ function renderAntispamPanel() {
     guildState.antispam_config = defaultAntispamState();
   }
   const cfg = guildState.antispam_config;
+  const founder = isDashboardFounder();
+  const testModeBlock = founder
+    ? `
+    <label class="field-row switch-row">
+      <span><strong>Mode test</strong> — observe seulement, ne supprime rien</span>
+      <input type="checkbox" id="as-test" ${cfg.test_mode ? "checked" : ""} />
+    </label>
+    <p class="muted tiny" style="margin:0 0 0.75rem">
+      Calibre les détections avec le mode test + log <em>Antispam automatique</em> activé,
+      puis désactive le mode test pour appliquer les sanctions.
+    </p>`
+    : "";
 
   root.innerHTML = `
     <label class="field-row switch-row">
       <span>Antispam activé</span>
       <input type="checkbox" id="as-enabled" ${cfg.enabled ? "checked" : ""} />
     </label>
-    <label class="field-row switch-row">
-      <span><strong>Mode test</strong> — observe seulement, ne supprime rien</span>
-      <input type="checkbox" id="as-test" ${cfg.test_mode !== false ? "checked" : ""} />
-    </label>
-    <p class="muted tiny" style="margin:0 0 0.75rem">
-      Commence toujours avec le mode test + log <em>Antispam automatique</em> activé.
-      Quand les détections te semblent justes, désactive le mode test.
-    </p>
+    ${testModeBlock}
     <label class="field-row switch-row">
       <span>Détection multi-salons (comptes hackés)</span>
       <input type="checkbox" id="as-cross" ${cfg.cross_channel ? "checked" : ""} />
@@ -1167,7 +1177,7 @@ function renderAntispamPanel() {
 
   const sync = () => {
     cfg.enabled = $("as-enabled").checked;
-    cfg.test_mode = $("as-test").checked;
+    if ($("as-test")) cfg.test_mode = $("as-test").checked;
     cfg.cross_channel = $("as-cross").checked;
     cfg.trusted_member_days = Number($("as-trusted-days").value);
     cfg.url_spam.enabled = $("as-url-on").checked;
@@ -1186,9 +1196,8 @@ function renderAntispamPanel() {
     setDirty(true);
   };
 
-  for (const id of [
+  const fieldIds = [
     "as-enabled",
-    "as-test",
     "as-cross",
     "as-trusted-days",
     "as-url-on",
@@ -1204,7 +1213,9 @@ function renderAntispamPanel() {
     "as-timeout-repeat",
     "as-timeout-esc",
     "as-decay",
-  ]) {
+  ];
+  if (founder) fieldIds.splice(1, 0, "as-test");
+  for (const id of fieldIds) {
     const el = $(id);
     if (!el) continue;
     el.addEventListener("change", sync);
@@ -1674,6 +1685,7 @@ function setViewsDisabled(noBot) {
     "custom",
     "embeds",
     "moderation",
+    "warns",
   ];
   for (const key of keys) {
     const el = viewEls.get(key);
@@ -1777,7 +1789,7 @@ async function applyGuildData(data) {
   renderCustomCommands();
   renderAntispamPanel();
   renderWarnConfigPanel();
-  if (getHashView() === "moderation") loadWarningsList();
+  if (getHashView() === "warns") loadWarningsList();
   updateOverview();
 
   await refreshDiscordForGuild(data.guild_id);
@@ -2157,6 +2169,10 @@ async function save() {
     warn_config: { ...guildState.warn_config },
     custom_commands: customPayload,
   };
+  if (!isDashboardFounder()) {
+    const { test_mode, ...antispamRest } = body.antispam_config;
+    body.antispam_config = antispamRest;
+  }
 
   try {
     const avatarInput = $("input-bot-avatar-url");

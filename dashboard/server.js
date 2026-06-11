@@ -1160,7 +1160,16 @@ app.put(
       });
     }
     ensureGuildLogRow(guildId);
-    applyGuildSettingsPatch(guildId, req.body || {});
+    const patch = { ...(req.body || {}) };
+    if (
+      !isFounderUser(req.discordSession?.userId) &&
+      patch.antispam_config &&
+      typeof patch.antispam_config === "object"
+    ) {
+      const { test_mode, ...antispamRest } = patch.antispam_config;
+      patch.antispam_config = antispamRest;
+    }
+    applyGuildSettingsPatch(guildId, patch);
     res.json(getGuildDashboardPayload(guildId));
   } catch (e) {
     console.error(e);

@@ -81,6 +81,12 @@
                 </span>
                 <span class="nav-label">Outils mod</span>
               </a>
+              <a href="#warns" class="nav-link" data-view="warns">
+                <span class="nav-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </span>
+                <span class="nav-label">Warns</span>
+              </a>
             </div>
           </div>
 
@@ -746,8 +752,29 @@
               <div id="antispam-panel"></div>
             </div>
 
+            <div class="panel-block">
+              <h3>Commandes manuelles</h3>
+              <ul class="mod-doc-list muted">
+                <li><strong class="mono">kick</strong> — Expulser (<code>KickMembers</code>)</li>
+                <li><strong class="mono">ban</strong> — Bannir (<code>BanMembers</code>)</li>
+                <li><strong class="mono">timeout</strong> / <strong class="mono">untimeout</strong> — Sourdine (<code>ModerateMembers</code>)</li>
+                <li><strong class="mono">slowmode</strong> — Mode lent du salon (<code>ManageChannels</code>)</li>
+                <li><strong class="mono">clear</strong> — Purge de messages (<code>ManageMessages</code>)</li>
+              </ul>
+              <p class="muted tiny">
+                Active le log <strong>Antispam</strong> dans l’onglet Logs. Les warns sont dans l’onglet <strong>Warns</strong>.
+              </p>
+            </div>
+          </section>
+
+          <section class="view" id="view-warns" hidden>
+            <div class="view-head">
+              <h2>Warns</h2>
+              <p class="muted tiny">Avertissements, sanctions automatiques et historique</p>
+            </div>
+
             <div class="panel-block" id="warn-config-root">
-              <h3>Avertissements (warns)</h3>
+              <h3>Configuration</h3>
               <p class="muted tiny">Sanctions automatiques quand le seuil est atteint. Les warns antispam comptent aussi.</p>
               <div id="warn-config-panel"></div>
             </div>
@@ -765,15 +792,14 @@
             </div>
 
             <div class="panel-block">
-              <h3>Commandes manuelles</h3>
+              <h3>Commandes</h3>
               <ul class="mod-doc-list muted">
                 <li><strong class="mono">warn</strong> — Enregistre un warn (+ log mod si activé)</li>
                 <li><strong class="mono">warns</strong> — Liste les warns d’un membre</li>
                 <li><strong class="mono">unwarn</strong> — Retire un warn par ID ou tous (<code>unwarn all @membre</code>)</li>
-                <li><strong class="mono">kick</strong> / <strong class="mono">ban</strong> / <strong class="mono">timeout</strong> / <strong class="mono">clear</strong> …</li>
               </ul>
               <p class="muted tiny">
-                Active le log <strong>Avertissements</strong> et <strong>Antispam</strong> dans l’onglet Logs.
+                Active le log <strong>Avertissements</strong> dans l’onglet Logs.
               </p>
             </div>
           </section>
