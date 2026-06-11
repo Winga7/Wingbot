@@ -496,11 +496,12 @@ async function refreshBotBranding() {
 }
 
 function escapeHtml(s) {
-  return String(s)
+  return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function updateInviteBanner() {
@@ -1347,14 +1348,6 @@ async function loadWarningsList() {
   } catch {
     panel.textContent = "Erreur réseau.";
   }
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function renderCustomCommands() {
@@ -2871,15 +2864,6 @@ function stopFondaDmPolling() {
 function defaultAvatarFor(userId) {
   const n = Number(BigInt(String(userId || "0")) % 5n);
   return `https://cdn.discordapp.com/embed/avatars/${n}.png`;
-}
-
-function escapeHtml(s) {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function escapeAttr(s) {
