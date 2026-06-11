@@ -279,39 +279,34 @@ function setSidebarNavVisible(visible) {
   else nav.setAttribute("hidden", "");
 }
 
-function shouldBootDashboard() {
+function clearOAuthConnectedQuery() {
   try {
-    if (sessionStorage.getItem("wingbot.dashboard") === "1") return true;
-    if (/[?&]discord=connected(?:&|$)/.test(location.search)) return true;
+    if (!/[?&]discord=connected(?:&|$)/.test(location.search)) return;
+    const u = new URL(location.href);
+    u.searchParams.delete("discord");
+    u.searchParams.delete("reason");
+    const qs = u.searchParams.toString();
+    history.replaceState(
+      null,
+      "",
+      u.pathname + (qs ? `?${qs}` : "") + u.hash
+    );
   } catch {
     /* ignore */
   }
-  return false;
 }
 
-/** Affiche le shell dashboard sans attendre les API (évite le flash landing au refresh). */
-function restoreDashboardShellIfCached() {
-  if (!shouldBootDashboard()) return;
-  appMode = "dashboard";
-  document.documentElement.classList.add("dash-boot");
-  const app = $("app");
-  app?.classList.add("app--dashboard");
-  app?.classList.remove("app--landing");
-  $("landing-page")?.setAttribute("hidden", "");
-  $("workspace")?.removeAttribute("hidden");
-  $("save-dock")?.removeAttribute("hidden");
-  document.querySelector(".foot")?.removeAttribute("hidden");
-  stopLandingEffects();
+/** Relance les animations landing (cassées si la page a booté masquée). */
+function restartLandingReveal() {
+  const inner = document.querySelector(".landing-inner--reveal");
+  if (!inner) return;
+  inner.classList.remove("landing-inner--reveal");
+  void inner.offsetWidth;
+  inner.classList.add("landing-inner--reveal");
 }
 
 function showLandingPage() {
   appMode = "landing";
-  try {
-    sessionStorage.removeItem("wingbot.dashboard");
-  } catch {
-    /* ignore */
-  }
-  document.documentElement.classList.remove("dash-boot");
   const app = $("app");
   app?.classList.remove("app--dashboard");
   app?.classList.add("app--landing");
@@ -321,17 +316,12 @@ function showLandingPage() {
   $("stats-section")?.setAttribute("hidden", "");
   $("save-dock")?.setAttribute("hidden", "");
   document.querySelector(".foot")?.setAttribute("hidden", "");
+  restartLandingReveal();
   initLandingEffects();
 }
 
 function showDashboard() {
   appMode = "dashboard";
-  try {
-    sessionStorage.setItem("wingbot.dashboard", "1");
-  } catch {
-    /* ignore */
-  }
-  document.documentElement.classList.add("dash-boot");
   stopLandingEffects();
   const app = $("app");
   app?.classList.add("app--dashboard");
@@ -1873,9 +1863,11 @@ async function loadData() {
   $("error").textContent = "";
   setDiscordOAuthHref();
 
+  try {
   const st = await fetch(apiUrl("/api/auth/discord/status"), fetchOptsGet());
   if (gen !== loadDataGen) return;
   if (!st.ok) {
+    showLandingPage();
     $("error").hidden = false;
     $("error").textContent = "Impossible de vérifier la session Discord.";
     return;
@@ -1903,6 +1895,7 @@ async function loadData() {
   }
 
   showDashboard();
+  clearOAuthConnectedQuery();
   discordOAuthConnected = true;
 
   const brandingP = Promise.all([
@@ -2076,6 +2069,14 @@ async function loadData() {
 
   selectedGuildId = null;
   showGuildPicker();
+  } catch (e) {
+    console.error("[dashboard] loadData", e);
+    if (gen !== loadDataGen) return;
+    showLandingPage();
+    $("error").hidden = false;
+    $("error").textContent =
+      "Erreur au chargement du dashboard. Vérifie que le serveur tourne (npm run dashboard).";
+  }
 }
 
 async function onGuildChange(opts = {}) {
@@ -2926,7 +2927,6 @@ $("btn-refresh-vip")?.addEventListener("click", () => {
 setDiscordOAuthHref();
 initViewNavCache();
 initNavSections();
-restoreDashboardShellIfCached();
 
 $("sidebar-nav")?.addEventListener("click", (e) => {
   const a = e.target.closest(".nav-link[data-view]");

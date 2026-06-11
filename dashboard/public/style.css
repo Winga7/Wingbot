@@ -193,23 +193,6 @@ body::after {
   display: flex !important;
 }
 
-html.dash-boot #app {
-  grid-template-columns: 272px minmax(0, 1fr);
-  max-width: 1680px;
-}
-
-html.dash-boot #app .sidebar {
-  display: flex !important;
-}
-
-html.dash-boot #landing-page {
-  display: none !important;
-}
-
-html.dash-boot #workspace {
-  display: flex !important;
-}
-
 /* ========== Sidebar ========== */
 
 .sidebar {

@@ -13,32 +13,6 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
-    <style id="wingbot-dash-boot">
-      html.dash-boot #landing-page {
-        display: none !important;
-        visibility: hidden !important;
-      }
-      html.dash-boot #workspace {
-        display: flex !important;
-      }
-      html.dash-boot #app {
-        grid-template-columns: 272px minmax(0, 1fr) !important;
-        max-width: 1680px;
-      }
-      html.dash-boot #app .sidebar {
-        display: flex !important;
-      }
-    </style>
-    <script>
-      (function () {
-        try {
-          var boot =
-            sessionStorage.getItem("wingbot.dashboard") === "1" ||
-            /[?&]discord=connected(?:&|$)/.test(location.search);
-          if (boot) document.documentElement.classList.add("dash-boot");
-        } catch (e) {}
-      })();
-    </script>
   </head>
   <body>
     <div class="app app--landing" id="app">
@@ -816,7 +790,7 @@
           </section>
         </div>
       </div>
-      
+      </div><!-- #workspace -->
 
       <main class="landing-page" id="landing-page">
         <div class="landing-aurora" aria-hidden="true">
