@@ -757,20 +757,34 @@
 
           <section class="view" id="view-moderation" hidden>
             <div class="view-head">
-              <h2>Outils mod</h2>
-              <p class="muted tiny">Commandes slash et préfixe — permissions Discord requises</p>
+              <h2>Modération</h2>
+              <p class="muted tiny">Antispam automatique + commandes manuelles</p>
             </div>
+
+            <div class="panel-block" id="antispam-panel-root">
+              <div class="panel-block-head">
+                <h3>Antispam</h3>
+                <p class="muted tiny">
+                  Détecte les comptes compromis (liens ou images postés sur plusieurs salons).
+                  Supprime le message, envoie un MP d’avertissement, puis applique une sourdine Discord (messages + vocal) en cas de récidive.
+                </p>
+              </div>
+              <div id="antispam-panel"></div>
+            </div>
+
             <div class="panel-block">
+              <h3>Commandes manuelles</h3>
               <ul class="mod-doc-list muted">
                 <li><strong class="mono">kick</strong> — Expulser (<code>KickMembers</code>)</li>
-                <li><strong class="mono">ban</strong> — Bannir, option jours de messages effacés (<code>BanMembers</code>)</li>
+                <li><strong class="mono">ban</strong> — Bannir (<code>BanMembers</code>)</li>
                 <li><strong class="mono">timeout</strong> / <strong class="mono">untimeout</strong> — Sourdine Discord (<code>ModerateMembers</code>)</li>
-                <li><strong class="mono">warn</strong> — Avertissement + MP si possible (<code>ModerateMembers</code>)</li>
+                <li><strong class="mono">warn</strong> — Avertissement + MP (<code>ModerateMembers</code>)</li>
                 <li><strong class="mono">slowmode</strong> — Mode lent du salon (<code>ManageChannels</code>)</li>
                 <li><strong class="mono">clear</strong> — Purge de messages (<code>ManageMessages</code>)</li>
               </ul>
               <p class="muted tiny">
-                Après mise à jour du code, redéploie les slash : <code>npm run deploy</code> (nécessite <code>GUILD_ID</code> dans <code>.env</code>).
+                Le bot doit avoir <code>Gérer les messages</code> et <code>Modérer les membres</code>.
+                Active le log <strong>Antispam automatique</strong> dans l’onglet Logs pour suivre les sanctions.
               </p>
             </div>
           </section>

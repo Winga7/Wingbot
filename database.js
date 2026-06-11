@@ -952,6 +952,12 @@ function migrateGuildConfigExtras() {
       "UPDATE guild_config SET command_access = ? WHERE command_access IS NULL"
     ).run("{}");
   }
+  if (!names.has("antispam_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN antispam_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET antispam_config = ? WHERE antispam_config IS NULL"
+    ).run("{}");
+  }
 }
 
 const COMMAND_GROUP_IDS = new Set(COMMAND_GROUPS.map((g) => g.id));
@@ -1006,6 +1012,18 @@ function getCommandAccessConfig(guildId) {
     .prepare("SELECT command_access FROM guild_config WHERE guild_id = ?")
     .get(guildId);
   return parseCommandAccess(row?.command_access);
+}
+
+const {
+  parseAntispamConfig,
+  mergeAntispamPatch,
+} = require("./lib/antispamConfig");
+
+function getAntispamConfig(guildId) {
+  const row = db
+    .prepare("SELECT antispam_config FROM guild_config WHERE guild_id = ?")
+    .get(guildId);
+  return parseAntispamConfig(row?.antispam_config);
 }
 
 function getDisabledCommandGroups(guildId) {
@@ -1269,6 +1287,7 @@ function getGuildDashboardPayload(guildId) {
     commands_disabled: getDisabledCommands(guildId),
     command_groups_disabled: getDisabledCommandGroups(guildId),
     command_access: getCommandAccessConfig(guildId),
+    antispam_config: getAntispamConfig(guildId),
     custom_commands: getCustomCommands(guildId),
   };
 }
@@ -1395,6 +1414,16 @@ function applyGuildSettingsPatch(guildId, patch) {
   if (Object.prototype.hasOwnProperty.call(patch, "custom_commands")) {
     replaceCustomCommands(guildId, patch.custom_commands);
   }
+
+  if (patch.antispam_config != null) {
+    if (typeof patch.antispam_config !== "object" || patch.antispam_config === null) {
+      throw new Error("antispam_config invalide");
+    }
+    const next = mergeAntispamPatch(getAntispamConfig(guildId), patch.antispam_config);
+    db.prepare(
+      "UPDATE guild_config SET antispam_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+    ).run(JSON.stringify(next), guildId);
+  }
 }
 
 // Activer/désactiver un type de log (compat commandes /togglelog)
@@ -1501,6 +1530,7 @@ module.exports = {
   getDisabledCommands,
   isCommandEnabled,
   getCommandAccessConfig,
+  getAntispamConfig,
   getCustomCommands,
   getCustomCommandReply,
   getGuildDashboardPayload,

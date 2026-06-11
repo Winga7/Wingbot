@@ -1055,6 +1055,168 @@ function renderCommands() {
   });
 }
 
+function defaultAntispamState() {
+  return {
+    enabled: false,
+    test_mode: true,
+    cross_channel: true,
+    trusted_member_days: 14,
+    url_spam: {
+      enabled: true,
+      max_messages: 3,
+      window_sec: 45,
+      min_channels: 3,
+      duplicate_link_trigger: true,
+    },
+    image_spam: {
+      enabled: true,
+      max_messages: 4,
+      window_sec: 90,
+      min_channels: 3,
+    },
+    immune_role_ids: [],
+    immune_channel_ids: [],
+    timeout_min_repeat: 60,
+    timeout_min_escalated: 240,
+    strikes_before_timeout: 3,
+    strike_decay_hours: 72,
+  };
+}
+
+function renderAntispamPanel() {
+  const root = $("antispam-panel");
+  if (!root || !guildState) return;
+  if (!guildState.antispam_config) {
+    guildState.antispam_config = defaultAntispamState();
+  }
+  const cfg = guildState.antispam_config;
+
+  root.innerHTML = `
+    <label class="field-row switch-row">
+      <span>Antispam activé</span>
+      <input type="checkbox" id="as-enabled" ${cfg.enabled ? "checked" : ""} />
+    </label>
+    <label class="field-row switch-row">
+      <span><strong>Mode test</strong> — observe seulement, ne supprime rien</span>
+      <input type="checkbox" id="as-test" ${cfg.test_mode !== false ? "checked" : ""} />
+    </label>
+    <p class="muted tiny" style="margin:0 0 0.75rem">
+      Commence toujours avec le mode test + log <em>Antispam automatique</em> activé.
+      Quand les détections te semblent justes, désactive le mode test.
+    </p>
+    <label class="field-row switch-row">
+      <span>Détection multi-salons (comptes hackés)</span>
+      <input type="checkbox" id="as-cross" ${cfg.cross_channel ? "checked" : ""} />
+    </label>
+    <label class="field-row">
+      <span>Membre fidèle (jours sur le serveur)</span>
+      <input type="number" id="as-trusted-days" class="input-sm" min="0" max="365" value="${cfg.trusted_member_days ?? 14}" />
+      <span class="muted tiny">seuils +1 si membre plus ancien</span>
+    </label>
+    <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Spam de liens</h4>
+    <label class="field-row switch-row">
+      <span>Activer</span>
+      <input type="checkbox" id="as-url-on" ${cfg.url_spam.enabled ? "checked" : ""} />
+    </label>
+    <label class="field-row">
+      <span>Messages max / fenêtre</span>
+      <input type="number" id="as-url-max" class="input-sm" min="2" max="20" value="${cfg.url_spam.max_messages}" />
+      <input type="number" id="as-url-win" class="input-sm" min="10" max="300" value="${cfg.url_spam.window_sec}" title="secondes" />
+      <span class="muted tiny">sec</span>
+    </label>
+    <label class="field-row">
+      <span>Salons min. (multi-salons)</span>
+      <input type="number" id="as-url-ch" class="input-sm" min="2" max="20" value="${cfg.url_spam.min_channels}" />
+    </label>
+    <label class="field-row switch-row">
+      <span>Même lien sur 2+ salons = alerte immédiate</span>
+      <input type="checkbox" id="as-url-dup" ${cfg.url_spam.duplicate_link_trigger !== false ? "checked" : ""} />
+    </label>
+    <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Spam d’images (fichiers uploadés)</h4>
+    <label class="field-row switch-row">
+      <span>Activer</span>
+      <input type="checkbox" id="as-img-on" ${cfg.image_spam.enabled ? "checked" : ""} />
+    </label>
+    <label class="field-row">
+      <span>Messages max / fenêtre</span>
+      <input type="number" id="as-img-max" class="input-sm" min="2" max="30" value="${cfg.image_spam.max_messages}" />
+      <input type="number" id="as-img-win" class="input-sm" min="15" max="600" value="${cfg.image_spam.window_sec}" />
+      <span class="muted tiny">sec</span>
+    </label>
+    <label class="field-row">
+      <span>Salons min. (multi-salons)</span>
+      <input type="number" id="as-img-ch" class="input-sm" min="2" max="20" value="${cfg.image_spam.min_channels}" />
+    </label>
+    <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Sanctions</h4>
+    <label class="field-row">
+      <span>Détections avant sourdine</span>
+      <input type="number" id="as-strikes" class="input-sm" min="2" max="10" value="${cfg.strikes_before_timeout}" />
+    </label>
+    <label class="field-row">
+      <span>Sourdine récidive (min)</span>
+      <input type="number" id="as-timeout-repeat" class="input-sm" min="5" max="40320" value="${cfg.timeout_min_repeat}" />
+    </label>
+    <label class="field-row">
+      <span>Sourdine récidive forte (min)</span>
+      <input type="number" id="as-timeout-esc" class="input-sm" min="5" max="40320" value="${cfg.timeout_min_escalated}" />
+    </label>
+    <label class="field-row">
+      <span>Réinitialiser strikes après (h)</span>
+      <input type="number" id="as-decay" class="input-sm" min="1" max="720" value="${cfg.strike_decay_hours}" />
+    </label>
+    <p class="muted tiny" style="margin-top:0.75rem">
+      Un lien YouTube dans un salon ≠ spam. Les aperçus de lien ne comptent pas comme images.
+      Admins, staff et salons ignorés (Permissions) sont exclus.
+    </p>
+  `;
+
+  const sync = () => {
+    cfg.enabled = $("as-enabled").checked;
+    cfg.test_mode = $("as-test").checked;
+    cfg.cross_channel = $("as-cross").checked;
+    cfg.trusted_member_days = Number($("as-trusted-days").value);
+    cfg.url_spam.enabled = $("as-url-on").checked;
+    cfg.url_spam.duplicate_link_trigger = $("as-url-dup").checked;
+    cfg.url_spam.max_messages = Number($("as-url-max").value);
+    cfg.url_spam.window_sec = Number($("as-url-win").value);
+    cfg.url_spam.min_channels = Number($("as-url-ch").value);
+    cfg.image_spam.enabled = $("as-img-on").checked;
+    cfg.image_spam.max_messages = Number($("as-img-max").value);
+    cfg.image_spam.window_sec = Number($("as-img-win").value);
+    cfg.image_spam.min_channels = Number($("as-img-ch").value);
+    cfg.strikes_before_timeout = Number($("as-strikes").value);
+    cfg.timeout_min_repeat = Number($("as-timeout-repeat").value);
+    cfg.timeout_min_escalated = Number($("as-timeout-esc").value);
+    cfg.strike_decay_hours = Number($("as-decay").value);
+    setDirty(true);
+  };
+
+  for (const id of [
+    "as-enabled",
+    "as-test",
+    "as-cross",
+    "as-trusted-days",
+    "as-url-on",
+    "as-url-dup",
+    "as-url-max",
+    "as-url-win",
+    "as-url-ch",
+    "as-img-on",
+    "as-img-max",
+    "as-img-win",
+    "as-img-ch",
+    "as-strikes",
+    "as-timeout-repeat",
+    "as-timeout-esc",
+    "as-decay",
+  ]) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener("change", sync);
+    if (el.type === "number") el.addEventListener("input", sync);
+  }
+}
+
 function renderCustomCommands() {
   const root = $("custom-commands-root");
   if (!root || !guildState) return;
@@ -1473,6 +1635,12 @@ async function applyGuildData(data) {
           response: r.response ?? "",
         }))
       : [],
+    antispam_config: data.antispam_config
+      ? { ...defaultAntispamState(), ...data.antispam_config,
+          url_spam: { ...defaultAntispamState().url_spam, ...(data.antispam_config.url_spam || {}) },
+          image_spam: { ...defaultAntispamState().image_spam, ...(data.antispam_config.image_spam || {}) },
+        }
+      : defaultAntispamState(),
   };
 
   setDirty(false);
@@ -1481,6 +1649,7 @@ async function applyGuildData(data) {
   renderGroups();
   renderCommands();
   renderCustomCommands();
+  renderAntispamPanel();
   updateOverview();
 
   await refreshDiscordForGuild(data.guild_id);
@@ -1845,6 +2014,7 @@ async function save() {
     commands_disabled: [...guildState.commands_disabled].filter((id) => id !== "help"),
     command_groups_disabled: [...(guildState.command_groups_disabled || [])],
     command_access: { ...guildState.command_access },
+    antispam_config: { ...guildState.antispam_config },
     custom_commands: customPayload,
   };
 

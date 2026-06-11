@@ -26,6 +26,7 @@ const ALL_KEYS = [
   "mod_timeout",
   "mod_ban",
   "mod_unban",
+  "mod_antispam",
   "srv_channel",
   "srv_thread",
   "srv_emoji",
@@ -61,7 +62,7 @@ const LEGACY_MAP = {
     "voc_srv_deaf",
   ],
   log_roles: ["role_add", "role_remove", "nick_change"],
-  log_moderation: ["mod_timeout", "mod_ban", "mod_unban"],
+  log_moderation: ["mod_timeout", "mod_ban", "mod_unban", "mod_antispam"],
   log_server: [
     "srv_channel",
     "srv_thread",
@@ -147,6 +148,7 @@ const DASHBOARD_GROUPS = [
       { id: "mod_timeout", label: "Timeout (exclusion temporaire)" },
       { id: "mod_ban", label: "Bannissement" },
       { id: "mod_unban", label: "Débannissement" },
+      { id: "mod_antispam", label: "Antispam automatique" },
     ],
   },
   {
