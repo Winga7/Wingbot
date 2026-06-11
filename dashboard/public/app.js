@@ -1408,10 +1408,72 @@ function resetRrForm() {
   $("rr-embed-desc").value = "";
   $("rr-embed-color").value = "#5865f2";
   $("rr-mode").value = "normal";
+  if ($("rr-source")) $("rr-source").value = "new";
+  if ($("rr-message-ref")) $("rr-message-ref").value = "";
+  updateRrSourceUI();
   const root = $("rr-entries-root");
   if (root) root.innerHTML = "";
   addRrEntryRow();
   addRrEntryRow();
+}
+
+function parseDiscordMessageRef(raw, guildId) {
+  const s = String(raw || "").trim();
+  const link = s.match(
+    /discord(?:app)?\.com\/channels\/(\d{17,20})\/(\d{17,20})\/(\d{17,20})/
+  );
+  if (link) {
+    return {
+      guild_id: link[1],
+      channel_id: link[2],
+      message_id: link[3],
+    };
+  }
+  const ids = s.match(/\d{17,20}/g);
+  if (ids?.length >= 3) {
+    return {
+      guild_id: ids[0],
+      channel_id: ids[1],
+      message_id: ids[2],
+    };
+  }
+  if (ids?.length === 1 || /^\d{17,20}$/.test(s)) {
+    return { message_id: ids?.[0] || s };
+  }
+  return null;
+}
+
+function updateRrSourceUI() {
+  const existing = $("rr-source")?.value === "existing";
+  const newFields = $("rr-new-message-fields");
+  const existingFields = $("rr-existing-fields");
+  const btn = $("btn-rr-publish");
+  if (newFields) newFields.hidden = existing;
+  if (existingFields) existingFields.hidden = !existing;
+  if (btn) {
+    btn.textContent = existing
+      ? "Activer sur le message"
+      : "Publier le panneau";
+  }
+}
+
+function applyRrMessageRefFromInput() {
+  const input = $("rr-message-ref");
+  const channelSel = $("rr-channel");
+  if (!input || !channelSel || !selectedGuildId) return;
+  const parsed = parseDiscordMessageRef(input.value, selectedGuildId);
+  if (!parsed?.message_id) return;
+  if (parsed.guild_id && parsed.guild_id !== selectedGuildId) {
+    alert("Ce lien ne correspond pas au serveur sélectionné.");
+    return;
+  }
+  if (parsed.channel_id) {
+    const hasChannel = [...channelSel.options].some(
+      (o) => o.value === parsed.channel_id
+    );
+    if (hasChannel) channelSel.value = parsed.channel_id;
+    else alert("Salon du lien introuvable dans la liste — vérifie que le bot y a accès.");
+  }
 }
 
 function fillRrChannelSelect() {
@@ -1569,23 +1631,49 @@ async function publishReactionRolePanel() {
     alert("Ajoute au moins une paire emoji → rôle.");
     return;
   }
+  const useExisting = $("rr-source")?.value === "existing";
+  let messageId = null;
+  if (useExisting) {
+    applyRrMessageRefFromInput();
+    const parsed = parseDiscordMessageRef(
+      $("rr-message-ref")?.value,
+      selectedGuildId
+    );
+    messageId = parsed?.message_id || null;
+    if (!messageId) {
+      alert("Indique l'ID du message ou un lien Discord valide.");
+      return;
+    }
+    if (parsed?.guild_id && parsed.guild_id !== selectedGuildId) {
+      alert("Ce message n'appartient pas au serveur sélectionné.");
+      return;
+    }
+    if (parsed?.channel_id && parsed.channel_id !== channelId) {
+      alert("Le salon du lien ne correspond pas au salon sélectionné.");
+      return;
+    }
+  }
   const title = String($("rr-embed-title").value || "").trim();
   const description = String($("rr-embed-desc").value || "").trim();
   const color = parseEmbedColorInput($("rr-embed-color").value);
   const embed =
-    title || description ? { title, description, color, fields: [] } : null;
+    !useExisting && (title || description)
+      ? { title, description, color, fields: [] }
+      : null;
   const body = {
     label: $("rr-label").value,
     channel_id: channelId,
-    content: $("rr-content").value,
+    content: useExisting ? "" : $("rr-content").value,
     embed,
     mode: $("rr-mode").value,
     entries,
   };
+  if (messageId) body.message_id = messageId;
   const btn = $("btn-rr-publish");
+  const btnDefault = useExisting ? "Activer sur le message" : "Publier le panneau";
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "Publication…";
+    btn.textContent = useExisting ? "Activation…" : "Publication…";
   }
   try {
     const res = await fetch(
@@ -1607,7 +1695,7 @@ async function publishReactionRolePanel() {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = "Publier le panneau";
+      btn.textContent = btnDefault;
     }
   }
 }
@@ -3492,6 +3580,11 @@ document.querySelectorAll(".fonda-tab").forEach((b) => {
 $("btn-rr-add-entry")?.addEventListener("click", () => addRrEntryRow());
 $("btn-rr-publish")?.addEventListener("click", () => publishReactionRolePanel());
 $("btn-rr-refresh")?.addEventListener("click", () => loadReactionRolesList());
+$("rr-source")?.addEventListener("change", () => updateRrSourceUI());
+$("rr-message-ref")?.addEventListener("change", () => applyRrMessageRefFromInput());
+$("rr-message-ref")?.addEventListener("paste", () => {
+  setTimeout(() => applyRrMessageRefFromInput(), 0);
+});
 
 $("btn-sched-save")?.addEventListener("click", () => saveScheduledMessage());
 $("btn-sched-cancel")?.addEventListener("click", () => resetSchedForm());

@@ -657,7 +657,7 @@
           <section class="view" id="view-reactionroles" hidden>
             <div class="view-head">
               <h2>Réactions rôles</h2>
-              <p class="muted tiny">Publie un message avec des réactions : les membres obtiennent ou perdent des rôles en cliquant.</p>
+              <p class="muted tiny">Publie un nouveau message ou lie un message existant : les membres obtiennent ou perdent des rôles en réagissant.</p>
             </div>
             <div class="panel-block" id="rr-form-panel">
               <h3>Nouveau panneau</h3>
@@ -666,9 +666,23 @@
                 <input type="text" id="rr-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Rôles jeux" />
               </label>
               <label class="field-row">
+                <span>Source</span>
+                <select id="rr-source" class="input-sm input-wide">
+                  <option value="new">Nouveau message (envoyé par le bot)</option>
+                  <option value="existing">Message existant (déjà sur Discord)</option>
+                </select>
+              </label>
+              <label class="field-row">
                 <span>Salon</span>
                 <select id="rr-channel" class="input-sm input-wide"></select>
               </label>
+              <div id="rr-existing-fields" hidden>
+                <label class="field-row">
+                  <span>Message</span>
+                  <input type="text" id="rr-message-ref" class="input-sm input-wide mono" placeholder="ID du message ou lien Discord" />
+                </label>
+                <p class="muted tiny">Colle l’ID du message ou un lien du type <code>https://discord.com/channels/…/…/…</code>. Le salon sera rempli automatiquement si le lien correspond à ce serveur.</p>
+              </div>
               <label class="field-row">
                 <span>Mode</span>
                 <select id="rr-mode" class="input-sm">
@@ -676,6 +690,7 @@
                   <option value="unique">Unique — un seul rôle du panneau à la fois</option>
                 </select>
               </label>
+              <div id="rr-new-message-fields">
               <label class="field-row">
                 <span>Message</span>
                 <textarea id="rr-content" class="input-sm input-wide" rows="3" placeholder="Choisis tes rôles en réagissant ci-dessous !"></textarea>
@@ -697,6 +712,7 @@
                   </label>
                 </div>
               </details>
+              </div>
               <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Paires emoji → rôle</h4>
               <p class="muted tiny">Emoji Unicode (<code>✅</code>) ou custom (<code>&lt;:nom:123&gt;</code>). Le bot doit être au-dessus des rôles dans la hiérarchie.</p>
               <div id="rr-entries-root"></div>

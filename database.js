@@ -431,6 +431,15 @@ function getReactionRolePanelByMessage(guildId, messageId) {
   return formatReactionPanelRow(row);
 }
 
+function reactionRolePanelExistsForMessage(guildId, messageId) {
+  const row = db
+    .prepare(
+      `SELECT id FROM reaction_role_panels WHERE guild_id = ? AND message_id = ?`
+    )
+    .get(guildId, String(messageId));
+  return !!row;
+}
+
 function insertReactionRolePanel(guildId, data) {
   const mode = RR_MODES.has(data.mode) ? data.mode : "normal";
   const entries = parseReactionEntries(JSON.stringify(data.entries || []));
@@ -2061,6 +2070,7 @@ module.exports = {
   listReactionRolePanels,
   getReactionRolePanel,
   getReactionRolePanelByMessage,
+  reactionRolePanelExistsForMessage,
   insertReactionRolePanel,
   updateReactionRolePanel,
   deleteReactionRolePanel,

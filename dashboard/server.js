@@ -56,6 +56,7 @@ const {
   insertReactionRolePanel,
   updateReactionRolePanel,
   deleteReactionRolePanel,
+  reactionRolePanelExistsForMessage,
   DB_PATH,
 } = require("../database");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
@@ -1486,6 +1487,55 @@ async function publishReactionRoleMessage(guildId, channelId, body, entries) {
   return messageId;
 }
 
+async function attachReactionRoleToExistingMessage(
+  guildId,
+  channelId,
+  messageId,
+  entries
+) {
+  await assertGuildTextChannel(guildId, channelId);
+  if (reactionRolePanelExistsForMessage(guildId, messageId)) {
+    const err = new Error("Ce message a déjà un panneau réactions rôles");
+    err.status = 409;
+    throw err;
+  }
+  let msg;
+  try {
+    msg = await discordFetchJson(
+      `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`
+    );
+  } catch (e) {
+    if (e.status === 404) {
+      const err = new Error(
+        "Message introuvable dans ce salon (vérifie l'ID, le salon ou les permissions du bot)"
+      );
+      err.status = 404;
+      throw err;
+    }
+    throw e;
+  }
+  for (const entry of entries) {
+    await discordAddReaction(channelId, messageId, entry.emoji);
+    await new Promise((r) => setTimeout(r, 350));
+  }
+  const contentSnapshot = String(msg.content || "").trim();
+  let embedSnapshot = null;
+  if (msg.embeds?.length) {
+    const emb = msg.embeds[0];
+    embedSnapshot = {
+      title: emb.title || "",
+      description: emb.description || "",
+      color: emb.color ?? null,
+      fields: [],
+    };
+  }
+  return {
+    messageId: String(messageId),
+    content: contentSnapshot,
+    embed: embedSnapshot,
+  };
+}
+
 app.get(
   "/api/guilds/:guildId/reaction-roles",
   requireDiscordSession,
@@ -1520,21 +1570,38 @@ app.post(
       }
       const entries = normalizeReactionEntriesInput(req.body?.entries);
       const mode = req.body?.mode === "unique" ? "unique" : "normal";
-      const embed =
+      const existingMessageId = normalizeSnowflakeId(req.body?.message_id);
+      let messageId;
+      let content = String(req.body?.content || "");
+      let embed =
         req.body?.embed && typeof req.body.embed === "object"
           ? req.body.embed
           : null;
-      const messageId = await publishReactionRoleMessage(
-        guildId,
-        channelId,
-        { content: req.body?.content, embed },
-        entries
-      );
+
+      if (existingMessageId) {
+        const attached = await attachReactionRoleToExistingMessage(
+          guildId,
+          channelId,
+          existingMessageId,
+          entries
+        );
+        messageId = attached.messageId;
+        content = attached.content;
+        embed = attached.embed;
+      } else {
+        messageId = await publishReactionRoleMessage(
+          guildId,
+          channelId,
+          { content: req.body?.content, embed },
+          entries
+        );
+      }
+
       const row = insertReactionRolePanel(guildId, {
         channel_id: channelId,
         message_id: messageId,
         label: req.body?.label || "",
-        content: String(req.body?.content || ""),
+        content,
         embed,
         mode,
         entries,
