@@ -18,6 +18,8 @@ const MODERATION = [
   "timeout",
   "untimeout",
   "warn",
+  "warns",
+  "unwarn",
   "slowmode",
   "clear",
 ];

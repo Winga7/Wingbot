@@ -42,6 +42,10 @@ const {
   getDmThread,
   markDmThreadRead,
   updateDmThreadProfile,
+  listGuildWarnings,
+  deleteGuildWarning,
+  clearGuildWarningsForUser,
+  getGuildWarningById,
   DB_PATH,
 } = require("../database");
 const {
@@ -1163,6 +1167,71 @@ app.put(
     res.status(400).json({ error: String(e.message) });
   }
 });
+
+app.get(
+  "/api/guilds/:guildId/warnings",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const userId = normalizeSnowflakeId(req.query.user_id || "");
+      const limit = Math.min(Number(req.query.limit) || 50, 200);
+      const rows = listGuildWarnings(guildId, {
+        userId: userId || null,
+        limit,
+      });
+      res.json({ warnings: rows });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.delete(
+  "/api/guilds/:guildId/warnings/:warningId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.warningId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "warning_id invalide" });
+      }
+      const row = getGuildWarningById(guildId, id);
+      if (!row) {
+        return res.status(404).json({ error: "warn introuvable" });
+      }
+      deleteGuildWarning(guildId, id);
+      res.json({ ok: true, removed_id: id, user_id: row.user_id });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.delete(
+  "/api/guilds/:guildId/warnings/user/:userId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const userId = normalizeSnowflakeId(req.params.userId);
+      if (!userId) {
+        return res.status(400).json({ error: "user_id invalide" });
+      }
+      const n = clearGuildWarningsForUser(guildId, userId);
+      res.json({ ok: true, cleared: n, user_id: userId });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
 
 app.get("/api/commands-manifest", requireDiscordSession, (_req, res) => {
   res.json({ groups: COMMAND_GROUPS, commands: COMMANDS });

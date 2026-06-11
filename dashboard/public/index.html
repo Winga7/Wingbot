@@ -772,19 +772,34 @@
               <div id="antispam-panel"></div>
             </div>
 
+            <div class="panel-block" id="warn-config-root">
+              <h3>Avertissements (warns)</h3>
+              <p class="muted tiny">Sanctions automatiques quand le seuil est atteint. Les warns antispam comptent aussi.</p>
+              <div id="warn-config-panel"></div>
+            </div>
+
+            <div class="panel-block" id="warn-list-root">
+              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
+                <h3 style="margin:0">Warns actifs</h3>
+                <button type="button" class="btn ghost tiny" id="btn-refresh-warns">Rafraîchir</button>
+              </div>
+              <label class="field-row">
+                <span>Filtrer par ID membre</span>
+                <input type="text" id="warn-filter-user" class="input-sm mono input-wide" placeholder="Optionnel — 123456789012345678" />
+              </label>
+              <div id="warn-list-panel" class="warn-list-panel muted tiny">Charge un serveur pour afficher les warns.</div>
+            </div>
+
             <div class="panel-block">
               <h3>Commandes manuelles</h3>
               <ul class="mod-doc-list muted">
-                <li><strong class="mono">kick</strong> — Expulser (<code>KickMembers</code>)</li>
-                <li><strong class="mono">ban</strong> — Bannir (<code>BanMembers</code>)</li>
-                <li><strong class="mono">timeout</strong> / <strong class="mono">untimeout</strong> — Sourdine Discord (<code>ModerateMembers</code>)</li>
-                <li><strong class="mono">warn</strong> — Avertissement + MP (<code>ModerateMembers</code>)</li>
-                <li><strong class="mono">slowmode</strong> — Mode lent du salon (<code>ManageChannels</code>)</li>
-                <li><strong class="mono">clear</strong> — Purge de messages (<code>ManageMessages</code>)</li>
+                <li><strong class="mono">warn</strong> — Enregistre un warn (+ log mod si activé)</li>
+                <li><strong class="mono">warns</strong> — Liste les warns d’un membre</li>
+                <li><strong class="mono">unwarn</strong> — Retire un warn par ID ou tous (<code>unwarn all @membre</code>)</li>
+                <li><strong class="mono">kick</strong> / <strong class="mono">ban</strong> / <strong class="mono">timeout</strong> / <strong class="mono">clear</strong> …</li>
               </ul>
               <p class="muted tiny">
-                Le bot doit avoir <code>Gérer les messages</code> et <code>Modérer les membres</code>.
-                Active le log <strong>Antispam automatique</strong> dans l’onglet Logs pour suivre les sanctions.
+                Active le log <strong>Avertissements</strong> et <strong>Antispam</strong> dans l’onglet Logs.
               </p>
             </div>
           </section>

@@ -114,6 +114,18 @@ const COMMANDS = [
     description: "Avertir un membre",
   },
   {
+    id: "warns",
+    category: "moderation",
+    label: "warns",
+    description: "Lister les avertissements d’un membre",
+  },
+  {
+    id: "unwarn",
+    category: "moderation",
+    label: "unwarn",
+    description: "Retirer un ou tous les avertissements",
+  },
+  {
     id: "slowmode",
     category: "moderation",
     label: "slowmode",

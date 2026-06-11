@@ -6,12 +6,11 @@ const {
   isLogEnabled,
 } = require("../database");
 const { hasModAdminBypass } = require("../memberPerms");
+const { issueWarning } = require("../lib/warnService");
+const { getWarnConfig, countGuildWarnings } = require("../database");
 
 /** @type {Map<string, { events: SpamEvent[] }>} */
 const activity = new Map();
-
-/** @type {Map<string, { strikes: number, lastAt: number }>} */
-const strikes = new Map();
 
 const DISCORD_INVITE =
   /(?:https?:\/\/)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com\/invite)\/[\w-]+/i;
@@ -204,21 +203,6 @@ function channelIsImmune(channelId, cfg, access) {
   return ignore.has(channelId);
 }
 
-function getStrikeRecord(guildId, userId, decayMs) {
-  const key = trackerKey(guildId, userId);
-  const now = Date.now();
-  let rec = strikes.get(key);
-  if (rec && now - rec.lastAt > decayMs) {
-    rec = { strikes: 0, lastAt: now };
-    strikes.set(key, rec);
-  }
-  if (!rec) {
-    rec = { strikes: 0, lastAt: now };
-    strikes.set(key, rec);
-  }
-  return rec;
-}
-
 async function sendModLog(guild, embed) {
   if (!isLogEnabled(guild.id, "mod_antispam")) return;
   const channelId = getLogChannel(guild.id);
@@ -228,32 +212,22 @@ async function sendModLog(guild, embed) {
   await ch.send({ embeds: [embed] }).catch(() => null);
 }
 
-async function dmWarn(user, guildName, reason, timeoutMin) {
-  let text = `⚠️ **Antispam** sur **${guildName}**\n${reason}`;
-  if (timeoutMin > 0) {
-    text += `\n\nTu as été mis en **sourdine ${timeoutMin} min** (messages + vocal interdits).`;
-  } else {
-    text += `\n\nCe message a été supprimé. En cas de récidive, une sourdine automatique sera appliquée.`;
-  }
-  await user.send({ content: text }).catch(() => null);
-}
-
 async function applySanction(message, cfg, kind, evalResult) {
   const { guild, member, author, channel } = message;
   if (!guild || !member) return false;
 
-  const decayMs = cfg.strike_decay_hours * 60 * 60 * 1000;
-  const rec = getStrikeRecord(guild.id, author.id, decayMs);
-  const nextStrike = rec.strikes + 1;
-
-  let timeoutMin = 0;
-  if (nextStrike >= cfg.strikes_before_timeout + 1) {
-    timeoutMin = cfg.timeout_min_escalated;
-  } else if (nextStrike >= cfg.strikes_before_timeout) {
-    timeoutMin = cfg.timeout_min_repeat;
-  }
-
   const reasonLabel = evalResult.reason;
+  const warnCfg = getWarnConfig(guild.id);
+  const currentWarns = countGuildWarnings(guild.id, author.id);
+  const nextTotal = currentWarns + 1;
+
+  let simulatedTimeout = 0;
+  if (warnCfg.auto_timeout_enabled && nextTotal >= warnCfg.warns_before_timeout) {
+    simulatedTimeout =
+      nextTotal >= warnCfg.warns_before_timeout + 2
+        ? warnCfg.timeout_escalated_minutes
+        : warnCfg.timeout_minutes;
+  }
 
   if (cfg.test_mode) {
     const embed = new EmbedBuilder()
@@ -266,10 +240,11 @@ async function applySanction(message, cfg, kind, evalResult) {
           `**Type :** ${kind}`,
           `**Détection :** ${reasonLabel}`,
           evalResult.detail ? `**Détail :** ${evalResult.detail}` : null,
-          `**Serait appliqué :** suppression + MP`,
-          timeoutMin > 0
-            ? `**Sourdine simulée :** ${timeoutMin} min (strike ${nextStrike})`
-            : `**Avertissement simulé** (strike ${nextStrike}/${cfg.strikes_before_timeout})`,
+          `**Serait appliqué :** suppression + warn enregistré`,
+          `**Warn simulé :** ${nextTotal}/${warnCfg.warns_before_timeout}`,
+          simulatedTimeout > 0
+            ? `**Sourdine simulée :** ${simulatedTimeout} min`
+            : null,
         ]
           .filter(Boolean)
           .join("\n")
@@ -282,31 +257,32 @@ async function applySanction(message, cfg, kind, evalResult) {
 
   await message.delete().catch(() => null);
 
-  rec.strikes = nextStrike;
-  rec.lastAt = Date.now();
-  strikes.set(trackerKey(guild.id, author.id), rec);
+  const fullReason = `Antispam : ${reasonLabel}${
+    evalResult.detail ? ` (${evalResult.detail})` : ""
+  }`;
 
-  const reason = `Antispam : ${reasonLabel} (strike ${rec.strikes})`;
-  await dmWarn(author, guild.name, reasonLabel, timeoutMin);
-
-  if (timeoutMin > 0 && member.moderatable) {
-    await member.timeout(timeoutMin * 60 * 1000, reason).catch(() => null);
-  }
+  const result = await issueWarning({
+    guild,
+    targetUser: author,
+    moderator: null,
+    reason: fullReason.slice(0, 500),
+    source: "antispam",
+    targetMember: member,
+  });
 
   const embed = new EmbedBuilder()
-    .setColor(timeoutMin > 0 ? 0xef4444 : 0xf59e0b)
-    .setTitle("🛡️ Antispam")
+    .setColor(result.timeoutMin > 0 ? 0xef4444 : 0xf59e0b)
+    .setTitle("🛡️ Antispam — warn enregistré")
     .setDescription(
       [
         `**Membre :** ${author} (\`${author.id}\`)`,
         `**Salon :** ${channel}`,
         `**Type :** ${kind}`,
-        `**Détection :** ${reasonLabel}`,
+        `**Warn #${result.warning.id}** · total ${result.total}/${warnCfg.warns_before_timeout}`,
         evalResult.detail ? `**Détail :** ${evalResult.detail}` : null,
-        `**Action :** message supprimé`,
-        timeoutMin > 0
-          ? `**Sourdine :** ${timeoutMin} min`
-          : `**Avertissement :** strike ${rec.strikes}/${cfg.strikes_before_timeout}`,
+        result.timeoutMin > 0
+          ? `**Sourdine auto :** ${result.timeoutMin} min`
+          : null,
       ]
         .filter(Boolean)
         .join("\n")

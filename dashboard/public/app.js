@@ -256,6 +256,10 @@ function navigate(force = false) {
       }
     });
   }
+
+  if (name === "moderation" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadWarningsList());
+  }
 }
 
 window.addEventListener("hashchange", navigate);
@@ -1217,6 +1221,142 @@ function renderAntispamPanel() {
   }
 }
 
+function defaultWarnState() {
+  return {
+    auto_timeout_enabled: true,
+    warns_before_timeout: 3,
+    timeout_minutes: 60,
+    timeout_escalated_minutes: 240,
+    dm_user: true,
+  };
+}
+
+function renderWarnConfigPanel() {
+  const root = $("warn-config-panel");
+  if (!root || !guildState) return;
+  if (!guildState.warn_config) {
+    guildState.warn_config = defaultWarnState();
+  }
+  const cfg = guildState.warn_config;
+
+  root.innerHTML = `
+    <label class="field-row switch-row">
+      <span>Sourdine auto au seuil de warns</span>
+      <input type="checkbox" id="wc-auto-timeout" ${cfg.auto_timeout_enabled ? "checked" : ""} />
+    </label>
+    <label class="field-row switch-row">
+      <span>Envoyer un MP au membre warn</span>
+      <input type="checkbox" id="wc-dm" ${cfg.dm_user !== false ? "checked" : ""} />
+    </label>
+    <label class="field-row">
+      <span>Warns avant sourdine</span>
+      <input type="number" id="wc-threshold" class="input-sm" min="1" max="20" value="${cfg.warns_before_timeout}" />
+    </label>
+    <label class="field-row">
+      <span>Durée sourdine (min)</span>
+      <input type="number" id="wc-timeout" class="input-sm" min="1" max="40320" value="${cfg.timeout_minutes}" />
+    </label>
+    <label class="field-row">
+      <span>Sourdine récidive forte (min)</span>
+      <input type="number" id="wc-timeout-esc" class="input-sm" min="1" max="40320" value="${cfg.timeout_escalated_minutes}" />
+    </label>
+  `;
+
+  const sync = () => {
+    cfg.auto_timeout_enabled = $("wc-auto-timeout").checked;
+    cfg.dm_user = $("wc-dm").checked;
+    cfg.warns_before_timeout = Number($("wc-threshold").value);
+    cfg.timeout_minutes = Number($("wc-timeout").value);
+    cfg.timeout_escalated_minutes = Number($("wc-timeout-esc").value);
+    setDirty(true);
+  };
+
+  for (const id of [
+    "wc-auto-timeout",
+    "wc-dm",
+    "wc-threshold",
+    "wc-timeout",
+    "wc-timeout-esc",
+  ]) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener("change", sync);
+    if (el.type === "number") el.addEventListener("input", sync);
+  }
+}
+
+async function loadWarningsList() {
+  const panel = $("warn-list-panel");
+  if (!panel || !selectedGuildId || !currentGuildHasBot()) return;
+
+  panel.textContent = "Chargement…";
+  const filterRaw = String($("warn-filter-user")?.value || "").replace(/\D/g, "");
+  const q = filterRaw ? `?user_id=${encodeURIComponent(filterRaw)}&limit=80` : "?limit=80";
+
+  try {
+    const res = await fetch(
+      apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/warnings${q}`),
+      fetchOptsGet()
+    );
+    if (!res.ok) {
+      panel.textContent = "Impossible de charger les warns.";
+      return;
+    }
+    const data = await res.json();
+    const rows = data.warnings || [];
+    if (!rows.length) {
+      panel.textContent = "Aucun avertissement actif.";
+      return;
+    }
+
+    panel.innerHTML = "";
+    for (const w of rows) {
+      const row = document.createElement("div");
+      row.className = "warn-row";
+      row.style.cssText =
+        "border:1px solid var(--border, #333);border-radius:8px;padding:0.6rem 0.75rem;margin-bottom:0.5rem;";
+      const src = w.source === "antispam" ? "antispam" : "manuel";
+      const when = w.created_at ? String(w.created_at).slice(0, 16) : "?";
+      row.innerHTML = `
+        <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;align-items:center">
+          <strong>#${w.id}</strong>
+          <span class="mono muted tiny">${when} · ${src}</span>
+          <button type="button" class="btn link tiny btn-del-warn" data-warn-id="${w.id}">Retirer</button>
+        </div>
+        <div style="margin-top:0.35rem"><span class="mono">${w.user_tag || w.user_id}</span> <span class="muted tiny">(${w.user_id})</span></div>
+        <div style="margin-top:0.25rem">${escapeHtml(w.reason || "")}</div>
+        <div class="muted tiny" style="margin-top:0.25rem">par ${escapeHtml(w.moderator_tag || "?")}</div>
+      `;
+      panel.appendChild(row);
+    }
+
+    panel.querySelectorAll(".btn-del-warn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const wid = btn.getAttribute("data-warn-id");
+        if (!wid || !confirm(`Retirer le warn #${wid} ?`)) return;
+        const del = await fetch(
+          apiUrl(
+            `/api/guilds/${encodeURIComponent(selectedGuildId)}/warnings/${encodeURIComponent(wid)}`
+          ),
+          { method: "DELETE", credentials: "include" }
+        );
+        if (del.ok) loadWarningsList();
+        else alert("Échec de la suppression.");
+      });
+    });
+  } catch {
+    panel.textContent = "Erreur réseau.";
+  }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function renderCustomCommands() {
   const root = $("custom-commands-root");
   if (!root || !guildState) return;
@@ -1641,6 +1781,9 @@ async function applyGuildData(data) {
           image_spam: { ...defaultAntispamState().image_spam, ...(data.antispam_config.image_spam || {}) },
         }
       : defaultAntispamState(),
+    warn_config: data.warn_config
+      ? { ...defaultWarnState(), ...data.warn_config }
+      : defaultWarnState(),
   };
 
   setDirty(false);
@@ -1650,6 +1793,8 @@ async function applyGuildData(data) {
   renderCommands();
   renderCustomCommands();
   renderAntispamPanel();
+  renderWarnConfigPanel();
+  if (getHashView() === "moderation") loadWarningsList();
   updateOverview();
 
   await refreshDiscordForGuild(data.guild_id);
@@ -2015,6 +2160,7 @@ async function save() {
     command_groups_disabled: [...(guildState.command_groups_disabled || [])],
     command_access: { ...guildState.command_access },
     antispam_config: { ...guildState.antispam_config },
+    warn_config: { ...guildState.warn_config },
     custom_commands: customPayload,
   };
 
@@ -2762,6 +2908,12 @@ document.addEventListener("keydown", (e) => {
 document.querySelectorAll(".fonda-tab").forEach((b) => {
   b.addEventListener("click", () => switchFondaTab(b.dataset.fondaTab));
 });
+$("btn-refresh-warns")?.addEventListener("click", () => loadWarningsList());
+$("warn-filter-user")?.addEventListener("change", () => loadWarningsList());
+$("warn-filter-user")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") loadWarningsList();
+});
+
 $("btn-refresh-dms")?.addEventListener("click", () => {
   refreshFondaThreads().catch(() => null);
   if (fondaState.selectedUserId) loadFondaThreadMessages().catch(() => null);

@@ -117,8 +117,35 @@ function initDatabase() {
   migrateBackupRestoresTable();
   migrateDmMessagesTable();
   migrateDashboardSessionsTable();
+  migrateGuildWarningsTable();
 
   console.log("✅ Base de données initialisée");
+}
+
+function migrateGuildWarningsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS guild_warnings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      user_tag TEXT,
+      moderator_id TEXT,
+      moderator_tag TEXT,
+      reason TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_guild_warnings_guild_user
+     ON guild_warnings(guild_id, user_id)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_guild_warnings_guild_created
+     ON guild_warnings(guild_id, created_at DESC)`
+  ).run();
 }
 
 // ============================================================
@@ -958,6 +985,12 @@ function migrateGuildConfigExtras() {
       "UPDATE guild_config SET antispam_config = ? WHERE antispam_config IS NULL"
     ).run("{}");
   }
+  if (!names.has("warn_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN warn_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET warn_config = ? WHERE warn_config IS NULL"
+    ).run("{}");
+  }
 }
 
 const COMMAND_GROUP_IDS = new Set(COMMAND_GROUPS.map((g) => g.id));
@@ -1024,6 +1057,114 @@ function getAntispamConfig(guildId) {
     .prepare("SELECT antispam_config FROM guild_config WHERE guild_id = ?")
     .get(guildId);
   return parseAntispamConfig(row?.antispam_config);
+}
+
+const { parseWarnConfig, mergeWarnPatch } = require("./lib/warnConfig");
+
+function getWarnConfig(guildId) {
+  const row = db
+    .prepare("SELECT warn_config FROM guild_config WHERE guild_id = ?")
+    .get(guildId);
+  return parseWarnConfig(row?.warn_config);
+}
+
+function insertGuildWarning({
+  guildId,
+  userId,
+  userTag,
+  moderatorId,
+  moderatorTag,
+  reason,
+  source,
+}) {
+  const stmt = db.prepare(
+    `INSERT INTO guild_warnings
+     (guild_id, user_id, user_tag, moderator_id, moderator_tag, reason, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  const info = stmt.run(
+    String(guildId),
+    String(userId),
+    userTag || null,
+    moderatorId || null,
+    moderatorTag || null,
+    String(reason).slice(0, 500),
+    source === "antispam" ? "antispam" : "manual"
+  );
+  return {
+    id: Number(info.lastInsertRowid),
+    guild_id: String(guildId),
+    user_id: String(userId),
+    user_tag: userTag || null,
+    moderator_id: moderatorId || null,
+    moderator_tag: moderatorTag || null,
+    reason: String(reason).slice(0, 500),
+    source: source === "antispam" ? "antispam" : "manual",
+  };
+}
+
+function countGuildWarnings(guildId, userId) {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM guild_warnings WHERE guild_id = ? AND user_id = ?`
+    )
+    .get(String(guildId), String(userId));
+  return Number(row?.n || 0);
+}
+
+function listGuildWarnings(guildId, { userId = null, limit = 50, offset = 0 } = {}) {
+  const lim = Math.min(Math.max(1, limit), 200);
+  const off = Math.max(0, offset);
+  let rows;
+  if (userId) {
+    rows = db
+      .prepare(
+        `SELECT id, guild_id, user_id, user_tag, moderator_id, moderator_tag,
+                reason, source, created_at
+         FROM guild_warnings
+         WHERE guild_id = ? AND user_id = ?
+         ORDER BY id DESC
+         LIMIT ? OFFSET ?`
+      )
+      .all(String(guildId), String(userId), lim, off);
+  } else {
+    rows = db
+      .prepare(
+        `SELECT id, guild_id, user_id, user_tag, moderator_id, moderator_tag,
+                reason, source, created_at
+         FROM guild_warnings
+         WHERE guild_id = ?
+         ORDER BY id DESC
+         LIMIT ? OFFSET ?`
+      )
+      .all(String(guildId), lim, off);
+  }
+  return rows;
+}
+
+function getGuildWarningById(guildId, warningId) {
+  return db
+    .prepare(
+      `SELECT id, guild_id, user_id, user_tag, moderator_id, moderator_tag,
+              reason, source, created_at
+       FROM guild_warnings
+       WHERE guild_id = ? AND id = ?`
+    )
+    .get(String(guildId), Number(warningId));
+}
+
+function deleteGuildWarning(guildId, warningId) {
+  const info = db
+    .prepare(`DELETE FROM guild_warnings WHERE guild_id = ? AND id = ?`)
+    .run(String(guildId), Number(warningId));
+  return info.changes > 0;
+}
+
+function clearGuildWarningsForUser(guildId, userId) {
+  const info = db
+    .prepare(`DELETE FROM guild_warnings WHERE guild_id = ? AND user_id = ?`)
+    .run(String(guildId), String(userId));
+  return info.changes;
 }
 
 function getDisabledCommandGroups(guildId) {
@@ -1288,6 +1429,7 @@ function getGuildDashboardPayload(guildId) {
     command_groups_disabled: getDisabledCommandGroups(guildId),
     command_access: getCommandAccessConfig(guildId),
     antispam_config: getAntispamConfig(guildId),
+    warn_config: getWarnConfig(guildId),
     custom_commands: getCustomCommands(guildId),
   };
 }
@@ -1424,6 +1566,16 @@ function applyGuildSettingsPatch(guildId, patch) {
       "UPDATE guild_config SET antispam_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
     ).run(JSON.stringify(next), guildId);
   }
+
+  if (patch.warn_config != null) {
+    if (typeof patch.warn_config !== "object" || patch.warn_config === null) {
+      throw new Error("warn_config invalide");
+    }
+    const next = mergeWarnPatch(getWarnConfig(guildId), patch.warn_config);
+    db.prepare(
+      "UPDATE guild_config SET warn_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+    ).run(JSON.stringify(next), guildId);
+  }
 }
 
 // Activer/désactiver un type de log (compat commandes /togglelog)
@@ -1531,6 +1683,13 @@ module.exports = {
   isCommandEnabled,
   getCommandAccessConfig,
   getAntispamConfig,
+  getWarnConfig,
+  insertGuildWarning,
+  countGuildWarnings,
+  listGuildWarnings,
+  getGuildWarningById,
+  deleteGuildWarning,
+  clearGuildWarningsForUser,
   getCustomCommands,
   getCustomCommandReply,
   getGuildDashboardPayload,
