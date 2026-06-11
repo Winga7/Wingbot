@@ -83,10 +83,6 @@ const PLACEHOLDER_VIEWS = {
     title: "Anniversaires",
     desc: "Souhaite l’anniversaire de tes membres automatiquement.",
   },
-  social: {
-    title: "Réseaux sociaux",
-    desc: "Alertes Twitch, YouTube et autres intégrations.",
-  },
 };
 
 const PLACEHOLDER_SET = new Set(Object.keys(PLACEHOLDER_VIEWS));
@@ -268,6 +264,10 @@ function navigate(force = false) {
 
   if (name === "reactionroles" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadReactionRolesList());
+  }
+
+  if (name === "social" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadSocialFeedsList());
   }
 }
 
@@ -1942,6 +1942,307 @@ async function saveScheduledMessage() {
   loadScheduledMessagesList();
 }
 
+let socialEditingId = null;
+let socialPreviewData = null;
+
+function resetSocialForm() {
+  socialEditingId = null;
+  socialPreviewData = null;
+  $("social-label").value = "";
+  $("social-youtube-source").value = "";
+  $("social-content").value = "";
+  $("social-embed-title").value = "";
+  $("social-embed-desc").value = "";
+  $("social-embed-color").value = "#ff0000";
+  $("social-embed-thumb").value = "";
+  $("social-channel").value = "";
+  const hint = $("social-preview-hint");
+  if (hint) hint.textContent = "";
+  $("social-form-title").textContent = "Nouvelle alerte YouTube";
+  $("btn-social-save").textContent = "Activer l'alerte";
+  $("btn-social-cancel").hidden = true;
+  const src = $("social-youtube-source");
+  if (src) src.disabled = false;
+}
+
+function fillSocialChannelSelect() {
+  const sel = $("social-channel");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "— Choisir un salon —";
+  sel.appendChild(empty);
+  for (const ch of lastGuildChannelsList) {
+    const opt = document.createElement("option");
+    opt.value = ch.id;
+    opt.textContent = `#${ch.name}`;
+    sel.appendChild(opt);
+  }
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+}
+
+function collectSocialPayloadFromForm() {
+  const content = String($("social-content").value || "");
+  const title = String($("social-embed-title").value || "").trim();
+  const description = String($("social-embed-desc").value || "").trim();
+  const color = parseEmbedColorInput($("social-embed-color").value);
+  const thumbnail_url = String($("social-embed-thumb").value || "").trim();
+  const embed =
+    title || description || thumbnail_url
+      ? {
+          title,
+          description,
+          color,
+          thumbnail_url,
+          fields: [],
+        }
+      : null;
+  return { content, embed };
+}
+
+function fillSocialForm(row) {
+  socialEditingId = row.id;
+  $("social-label").value = row.source_label || "";
+  $("social-youtube-source").value = row.source_url || row.source_id || "";
+  $("social-channel").value = row.channel_id || "";
+  $("social-content").value = row.payload?.content || "";
+  const emb = row.payload?.embed || {};
+  $("social-embed-title").value = emb.title || "";
+  $("social-embed-desc").value = emb.description || "";
+  $("social-embed-color").value =
+    emb.color != null && Number.isFinite(Number(emb.color))
+      ? `#${Number(emb.color).toString(16).padStart(6, "0")}`
+      : "#ff0000";
+  $("social-embed-thumb").value = emb.thumbnail_url || "";
+  $("social-form-title").textContent = `Modifier l'alerte #${row.id}`;
+  $("btn-social-save").textContent = "Enregistrer";
+  $("btn-social-cancel").hidden = false;
+  const src = $("social-youtube-source");
+  if (src) src.disabled = true;
+  const hint = $("social-preview-hint");
+  if (hint) {
+    hint.textContent = row.source_id
+      ? `Chaîne : ${row.source_label || row.source_id}`
+      : "";
+  }
+}
+
+async function previewSocialYoutubeSource() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  const source = String($("social-youtube-source")?.value || "").trim();
+  if (!source) {
+    alert("Indique l'URL ou l'ID de la chaîne YouTube.");
+    return;
+  }
+  const hint = $("social-preview-hint");
+  if (hint) hint.textContent = "Vérification…";
+  try {
+    const res = await fetch(
+      apiUrl(
+        `/api/guilds/${encodeURIComponent(selectedGuildId)}/social-feeds/preview-youtube`
+      ),
+      {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ source }),
+      }
+    );
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (hint) hint.textContent = "";
+      alert(j.error || "Chaîne introuvable.");
+      socialPreviewData = null;
+      return;
+    }
+    socialPreviewData = j;
+    if (hint) {
+      hint.textContent = j.channel_name
+        ? `✓ ${j.channel_name} — dernière vidéo : ${j.latest_video?.title || "—"}`
+        : `✓ Chaîne ${j.channel_id}`;
+    }
+    if (!$("social-label").value.trim() && j.channel_name) {
+      $("social-label").value = j.channel_name;
+    }
+  } catch {
+    if (hint) hint.textContent = "";
+    alert("Erreur réseau.");
+    socialPreviewData = null;
+  }
+}
+
+async function loadSocialFeedsList() {
+  const list = $("social-list");
+  if (!list || !selectedGuildId || !currentGuildHasBot()) return;
+  fillSocialChannelSelect();
+  list.textContent = "Chargement…";
+  try {
+    const res = await fetch(
+      apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/social-feeds`),
+      fetchOptsGet()
+    );
+    if (!res.ok) {
+      list.textContent = "Impossible de charger les alertes.";
+      return;
+    }
+    const data = await res.json();
+    renderSocialFeedsList(data.feeds || []);
+  } catch {
+    list.textContent = "Erreur réseau.";
+  }
+}
+
+function renderSocialFeedsList(rows) {
+  const list = $("social-list");
+  if (!list) return;
+  if (!rows.length) {
+    list.textContent = "Aucune alerte YouTube configurée.";
+    return;
+  }
+  list.innerHTML = "";
+  for (const row of rows) {
+    const ch = lastGuildChannelsList.find((c) => c.id === row.channel_id);
+    const chName = ch ? `#${ch.name}` : row.channel_id;
+    const div = document.createElement("div");
+    div.className = "warn-row";
+    div.style.cssText =
+      "border:1px solid var(--border, #333);border-radius:8px;padding:0.65rem 0.75rem;margin-bottom:0.5rem;";
+    const status = row.enabled ? "Actif" : "Pause";
+    const err = row.last_error
+      ? `<div class="muted tiny" style="color:var(--danger,#f04747);margin-top:0.25rem">Erreur : ${escapeHtml(row.last_error)}</div>`
+      : "";
+    const ytLink = row.source_url
+      ? `<a href="${escapeAttr(row.source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.source_label || row.source_id)}</a>`
+      : escapeHtml(row.source_label || row.source_id);
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;align-items:center">
+        <strong>${escapeHtml(row.source_label || `Alerte #${row.id}`)}</strong>
+        <span class="muted tiny">${status} · YouTube</span>
+      </div>
+      <div class="muted tiny" style="margin-top:0.35rem">${ytLink} → ${escapeHtml(chName)}</div>
+      ${err}
+      <div style="margin-top:0.45rem;display:flex;gap:0.35rem;flex-wrap:wrap">
+        <button type="button" class="btn link tiny btn-social-edit" data-id="${row.id}">Modifier</button>
+        <button type="button" class="btn link tiny btn-social-toggle" data-id="${row.id}" data-on="${row.enabled ? "1" : "0"}">${row.enabled ? "Pause" : "Activer"}</button>
+        <button type="button" class="btn link tiny btn-social-del" data-id="${row.id}">Supprimer</button>
+      </div>
+    `;
+    list.appendChild(div);
+  }
+  list.querySelectorAll(".btn-social-edit").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.id);
+      const row = rows.find((r) => r.id === id);
+      if (row) fillSocialForm(row);
+    });
+  });
+  list.querySelectorAll(".btn-social-toggle").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.id);
+      const enabled = btn.dataset.on !== "1";
+      await fetch(
+        apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/social-feeds/${id}`
+        ),
+        {
+          method: "PUT",
+          headers: authHeaders(),
+          credentials: "include",
+          body: JSON.stringify({ enabled }),
+        }
+      );
+      loadSocialFeedsList();
+    });
+  });
+  list.querySelectorAll(".btn-social-del").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.id);
+      if (!confirm(`Supprimer l'alerte #${id} ?`)) return;
+      const res = await fetch(
+        apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/social-feeds/${id}`
+        ),
+        { method: "DELETE", credentials: "include" }
+      );
+      if (res.ok) {
+        if (socialEditingId === id) resetSocialForm();
+        loadSocialFeedsList();
+      }
+    });
+  });
+}
+
+async function saveSocialFeed() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  const channelId = $("social-channel").value;
+  if (!channelId) {
+    alert("Choisis un salon Discord.");
+    return;
+  }
+  const payload = collectSocialPayloadFromForm();
+  const btn = $("btn-social-save");
+  if (btn) btn.disabled = true;
+  try {
+    if (socialEditingId) {
+      const body = {
+        label: $("social-label").value,
+        channel_id: channelId,
+        payload,
+      };
+      const res = await fetch(
+        apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/social-feeds/${socialEditingId}`
+        ),
+        {
+          method: "PUT",
+          headers: authHeaders(),
+          credentials: "include",
+          body: JSON.stringify(body),
+        }
+      );
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error || "Échec de l'enregistrement.");
+        return;
+      }
+    } else {
+      const source = String($("social-youtube-source")?.value || "").trim();
+      if (!source) {
+        alert("Indique la chaîne YouTube.");
+        return;
+      }
+      const body = {
+        label: $("social-label").value,
+        channel_id: channelId,
+        source,
+        payload,
+      };
+      const res = await fetch(
+        apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/social-feeds`
+        ),
+        {
+          method: "POST",
+          headers: authHeaders(),
+          credentials: "include",
+          body: JSON.stringify(body),
+        }
+      );
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error || "Échec de la création.");
+        return;
+      }
+    }
+    resetSocialForm();
+    loadSocialFeedsList();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function loadWarningsList() {
   const panel = $("warn-list-panel");
   if (!panel || !selectedGuildId || !currentGuildHasBot()) return;
@@ -2463,6 +2764,7 @@ async function applyGuildData(data) {
   renderCommandAccessPanel();
   if (getHashView() === "announcements") loadScheduledMessagesList();
   if (getHashView() === "reactionroles") loadReactionRolesList();
+  if (getHashView() === "social") loadSocialFeedsList();
   if (getHashView() === "embeds" && window.wingbotEmbedWorkbench) {
     window.wingbotEmbedWorkbench.refresh();
   }
@@ -3589,6 +3891,11 @@ $("rr-message-ref")?.addEventListener("paste", () => {
 $("btn-sched-save")?.addEventListener("click", () => saveScheduledMessage());
 $("btn-sched-cancel")?.addEventListener("click", () => resetSchedForm());
 $("btn-sched-refresh")?.addEventListener("click", () => loadScheduledMessagesList());
+
+$("btn-social-save")?.addEventListener("click", () => saveSocialFeed());
+$("btn-social-cancel")?.addEventListener("click", () => resetSocialForm());
+$("btn-social-refresh")?.addEventListener("click", () => loadSocialFeedsList());
+$("btn-social-preview")?.addEventListener("click", () => previewSocialYoutubeSource());
 
 $("btn-refresh-warns")?.addEventListener("click", () => loadWarningsList());
 $("warn-filter-user")?.addEventListener("change", () => loadWarningsList());

@@ -120,6 +120,7 @@ function initDatabase() {
   migrateGuildWarningsTable();
   migrateScheduledMessagesTable();
   migrateReactionRolePanelsTable();
+  migrateSocialFeedsTable();
 
   console.log("✅ Base de données initialisée");
 }
@@ -497,6 +498,192 @@ function updateReactionRolePanel(id, guildId, patch) {
 function deleteReactionRolePanel(id, guildId) {
   const r = db
     .prepare(`DELETE FROM reaction_role_panels WHERE id = ? AND guild_id = ?`)
+    .run(id, guildId);
+  return r.changes > 0;
+}
+
+const SOCIAL_PLATFORMS = new Set(["youtube"]);
+
+function migrateSocialFeedsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS social_feeds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      platform TEXT NOT NULL DEFAULT 'youtube',
+      source_id TEXT NOT NULL,
+      source_label TEXT NOT NULL DEFAULT '',
+      source_url TEXT NOT NULL DEFAULT '',
+      payload TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_video_id TEXT,
+      last_checked_at TEXT,
+      last_error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_social_feeds_guild ON social_feeds(guild_id)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_social_feeds_enabled ON social_feeds(enabled, platform)`
+  ).run();
+}
+
+function parseSocialFeedPayload(raw) {
+  try {
+    const o = JSON.parse(raw || "{}");
+    if (!o || typeof o !== "object") return { content: "", embed: null };
+    return {
+      content: typeof o.content === "string" ? o.content : "",
+      embed: o.embed && typeof o.embed === "object" ? o.embed : null,
+    };
+  } catch {
+    return { content: "", embed: null };
+  }
+}
+
+function formatSocialFeedRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    guild_id: row.guild_id,
+    channel_id: row.channel_id,
+    platform: row.platform || "youtube",
+    source_id: row.source_id,
+    source_label: row.source_label || "",
+    source_url: row.source_url || "",
+    payload: parseSocialFeedPayload(row.payload),
+    enabled: !!row.enabled,
+    last_video_id: row.last_video_id || null,
+    last_checked_at: row.last_checked_at || null,
+    last_error: row.last_error || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function listSocialFeeds(guildId) {
+  const rows = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, platform, source_id, source_label, source_url,
+              payload, enabled, last_video_id, last_checked_at, last_error,
+              created_at, updated_at
+       FROM social_feeds WHERE guild_id = ? ORDER BY id DESC`
+    )
+    .all(guildId);
+  return rows.map(formatSocialFeedRow);
+}
+
+function getSocialFeed(id, guildId) {
+  const row = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, platform, source_id, source_label, source_url,
+              payload, enabled, last_video_id, last_checked_at, last_error,
+              created_at, updated_at
+       FROM social_feeds WHERE id = ? AND guild_id = ?`
+    )
+    .get(id, guildId);
+  return formatSocialFeedRow(row);
+}
+
+function listEnabledSocialFeeds(platform = "youtube") {
+  const rows = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, platform, source_id, source_label, source_url,
+              payload, enabled, last_video_id, last_checked_at, last_error,
+              created_at, updated_at
+       FROM social_feeds WHERE enabled = 1 AND platform = ?
+       ORDER BY id ASC`
+    )
+    .all(platform);
+  return rows.map(formatSocialFeedRow);
+}
+
+function insertSocialFeed(guildId, data) {
+  const platform = SOCIAL_PLATFORMS.has(data.platform) ? data.platform : "youtube";
+  const payload = JSON.stringify({
+    content: String(data.payload?.content || ""),
+    embed: data.payload?.embed || null,
+  });
+  const r = db
+    .prepare(
+      `INSERT INTO social_feeds
+        (guild_id, channel_id, platform, source_id, source_label, source_url,
+         payload, enabled, last_video_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      guildId,
+      data.channel_id,
+      platform,
+      data.source_id,
+      String(data.source_label || "").slice(0, 120),
+      String(data.source_url || "").slice(0, 512),
+      payload,
+      data.enabled === false ? 0 : 1,
+      data.last_video_id || null
+    );
+  return getSocialFeed(r.lastInsertRowid, guildId);
+}
+
+function updateSocialFeed(id, guildId, patch) {
+  const cur = getSocialFeed(id, guildId);
+  if (!cur) return null;
+  const fields = [];
+  const vals = [];
+  if (patch.channel_id != null) {
+    fields.push("channel_id = ?");
+    vals.push(patch.channel_id);
+  }
+  if (patch.source_label != null) {
+    fields.push("source_label = ?");
+    vals.push(String(patch.source_label).slice(0, 120));
+  }
+  if (patch.source_url != null) {
+    fields.push("source_url = ?");
+    vals.push(String(patch.source_url).slice(0, 512));
+  }
+  if (patch.enabled != null) {
+    fields.push("enabled = ?");
+    vals.push(patch.enabled ? 1 : 0);
+  }
+  if (patch.payload != null) {
+    fields.push("payload = ?");
+    vals.push(
+      JSON.stringify({
+        content: String(patch.payload.content || ""),
+        embed: patch.payload.embed || null,
+      })
+    );
+  }
+  if (patch.last_video_id !== undefined) {
+    fields.push("last_video_id = ?");
+    vals.push(patch.last_video_id);
+  }
+  if (patch.last_checked_at !== undefined) {
+    fields.push("last_checked_at = ?");
+    vals.push(patch.last_checked_at);
+  }
+  if (patch.last_error !== undefined) {
+    fields.push("last_error = ?");
+    vals.push(patch.last_error ? String(patch.last_error).slice(0, 500) : null);
+  }
+  if (!fields.length) return cur;
+  fields.push("updated_at = CURRENT_TIMESTAMP");
+  vals.push(id, guildId);
+  db.prepare(
+    `UPDATE social_feeds SET ${fields.join(", ")} WHERE id = ? AND guild_id = ?`
+  ).run(...vals);
+  return getSocialFeed(id, guildId);
+}
+
+function deleteSocialFeed(id, guildId) {
+  const r = db
+    .prepare(`DELETE FROM social_feeds WHERE id = ? AND guild_id = ?`)
     .run(id, guildId);
   return r.changes > 0;
 }
@@ -2074,4 +2261,10 @@ module.exports = {
   insertReactionRolePanel,
   updateReactionRolePanel,
   deleteReactionRolePanel,
+  listSocialFeeds,
+  getSocialFeed,
+  listEnabledSocialFeeds,
+  insertSocialFeed,
+  updateSocialFeed,
+  deleteSocialFeed,
 };

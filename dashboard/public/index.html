@@ -867,6 +867,69 @@
             </div>
           </section>
 
+          <section class="view" id="view-social" hidden>
+            <div class="view-head">
+              <h2>Réseaux sociaux</h2>
+              <p class="muted tiny">Alerte Discord quand une chaîne YouTube publie une nouvelle vidéo. Message personnalisable avec variables.</p>
+            </div>
+            <div class="panel-block" id="social-form-panel">
+              <h3 id="social-form-title">Nouvelle alerte YouTube</h3>
+              <label class="field-row">
+                <span>Nom interne</span>
+                <input type="text" id="social-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Chaîne principale" />
+              </label>
+              <label class="field-row">
+                <span>Chaîne YouTube</span>
+                <input type="text" id="social-youtube-source" class="input-sm input-wide" placeholder="URL, @pseudo ou ID UC…" />
+              </label>
+              <div style="margin:-0.25rem 0 0.65rem">
+                <button type="button" class="btn ghost tiny" id="btn-social-preview">Vérifier la chaîne</button>
+                <span id="social-preview-hint" class="muted tiny" style="margin-left:0.5rem"></span>
+              </div>
+              <label class="field-row">
+                <span>Salon Discord</span>
+                <select id="social-channel" class="input-sm input-wide"></select>
+              </label>
+              <label class="field-row">
+                <span>Message</span>
+                <textarea id="social-content" class="input-sm input-wide" rows="3" placeholder="🎬 **{youtube.title}**&#10;{youtube.url}"></textarea>
+              </label>
+              <p class="muted tiny">Variables : <code>{youtube.title}</code>, <code>{youtube.url}</code>, <code>{youtube.channel}</code>, <code>{youtube.thumbnail}</code>, <code>{guild}</code>, <code>{channel}</code> (mention salon)…</p>
+              <details class="custom-guide">
+                <summary>Embed (optionnel)</summary>
+                <div class="custom-guide-body">
+                  <label class="field-row">
+                    <span>Titre</span>
+                    <input type="text" id="social-embed-title" class="input-sm input-wide" maxlength="256" placeholder="{youtube.title}" />
+                  </label>
+                  <label class="field-row">
+                    <span>Description</span>
+                    <textarea id="social-embed-desc" class="input-sm input-wide" rows="2" maxlength="4096" placeholder="Nouvelle vidéo de {youtube.channel}"></textarea>
+                  </label>
+                  <label class="field-row">
+                    <span>Couleur</span>
+                    <input type="text" id="social-embed-color" class="input-sm mono" value="#ff0000" maxlength="7" />
+                  </label>
+                  <label class="field-row">
+                    <span>Miniature</span>
+                    <input type="text" id="social-embed-thumb" class="input-sm input-wide" placeholder="{youtube.thumbnail}" />
+                  </label>
+                </div>
+              </details>
+              <div class="fonda-actions" style="margin-top:0.75rem">
+                <button type="button" class="btn primary" id="btn-social-save">Activer l'alerte</button>
+                <button type="button" class="btn ghost" id="btn-social-cancel" hidden>Annuler</button>
+              </div>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
+                <h3 style="margin:0">Alertes actives</h3>
+                <button type="button" class="btn ghost tiny" id="btn-social-refresh">Rafraîchir</button>
+              </div>
+              <div id="social-list" class="muted tiny">Charge un serveur pour voir les alertes.</div>
+            </div>
+          </section>
+
           <section class="view" id="view-embeds" hidden>
             <div class="view-head">
               <h2>Constructeur</h2>

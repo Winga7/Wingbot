@@ -243,6 +243,30 @@ function substituteTokens(text, ctx = {}) {
     ["channel.name", String(c.name || "")],
     ["channel", c.id ? `<#${c.id}>` : ""],
   ];
+  const yt = ctx.youtube || ctx.video || null;
+  if (yt && typeof yt === "object") {
+    const ytTokens = [
+      ["youtube.title", String(yt.title || "")],
+      ["youtube.url", String(yt.url || "")],
+      ["youtube.id", String(yt.id || "")],
+      ["youtube.thumbnail", String(yt.thumbnail || "")],
+      ["youtube.channel", String(yt.channel_name || "")],
+      ["youtube.channel_url", String(yt.channel_url || "")],
+      ["youtube.published", String(yt.published_at || "")],
+      ["yt.title", String(yt.title || "")],
+      ["yt.url", String(yt.url || "")],
+      ["yt.id", String(yt.id || "")],
+      ["yt.thumbnail", String(yt.thumbnail || "")],
+      ["yt.channel", String(yt.channel_name || "")],
+      ["video.title", String(yt.title || "")],
+      ["video.url", String(yt.url || "")],
+      ["video.id", String(yt.id || "")],
+      ["video.thumbnail", String(yt.thumbnail || "")],
+      ["title", String(yt.title || "")],
+      ["url", String(yt.url || "")],
+    ];
+    for (const pair of ytTokens) tokens.unshift(pair);
+  }
   let out = s;
   for (const [token, value] of tokens) {
     const re = new RegExp(
@@ -265,6 +289,8 @@ function substituteEmbedPayload(payload, ctx = {}) {
     "footer_text",
     "author_name",
     "author_url",
+    "thumbnail_url",
+    "image_url",
   ]) {
     if (e[k]) e[k] = substituteTokens(e[k], ctx);
   }

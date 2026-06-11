@@ -57,9 +57,15 @@ const {
   updateReactionRolePanel,
   deleteReactionRolePanel,
   reactionRolePanelExistsForMessage,
+  listSocialFeeds,
+  getSocialFeed,
+  insertSocialFeed,
+  updateSocialFeed,
+  deleteSocialFeed,
   DB_PATH,
 } = require("../database");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
+const { resolveAndPreviewYoutubeChannel } = require("../lib/youtubeFeed");
 const {
   defaultEmbedPayload,
   mergeEmbedPayload,
@@ -1278,6 +1284,38 @@ function normalizeScheduledPayloadInput(body) {
   return { content: merged.content, embed: merged.embed };
 }
 
+function normalizeSocialPayloadInput(body) {
+  const raw =
+    body?.payload && typeof body.payload === "object" ? body.payload : body;
+  let merged = mergeEmbedPayload(defaultEmbedPayload(), {
+    content: raw?.content ?? "",
+    embed: raw?.embed && typeof raw.embed === "object" ? raw.embed : {},
+  });
+  const e = merged.embed || {};
+  const hasText = String(merged.content || "").trim().length > 0;
+  const hasEmbed = !!(
+    e.title ||
+    e.description ||
+    e.image_url ||
+    e.thumbnail_url ||
+    (e.fields && e.fields.length)
+  );
+  if (!hasText && !hasEmbed) {
+    merged = mergeEmbedPayload(defaultEmbedPayload(), {
+      content: "🎬 **{youtube.title}**\n{youtube.url}",
+      embed: {
+        title: "{youtube.title}",
+        description: "Nouvelle vidéo de {youtube.channel}",
+        url: "{youtube.url}",
+        thumbnail_url: "{youtube.thumbnail}",
+        color: 0xff0000,
+        fields: [],
+      },
+    });
+  }
+  return { content: merged.content, embed: merged.embed };
+}
+
 function parseSendAtInput(v) {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) {
@@ -1661,6 +1699,151 @@ app.delete(
         await discordDeleteMessage(row.channel_id, row.message_id);
       }
       deleteReactionRolePanel(id, guildId);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/social-feeds",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      res.json({ feeds: listSocialFeeds(guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/social-feeds/preview-youtube",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const source = String(req.body?.source || "").trim();
+      if (!source) {
+        return res.status(400).json({ error: "source requis (URL ou ID chaîne YouTube)" });
+      }
+      const preview = await resolveAndPreviewYoutubeChannel(source);
+      res.json(preview);
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/social-feeds",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      const platform =
+        req.body?.platform === "youtube" ? "youtube" : "youtube";
+      const channelId = normalizeSnowflakeId(req.body?.channel_id);
+      if (!channelId) {
+        return res.status(400).json({ error: "channel_id requis" });
+      }
+      await assertGuildTextChannel(guildId, channelId);
+      const source = String(req.body?.source || "").trim();
+      if (!source) {
+        return res.status(400).json({ error: "source requis (URL ou ID chaîne YouTube)" });
+      }
+      const preview = await resolveAndPreviewYoutubeChannel(source);
+      const dup = listSocialFeeds(guildId).find(
+        (f) => f.platform === platform && f.source_id === preview.channel_id
+      );
+      if (dup) {
+        return res.status(409).json({
+          error: "Cette chaîne YouTube est déjà suivie sur ce serveur",
+        });
+      }
+      const payload = normalizeSocialPayloadInput(req.body);
+      const row = insertSocialFeed(guildId, {
+        channel_id: channelId,
+        platform,
+        source_id: preview.channel_id,
+        source_label: preview.channel_name || "",
+        source_url: preview.channel_url,
+        payload,
+        enabled: req.body?.enabled !== false,
+        last_video_id: preview.latest_video?.id || null,
+      });
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/social-feeds/:feedId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.feedId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      const cur = getSocialFeed(id, guildId);
+      if (!cur) return res.status(404).json({ error: "not_found" });
+      const patch = {};
+      if (req.body?.label != null) patch.source_label = req.body.label;
+      if (req.body?.enabled != null) patch.enabled = !!req.body.enabled;
+      if (req.body?.channel_id != null) {
+        const channelId = normalizeSnowflakeId(req.body.channel_id);
+        if (!channelId) {
+          return res.status(400).json({ error: "channel_id invalide" });
+        }
+        await assertGuildTextChannel(guildId, channelId);
+        patch.channel_id = channelId;
+      }
+      if (req.body?.payload != null || req.body?.content != null) {
+        patch.payload = normalizeSocialPayloadInput(req.body);
+      }
+      const row = updateSocialFeed(id, guildId, patch);
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.delete(
+  "/api/guilds/:guildId/social-feeds/:feedId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.feedId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      if (!getSocialFeed(id, guildId)) {
+        return res.status(404).json({ error: "not_found" });
+      }
+      deleteSocialFeed(id, guildId);
       res.json({ ok: true });
     } catch (e) {
       console.error(e);
