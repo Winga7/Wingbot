@@ -46,6 +46,11 @@ const {
   deleteGuildWarning,
   clearGuildWarningsForUser,
   getGuildWarningById,
+  listScheduledMessages,
+  getScheduledMessage,
+  insertScheduledMessage,
+  updateScheduledMessage,
+  deleteScheduledMessage,
   DB_PATH,
 } = require("../database");
 const {
@@ -1235,6 +1240,177 @@ app.delete(
       }
       const n = clearGuildWarningsForUser(guildId, userId);
       res.json({ ok: true, cleared: n, user_id: userId });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+const SCHED_REPEAT = new Set(["once", "daily", "weekly"]);
+
+function normalizeScheduledPayloadInput(body) {
+  const raw =
+    body?.payload && typeof body.payload === "object" ? body.payload : body;
+  const merged = mergeEmbedPayload(defaultEmbedPayload(), {
+    content: raw?.content ?? "",
+    embed: raw?.embed && typeof raw.embed === "object" ? raw.embed : {},
+  });
+  const e = merged.embed || {};
+  const hasText = String(merged.content || "").trim().length > 0;
+  const hasEmbed = !!(
+    e.title ||
+    e.description ||
+    e.image_url ||
+    e.thumbnail_url ||
+    (e.fields && e.fields.length)
+  );
+  if (!hasText && !hasEmbed) {
+    throw new Error("Contenu ou embed requis");
+  }
+  return { content: merged.content, embed: merged.embed };
+}
+
+function parseSendAtInput(v) {
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) {
+    throw new Error("Date/heure invalide");
+  }
+  return d.toISOString();
+}
+
+async function assertGuildTextChannel(guildId, channelId) {
+  const allowedTypes = new Set([0, 5, 10, 11, 12]);
+  const chMeta = await discordFetchJson(
+    `/channels/${encodeURIComponent(channelId)}`
+  );
+  if (!chMeta || normalizeSnowflakeId(chMeta.guild_id) !== guildId) {
+    const err = new Error("Salon invalide pour ce serveur");
+    err.status = 400;
+    throw err;
+  }
+  if (!allowedTypes.has(chMeta.type)) {
+    const err = new Error("Salon texte, annonce ou fil requis");
+    err.status = 400;
+    throw err;
+  }
+  return chMeta;
+}
+
+app.get(
+  "/api/guilds/:guildId/scheduled-messages",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      res.json({ scheduled: listScheduledMessages(guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/scheduled-messages",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      const channelId = normalizeSnowflakeId(req.body?.channel_id);
+      if (!channelId) {
+        return res.status(400).json({ error: "channel_id requis" });
+      }
+      await assertGuildTextChannel(guildId, channelId);
+      const payload = normalizeScheduledPayloadInput(req.body);
+      const sendAt = parseSendAtInput(req.body?.send_at);
+      const repeat = SCHED_REPEAT.has(req.body?.repeat)
+        ? req.body.repeat
+        : "once";
+      const row = insertScheduledMessage(guildId, {
+        channel_id: channelId,
+        label: req.body?.label || "",
+        payload,
+        send_at: sendAt,
+        repeat,
+        enabled: req.body?.enabled !== false,
+        created_by: req.discordSession?.userId || null,
+      });
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/scheduled-messages/:schedId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.schedId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      if (!getScheduledMessage(id, guildId)) {
+        return res.status(404).json({ error: "not_found" });
+      }
+      const patch = {};
+      if (req.body?.channel_id != null) {
+        const channelId = normalizeSnowflakeId(req.body.channel_id);
+        if (!channelId) {
+          return res.status(400).json({ error: "channel_id invalide" });
+        }
+        await assertGuildTextChannel(guildId, channelId);
+        patch.channel_id = channelId;
+      }
+      if (req.body?.label != null) patch.label = req.body.label;
+      if (req.body?.send_at != null) patch.send_at = parseSendAtInput(req.body.send_at);
+      if (req.body?.repeat != null) {
+        if (!SCHED_REPEAT.has(req.body.repeat)) {
+          return res.status(400).json({ error: "repeat invalide" });
+        }
+        patch.repeat = req.body.repeat;
+      }
+      if (req.body?.enabled != null) patch.enabled = !!req.body.enabled;
+      if (req.body?.payload != null || req.body?.content != null) {
+        patch.payload = normalizeScheduledPayloadInput(req.body);
+      }
+      const row = updateScheduledMessage(id, guildId, patch);
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.delete(
+  "/api/guilds/:guildId/scheduled-messages/:schedId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.schedId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      if (!deleteScheduledMessage(id, guildId)) {
+        return res.status(404).json({ error: "not_found" });
+      }
+      res.json({ ok: true });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: String(e.message) });

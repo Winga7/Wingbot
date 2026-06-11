@@ -34,10 +34,6 @@ const PLACEHOLDER_VIEWS = {
     title: "Premium",
     desc: "Abonnement par serveur pour débloquer les fonctionnalités avancées — arrive bientôt.",
   },
-  announcements: {
-    title: "Annonces",
-    desc: "Publie des annonces planifiées dans les salons de ton choix.",
-  },
   templates: {
     title: "Modèles",
     desc: "Enregistre et réutilise des modèles de messages et d’embeds.",
@@ -263,6 +259,10 @@ function navigate(force = false) {
 
   if (name === "warns" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadWarningsList());
+  }
+
+  if (name === "announcements" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadScheduledMessagesList());
   }
 }
 
@@ -1353,6 +1353,250 @@ function renderWarnConfigPanel() {
   }
 }
 
+let schedEditingId = null;
+
+function parseEmbedColorInput(raw) {
+  const s = String(raw || "").trim();
+  if (/^#?[0-9a-fA-F]{6}$/.test(s)) {
+    return parseInt(s.replace(/^#/, ""), 16);
+  }
+  return 0x5865f2;
+}
+
+function toDatetimeLocalValue(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function formatSchedWhen(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function fillSchedChannelSelect() {
+  const sel = $("sched-channel");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "— Choisir un salon —";
+  sel.appendChild(empty);
+  for (const ch of lastGuildChannelsList) {
+    const opt = document.createElement("option");
+    opt.value = ch.id;
+    opt.textContent = `#${ch.name}`;
+    sel.appendChild(opt);
+  }
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+}
+
+function resetSchedForm() {
+  schedEditingId = null;
+  const title = $("sched-form-title");
+  if (title) title.textContent = "Nouvelle annonce";
+  $("sched-label").value = "";
+  $("sched-channel").value = "";
+  $("sched-send-at").value = "";
+  $("sched-repeat").value = "once";
+  $("sched-content").value = "";
+  $("sched-embed-title").value = "";
+  $("sched-embed-desc").value = "";
+  $("sched-embed-color").value = "#5865f2";
+  const cancel = $("btn-sched-cancel");
+  if (cancel) cancel.hidden = true;
+}
+
+function fillSchedForm(row) {
+  schedEditingId = row.id;
+  $("sched-form-title").textContent = `Modifier #${row.id}`;
+  $("sched-label").value = row.label || "";
+  $("sched-channel").value = row.channel_id || "";
+  $("sched-send-at").value = toDatetimeLocalValue(row.send_at);
+  $("sched-repeat").value = row.repeat || "once";
+  $("sched-content").value = row.payload?.content || "";
+  const emb = row.payload?.embed || {};
+  $("sched-embed-title").value = emb.title || "";
+  $("sched-embed-desc").value = emb.description || "";
+  const c = emb.color;
+  $("sched-embed-color").value =
+    typeof c === "number" && c > 0
+      ? `#${c.toString(16).padStart(6, "0")}`
+      : "#5865f2";
+  $("btn-sched-cancel").hidden = false;
+}
+
+function collectSchedPayloadFromForm() {
+  const content = String($("sched-content").value || "");
+  const title = String($("sched-embed-title").value || "").trim();
+  const description = String($("sched-embed-desc").value || "").trim();
+  const color = parseEmbedColorInput($("sched-embed-color").value);
+  const embed =
+    title || description
+      ? {
+          title,
+          description,
+          color,
+          fields: [],
+        }
+      : null;
+  return { content, embed };
+}
+
+async function loadScheduledMessagesList() {
+  const list = $("sched-list");
+  if (!list || !selectedGuildId || !currentGuildHasBot()) return;
+  fillSchedChannelSelect();
+  list.textContent = "Chargement…";
+  try {
+    const res = await fetch(
+      apiUrl(
+        `/api/guilds/${encodeURIComponent(selectedGuildId)}/scheduled-messages`
+      ),
+      fetchOptsGet()
+    );
+    if (!res.ok) {
+      list.textContent = "Impossible de charger les annonces.";
+      return;
+    }
+    const data = await res.json();
+    renderScheduledList(data.scheduled || []);
+  } catch {
+    list.textContent = "Erreur réseau.";
+  }
+}
+
+function renderScheduledList(rows) {
+  const list = $("sched-list");
+  if (!list) return;
+  if (!rows.length) {
+    list.textContent = "Aucune annonce programmée.";
+    return;
+  }
+  const repeatLabel = { once: "Une fois", daily: "Quotidien", weekly: "Hebdo" };
+  list.innerHTML = "";
+  for (const row of rows) {
+    const ch = lastGuildChannelsList.find((c) => c.id === row.channel_id);
+    const chName = ch ? `#${ch.name}` : row.channel_id;
+    const div = document.createElement("div");
+    div.className = "warn-row";
+    div.style.cssText =
+      "border:1px solid var(--border, #333);border-radius:8px;padding:0.65rem 0.75rem;margin-bottom:0.5rem;";
+    const status = row.enabled ? "Actif" : "Pause";
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;align-items:center">
+        <strong>${escapeHtml(row.label || `Annonce #${row.id}`)}</strong>
+        <span class="muted tiny">${status} · ${repeatLabel[row.repeat] || row.repeat}</span>
+      </div>
+      <div class="muted tiny" style="margin-top:0.35rem">${escapeHtml(chName)} · ${escapeHtml(formatSchedWhen(row.send_at))}</div>
+      <div style="margin-top:0.45rem;display:flex;gap:0.35rem;flex-wrap:wrap">
+        <button type="button" class="btn link tiny btn-sched-edit" data-id="${row.id}">Modifier</button>
+        <button type="button" class="btn link tiny btn-sched-toggle" data-id="${row.id}" data-on="${row.enabled ? "1" : "0"}">${row.enabled ? "Pause" : "Activer"}</button>
+        <button type="button" class="btn link tiny btn-sched-del" data-id="${row.id}">Supprimer</button>
+      </div>
+    `;
+    list.appendChild(div);
+  }
+  list.querySelectorAll(".btn-sched-edit").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.id);
+      const row = rows.find((r) => r.id === id);
+      if (row) fillSchedForm(row);
+    });
+  });
+  list.querySelectorAll(".btn-sched-toggle").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.id);
+      const enabled = btn.dataset.on !== "1";
+      const res = await fetch(
+        apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/scheduled-messages/${id}`
+        ),
+        {
+          method: "PUT",
+          headers: authHeaders(),
+          credentials: "include",
+          body: JSON.stringify({ enabled }),
+        }
+      );
+      if (res.ok) loadScheduledMessagesList();
+    });
+  });
+  list.querySelectorAll(".btn-sched-del").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.id);
+      if (!confirm(`Supprimer l'annonce #${id} ?`)) return;
+      const res = await fetch(
+        apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/scheduled-messages/${id}`
+        ),
+        { method: "DELETE", credentials: "include" }
+      );
+      if (res.ok) {
+        if (schedEditingId === id) resetSchedForm();
+        loadScheduledMessagesList();
+      }
+    });
+  });
+}
+
+async function saveScheduledMessage() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  const channelId = $("sched-channel").value;
+  const sendAtLocal = $("sched-send-at").value;
+  if (!channelId) {
+    alert("Choisis un salon.");
+    return;
+  }
+  if (!sendAtLocal) {
+    alert("Choisis une date et une heure.");
+    return;
+  }
+  const sendAt = new Date(sendAtLocal);
+  if (Number.isNaN(sendAt.getTime())) {
+    alert("Date invalide.");
+    return;
+  }
+  const body = {
+    label: $("sched-label").value,
+    channel_id: channelId,
+    send_at: sendAt.toISOString(),
+    repeat: $("sched-repeat").value,
+    payload: collectSchedPayloadFromForm(),
+  };
+  const url = schedEditingId
+    ? apiUrl(
+        `/api/guilds/${encodeURIComponent(selectedGuildId)}/scheduled-messages/${schedEditingId}`
+      )
+    : apiUrl(
+        `/api/guilds/${encodeURIComponent(selectedGuildId)}/scheduled-messages`
+      );
+  const res = await fetch(url, {
+    method: schedEditingId ? "PUT" : "POST",
+    headers: authHeaders(),
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    alert(j.error || "Échec de l'enregistrement.");
+    return;
+  }
+  resetSchedForm();
+  loadScheduledMessagesList();
+}
+
 async function loadWarningsList() {
   const panel = $("warn-list-panel");
   if (!panel || !selectedGuildId || !currentGuildHasBot()) return;
@@ -1752,6 +1996,7 @@ function setViewsDisabled(noBot) {
     "embeds",
     "moderation",
     "warns",
+    "announcements",
   ];
   for (const key of keys) {
     const el = viewEls.get(key);
@@ -1870,6 +2115,7 @@ async function applyGuildData(data) {
   await refreshDiscordForGuild(data.guild_id);
   await loadBotProfileForGuild(data.guild_id);
   renderCommandAccessPanel();
+  if (getHashView() === "announcements") loadScheduledMessagesList();
   if (getHashView() === "embeds" && window.wingbotEmbedWorkbench) {
     window.wingbotEmbedWorkbench.refresh();
   }
@@ -2984,6 +3230,10 @@ document.addEventListener("keydown", (e) => {
 document.querySelectorAll(".fonda-tab").forEach((b) => {
   b.addEventListener("click", () => switchFondaTab(b.dataset.fondaTab));
 });
+$("btn-sched-save")?.addEventListener("click", () => saveScheduledMessage());
+$("btn-sched-cancel")?.addEventListener("click", () => resetSchedForm());
+$("btn-sched-refresh")?.addEventListener("click", () => loadScheduledMessagesList());
+
 $("btn-refresh-warns")?.addEventListener("click", () => loadWarningsList());
 $("warn-filter-user")?.addEventListener("change", () => loadWarningsList());
 $("warn-filter-user")?.addEventListener("keydown", (e) => {

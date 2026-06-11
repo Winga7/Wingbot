@@ -118,6 +118,7 @@ function initDatabase() {
   migrateDmMessagesTable();
   migrateDashboardSessionsTable();
   migrateGuildWarningsTable();
+  migrateScheduledMessagesTable();
 
   console.log("✅ Base de données initialisée");
 }
@@ -146,6 +147,203 @@ function migrateGuildWarningsTable() {
     `CREATE INDEX IF NOT EXISTS idx_guild_warnings_guild_created
      ON guild_warnings(guild_id, created_at DESC)`
   ).run();
+}
+
+function migrateScheduledMessagesTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS scheduled_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      payload TEXT NOT NULL DEFAULT '{}',
+      send_at TEXT NOT NULL,
+      repeat_kind TEXT NOT NULL DEFAULT 'once',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_sent_at TEXT,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_sched_msg_guild ON scheduled_messages(guild_id)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_sched_msg_due ON scheduled_messages(enabled, send_at)`
+  ).run();
+}
+
+const VALID_REPEAT_KINDS = new Set(["once", "daily", "weekly"]);
+
+function parseScheduledPayload(raw) {
+  try {
+    const o = JSON.parse(raw || "{}");
+    if (!o || typeof o !== "object") return { content: "", embed: null };
+    return {
+      content: typeof o.content === "string" ? o.content : "",
+      embed:
+        o.embed && typeof o.embed === "object" ? o.embed : null,
+    };
+  } catch {
+    return { content: "", embed: null };
+  }
+}
+
+function formatScheduledRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    guild_id: row.guild_id,
+    channel_id: row.channel_id,
+    label: row.label || "",
+    payload: parseScheduledPayload(row.payload),
+    send_at: row.send_at,
+    repeat: row.repeat_kind || "once",
+    enabled: !!row.enabled,
+    last_sent_at: row.last_sent_at || null,
+    created_by: row.created_by || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function listScheduledMessages(guildId) {
+  const rows = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, label, payload, send_at, repeat_kind, enabled,
+              last_sent_at, created_by, created_at, updated_at
+       FROM scheduled_messages WHERE guild_id = ? ORDER BY send_at ASC, id ASC`
+    )
+    .all(guildId);
+  return rows.map(formatScheduledRow);
+}
+
+function getScheduledMessage(id, guildId) {
+  const row = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, label, payload, send_at, repeat_kind, enabled,
+              last_sent_at, created_by, created_at, updated_at
+       FROM scheduled_messages WHERE id = ? AND guild_id = ?`
+    )
+    .get(id, guildId);
+  return formatScheduledRow(row);
+}
+
+function insertScheduledMessage(guildId, data) {
+  const repeat = VALID_REPEAT_KINDS.has(data.repeat) ? data.repeat : "once";
+  const payload = JSON.stringify({
+    content: String(data.payload?.content || ""),
+    embed: data.payload?.embed || null,
+  });
+  const r = db
+    .prepare(
+      `INSERT INTO scheduled_messages
+        (guild_id, channel_id, label, payload, send_at, repeat_kind, enabled, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      guildId,
+      data.channel_id,
+      String(data.label || "").slice(0, 80),
+      payload,
+      data.send_at,
+      repeat,
+      data.enabled === false ? 0 : 1,
+      data.created_by || null
+    );
+  return getScheduledMessage(r.lastInsertRowid, guildId);
+}
+
+function updateScheduledMessage(id, guildId, patch) {
+  const cur = getScheduledMessage(id, guildId);
+  if (!cur) return null;
+  const fields = [];
+  const vals = [];
+  if (patch.channel_id != null) {
+    fields.push("channel_id = ?");
+    vals.push(patch.channel_id);
+  }
+  if (patch.label != null) {
+    fields.push("label = ?");
+    vals.push(String(patch.label).slice(0, 80));
+  }
+  if (patch.send_at != null) {
+    fields.push("send_at = ?");
+    vals.push(patch.send_at);
+  }
+  if (patch.repeat != null && VALID_REPEAT_KINDS.has(patch.repeat)) {
+    fields.push("repeat_kind = ?");
+    vals.push(patch.repeat);
+  }
+  if (patch.enabled != null) {
+    fields.push("enabled = ?");
+    vals.push(patch.enabled ? 1 : 0);
+  }
+  if (patch.payload != null) {
+    fields.push("payload = ?");
+    vals.push(
+      JSON.stringify({
+        content: String(patch.payload.content || ""),
+        embed: patch.payload.embed || null,
+      })
+    );
+  }
+  if (!fields.length) return cur;
+  fields.push("updated_at = CURRENT_TIMESTAMP");
+  vals.push(id, guildId);
+  db.prepare(
+    `UPDATE scheduled_messages SET ${fields.join(", ")} WHERE id = ? AND guild_id = ?`
+  ).run(...vals);
+  return getScheduledMessage(id, guildId);
+}
+
+function deleteScheduledMessage(id, guildId) {
+  const r = db
+    .prepare(`DELETE FROM scheduled_messages WHERE id = ? AND guild_id = ?`)
+    .run(id, guildId);
+  return r.changes > 0;
+}
+
+function listDueScheduledMessages(isoNow) {
+  const rows = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, label, payload, send_at, repeat_kind, enabled,
+              last_sent_at, created_by, created_at, updated_at
+       FROM scheduled_messages
+       WHERE enabled = 1 AND send_at <= ?
+       ORDER BY send_at ASC
+       LIMIT 40`
+    )
+    .all(isoNow);
+  return rows.map(formatScheduledRow);
+}
+
+function advanceScheduledMessageAfterSend(id, guildId, sentAtIso) {
+  const row = getScheduledMessage(id, guildId);
+  if (!row) return null;
+  if (row.repeat === "once") {
+    db.prepare(
+      `UPDATE scheduled_messages SET enabled = 0, last_sent_at = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND guild_id = ?`
+    ).run(sentAtIso, id, guildId);
+    return getScheduledMessage(id, guildId);
+  }
+  const base = new Date(row.send_at);
+  const next = new Date(base);
+  if (row.repeat === "daily") next.setUTCDate(next.getUTCDate() + 1);
+  else if (row.repeat === "weekly") next.setUTCDate(next.getUTCDate() + 7);
+  while (next.toISOString() <= sentAtIso) {
+    if (row.repeat === "daily") next.setUTCDate(next.getUTCDate() + 1);
+    else next.setUTCDate(next.getUTCDate() + 7);
+  }
+  db.prepare(
+    `UPDATE scheduled_messages SET send_at = ?, last_sent_at = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND guild_id = ?`
+  ).run(next.toISOString(), sentAtIso, id, guildId);
+  return getScheduledMessage(id, guildId);
 }
 
 // ============================================================
@@ -1682,4 +1880,11 @@ module.exports = {
   getDmThread,
   markDmThreadRead,
   updateDmThreadProfile,
+  listScheduledMessages,
+  getScheduledMessage,
+  insertScheduledMessage,
+  updateScheduledMessage,
+  deleteScheduledMessage,
+  listDueScheduledMessages,
+  advanceScheduledMessageAfterSend,
 };

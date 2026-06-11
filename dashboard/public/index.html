@@ -114,7 +114,6 @@
                   <svg viewBox="0 0 24 24"><path d="M3 11v2a4 4 0 004 4h1"/><path d="M7 15V9a5 5 0 0110 0v6"/><path d="M21 11v2a4 4 0 01-4 4h-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
                 </span>
                 <span class="nav-label">Annonces</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
               <a href="#templates" class="nav-link" data-view="templates">
                 <span class="nav-ico" aria-hidden="true">
@@ -721,6 +720,68 @@
               </details>
               <div id="custom-commands-root" class="custom-commands-list"></div>
               <button type="button" class="btn secondary" id="btn-add-custom">+ Ajouter une commande</button>
+            </div>
+          </section>
+
+          <section class="view" id="view-announcements" hidden>
+            <div class="view-head">
+              <h2>Annonces programmées</h2>
+              <p class="muted tiny">Envoie un message (et optionnellement un embed) dans un salon à l'heure choisie.</p>
+            </div>
+            <div class="panel-block" id="sched-form-panel">
+              <h3 id="sched-form-title">Nouvelle annonce</h3>
+              <label class="field-row">
+                <span>Nom interne</span>
+                <input type="text" id="sched-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Rappel hebdo" />
+              </label>
+              <label class="field-row">
+                <span>Salon</span>
+                <select id="sched-channel" class="input-sm input-wide"></select>
+              </label>
+              <label class="field-row">
+                <span>Date &amp; heure</span>
+                <input type="datetime-local" id="sched-send-at" class="input-sm" />
+              </label>
+              <label class="field-row">
+                <span>Répétition</span>
+                <select id="sched-repeat" class="input-sm">
+                  <option value="once">Une fois</option>
+                  <option value="daily">Tous les jours</option>
+                  <option value="weekly">Toutes les semaines</option>
+                </select>
+              </label>
+              <label class="field-row">
+                <span>Message</span>
+                <textarea id="sched-content" class="input-sm input-wide" rows="3" placeholder="Texte du message — variables {guild}, {date}, {time}, {channel}…"></textarea>
+              </label>
+              <details class="custom-guide">
+                <summary>Embed (optionnel)</summary>
+                <div class="custom-guide-body">
+                  <label class="field-row">
+                    <span>Titre</span>
+                    <input type="text" id="sched-embed-title" class="input-sm input-wide" maxlength="256" />
+                  </label>
+                  <label class="field-row">
+                    <span>Description</span>
+                    <textarea id="sched-embed-desc" class="input-sm input-wide" rows="3" maxlength="4096"></textarea>
+                  </label>
+                  <label class="field-row">
+                    <span>Couleur</span>
+                    <input type="text" id="sched-embed-color" class="input-sm mono" value="#5865f2" maxlength="7" />
+                  </label>
+                </div>
+              </details>
+              <div class="fonda-actions" style="margin-top:0.75rem">
+                <button type="button" class="btn primary" id="btn-sched-save">Programmer</button>
+                <button type="button" class="btn ghost" id="btn-sched-cancel" hidden>Annuler</button>
+              </div>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
+                <h3 style="margin:0">Annonces planifiées</h3>
+                <button type="button" class="btn ghost tiny" id="btn-sched-refresh">Rafraîchir</button>
+              </div>
+              <div id="sched-list" class="muted tiny">Charge un serveur pour voir les annonces.</div>
             </div>
           </section>
 

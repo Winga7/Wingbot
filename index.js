@@ -149,6 +149,9 @@ loadLogs(client);
 const loadAntispam = require("./events/antispam");
 loadAntispam(client);
 
+const loadScheduledMessages = require("./events/scheduledMessages");
+loadScheduledMessages(client);
+
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
