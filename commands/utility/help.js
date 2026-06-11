@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require("discord.js");
+const { formatDashboardHelpFields } = require("../../lib/dashboardFeatures");
 
 const INFOS = [
   "ping",
@@ -63,12 +64,15 @@ function buildEmbed() {
       {
         name: "✨ Commandes perso",
         value:
-          "Réponses configurables depuis le dashboard. _Préfixe uniquement._",
+          "Réponses configurables depuis le dashboard (**Messages → Commandes perso**). _Préfixe uniquement._",
         inline: false,
       },
+      ...formatDashboardHelpFields(),
     ],
     timestamp: new Date(),
-    footer: { text: "Wingbot · tape /help ou $help" },
+    footer: {
+      text: "Wingbot · /help ou $help · dashboard : annonces, réseaux sociaux, réactions rôles…",
+    },
   };
 }
 
