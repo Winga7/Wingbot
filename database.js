@@ -502,7 +502,8 @@ function deleteReactionRolePanel(id, guildId) {
   return r.changes > 0;
 }
 
-const SOCIAL_PLATFORMS = new Set(["youtube"]);
+const SOCIAL_PLATFORMS = new Set(["youtube", "twitch"]);
+const SOCIAL_EVENT_KINDS = new Set(["video", "live", "clip"]);
 
 function migrateSocialFeedsTable() {
   db.prepare(
@@ -512,12 +513,14 @@ function migrateSocialFeedsTable() {
       guild_id TEXT NOT NULL,
       channel_id TEXT NOT NULL,
       platform TEXT NOT NULL DEFAULT 'youtube',
+      event_kind TEXT NOT NULL DEFAULT 'video',
       source_id TEXT NOT NULL,
       source_label TEXT NOT NULL DEFAULT '',
       source_url TEXT NOT NULL DEFAULT '',
       payload TEXT NOT NULL DEFAULT '{}',
       enabled INTEGER NOT NULL DEFAULT 1,
       last_video_id TEXT,
+      last_state TEXT,
       last_checked_at TEXT,
       last_error TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -531,6 +534,20 @@ function migrateSocialFeedsTable() {
   db.prepare(
     `CREATE INDEX IF NOT EXISTS idx_social_feeds_enabled ON social_feeds(enabled, platform)`
   ).run();
+  migrateSocialFeedsExtras();
+}
+
+function migrateSocialFeedsExtras() {
+  const cols = db.prepare("PRAGMA table_info(social_feeds)").all();
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has("event_kind")) {
+    db.prepare(
+      `ALTER TABLE social_feeds ADD COLUMN event_kind TEXT NOT NULL DEFAULT 'video'`
+    ).run();
+  }
+  if (!names.has("last_state")) {
+    db.prepare(`ALTER TABLE social_feeds ADD COLUMN last_state TEXT`).run();
+  }
 }
 
 function parseSocialFeedPayload(raw) {
@@ -553,12 +570,14 @@ function formatSocialFeedRow(row) {
     guild_id: row.guild_id,
     channel_id: row.channel_id,
     platform: row.platform || "youtube",
+    event_kind: row.event_kind || "video",
     source_id: row.source_id,
     source_label: row.source_label || "",
     source_url: row.source_url || "",
     payload: parseSocialFeedPayload(row.payload),
     enabled: !!row.enabled,
     last_video_id: row.last_video_id || null,
+    last_state: row.last_state || null,
     last_checked_at: row.last_checked_at || null,
     last_error: row.last_error || null,
     created_at: row.created_at,
@@ -566,12 +585,14 @@ function formatSocialFeedRow(row) {
   };
 }
 
+const SOCIAL_FEED_SELECT = `id, guild_id, channel_id, platform, event_kind, source_id, source_label, source_url,
+              payload, enabled, last_video_id, last_state, last_checked_at, last_error,
+              created_at, updated_at`;
+
 function listSocialFeeds(guildId) {
   const rows = db
     .prepare(
-      `SELECT id, guild_id, channel_id, platform, source_id, source_label, source_url,
-              payload, enabled, last_video_id, last_checked_at, last_error,
-              created_at, updated_at
+      `SELECT ${SOCIAL_FEED_SELECT}
        FROM social_feeds WHERE guild_id = ? ORDER BY id DESC`
     )
     .all(guildId);
@@ -581,30 +602,31 @@ function listSocialFeeds(guildId) {
 function getSocialFeed(id, guildId) {
   const row = db
     .prepare(
-      `SELECT id, guild_id, channel_id, platform, source_id, source_label, source_url,
-              payload, enabled, last_video_id, last_checked_at, last_error,
-              created_at, updated_at
+      `SELECT ${SOCIAL_FEED_SELECT}
        FROM social_feeds WHERE id = ? AND guild_id = ?`
     )
     .get(id, guildId);
   return formatSocialFeedRow(row);
 }
 
-function listEnabledSocialFeeds(platform = "youtube") {
+function listEnabledSocialFeeds() {
   const rows = db
     .prepare(
-      `SELECT id, guild_id, channel_id, platform, source_id, source_label, source_url,
-              payload, enabled, last_video_id, last_checked_at, last_error,
-              created_at, updated_at
-       FROM social_feeds WHERE enabled = 1 AND platform = ?
+      `SELECT ${SOCIAL_FEED_SELECT}
+       FROM social_feeds WHERE enabled = 1
        ORDER BY id ASC`
     )
-    .all(platform);
+    .all();
   return rows.map(formatSocialFeedRow);
 }
 
 function insertSocialFeed(guildId, data) {
   const platform = SOCIAL_PLATFORMS.has(data.platform) ? data.platform : "youtube";
+  const eventKind = SOCIAL_EVENT_KINDS.has(data.event_kind)
+    ? data.event_kind
+    : platform === "twitch"
+      ? "live"
+      : "video";
   const payload = JSON.stringify({
     content: String(data.payload?.content || ""),
     embed: data.payload?.embed || null,
@@ -612,20 +634,22 @@ function insertSocialFeed(guildId, data) {
   const r = db
     .prepare(
       `INSERT INTO social_feeds
-        (guild_id, channel_id, platform, source_id, source_label, source_url,
-         payload, enabled, last_video_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (guild_id, channel_id, platform, event_kind, source_id, source_label, source_url,
+         payload, enabled, last_video_id, last_state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       guildId,
       data.channel_id,
       platform,
+      eventKind,
       data.source_id,
       String(data.source_label || "").slice(0, 120),
       String(data.source_url || "").slice(0, 512),
       payload,
       data.enabled === false ? 0 : 1,
-      data.last_video_id || null
+      data.last_video_id || null,
+      data.last_state || null
     );
   return getSocialFeed(r.lastInsertRowid, guildId);
 }
@@ -663,6 +687,10 @@ function updateSocialFeed(id, guildId, patch) {
   if (patch.last_video_id !== undefined) {
     fields.push("last_video_id = ?");
     vals.push(patch.last_video_id);
+  }
+  if (patch.last_state !== undefined) {
+    fields.push("last_state = ?");
+    vals.push(patch.last_state);
   }
   if (patch.last_checked_at !== undefined) {
     fields.push("last_checked_at = ?");

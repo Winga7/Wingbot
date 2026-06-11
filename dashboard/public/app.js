@@ -1945,11 +1945,77 @@ async function saveScheduledMessage() {
 let socialEditingId = null;
 let socialPreviewData = null;
 
+function socialAlertTypeFromRow(row) {
+  if (row.platform === "twitch" && row.event_kind === "live") return "twitch-live";
+  if (row.platform === "twitch" && row.event_kind === "clip") return "twitch-clip";
+  return "youtube-video";
+}
+
+function socialTypeLabel(alertType) {
+  if (alertType === "twitch-live") return "Twitch live";
+  if (alertType === "twitch-clip") return "Twitch clips";
+  return "YouTube vidéo";
+}
+
+function updateSocialTypeUI() {
+  const alertType = $("social-alert-type")?.value || "youtube-video";
+  const editing = !!socialEditingId;
+  const typeSel = $("social-alert-type");
+  if (typeSel) typeSel.disabled = editing;
+
+  const sourceLabel = $("social-source-label");
+  const sourceInput = $("social-source");
+  const varsHint = $("social-vars-hint");
+  const content = $("social-content");
+  const color = $("social-embed-color");
+  const thumb = $("social-embed-thumb");
+
+  if (alertType === "twitch-live") {
+    if (sourceLabel) sourceLabel.textContent = "Chaîne Twitch";
+    if (sourceInput) sourceInput.placeholder = "https://twitch.tv/pseudo ou @pseudo";
+    if (varsHint) {
+      varsHint.innerHTML =
+        'Variables Twitch live : <code>{twitch.display_name}</code>, <code>{twitch.title}</code>, <code>{twitch.url}</code>, <code>{twitch.game}</code>, <code>{twitch.viewers}</code>, <code>{twitch.thumbnail}</code>…';
+    }
+    if (content && !content.value.trim() && !editing) {
+      content.placeholder = "🔴 **{twitch.display_name}** est en live !\n{twitch.url}";
+    }
+    if (color && !editing) color.value = "#9146ff";
+    if (thumb && !thumb.value.trim()) thumb.placeholder = "{twitch.thumbnail}";
+  } else if (alertType === "twitch-clip") {
+    if (sourceLabel) sourceLabel.textContent = "Chaîne Twitch";
+    if (sourceInput) sourceInput.placeholder = "https://twitch.tv/pseudo ou @pseudo";
+    if (varsHint) {
+      varsHint.innerHTML =
+        'Variables Twitch clip : <code>{twitch.clip.title}</code>, <code>{twitch.clip.url}</code>, <code>{twitch.clip.creator}</code>, <code>{twitch.display_name}</code>…';
+    }
+    if (content && !content.value.trim() && !editing) {
+      content.placeholder =
+        "🎬 Nouveau clip — **{twitch.clip.title}**\n{twitch.clip.url}";
+    }
+    if (color && !editing) color.value = "#9146ff";
+    if (thumb && !thumb.value.trim()) thumb.placeholder = "{twitch.clip.thumbnail}";
+  } else {
+    if (sourceLabel) sourceLabel.textContent = "Chaîne YouTube";
+    if (sourceInput) sourceInput.placeholder = "URL, @pseudo ou ID UC…";
+    if (varsHint) {
+      varsHint.innerHTML =
+        'Variables YouTube : <code>{youtube.title}</code>, <code>{youtube.url}</code>, <code>{youtube.channel}</code>, <code>{youtube.thumbnail}</code>, <code>{guild}</code>, <code>{channel}</code>…';
+    }
+    if (content && !content.value.trim() && !editing) {
+      content.placeholder = "🎬 **{youtube.title}**\n{youtube.url}";
+    }
+    if (color && !editing) color.value = "#ff0000";
+    if (thumb && !thumb.value.trim()) thumb.placeholder = "{youtube.thumbnail}";
+  }
+}
+
 function resetSocialForm() {
   socialEditingId = null;
   socialPreviewData = null;
+  if ($("social-alert-type")) $("social-alert-type").value = "youtube-video";
   $("social-label").value = "";
-  $("social-youtube-source").value = "";
+  $("social-source").value = "";
   $("social-content").value = "";
   $("social-embed-title").value = "";
   $("social-embed-desc").value = "";
@@ -1958,11 +2024,14 @@ function resetSocialForm() {
   $("social-channel").value = "";
   const hint = $("social-preview-hint");
   if (hint) hint.textContent = "";
-  $("social-form-title").textContent = "Nouvelle alerte YouTube";
+  $("social-form-title").textContent = "Nouvelle alerte";
   $("btn-social-save").textContent = "Activer l'alerte";
   $("btn-social-cancel").hidden = true;
-  const src = $("social-youtube-source");
+  const src = $("social-source");
   if (src) src.disabled = false;
+  const typeSel = $("social-alert-type");
+  if (typeSel) typeSel.disabled = false;
+  updateSocialTypeUI();
 }
 
 function fillSocialChannelSelect() {
@@ -2004,8 +2073,10 @@ function collectSocialPayloadFromForm() {
 
 function fillSocialForm(row) {
   socialEditingId = row.id;
+  const alertType = socialAlertTypeFromRow(row);
+  if ($("social-alert-type")) $("social-alert-type").value = alertType;
   $("social-label").value = row.source_label || "";
-  $("social-youtube-source").value = row.source_url || row.source_id || "";
+  $("social-source").value = row.source_url || row.source_id || "";
   $("social-channel").value = row.channel_id || "";
   $("social-content").value = row.payload?.content || "";
   const emb = row.payload?.embed || {};
@@ -2014,57 +2085,78 @@ function fillSocialForm(row) {
   $("social-embed-color").value =
     emb.color != null && Number.isFinite(Number(emb.color))
       ? `#${Number(emb.color).toString(16).padStart(6, "0")}`
-      : "#ff0000";
+      : alertType.startsWith("twitch")
+        ? "#9146ff"
+        : "#ff0000";
   $("social-embed-thumb").value = emb.thumbnail_url || "";
-  $("social-form-title").textContent = `Modifier l'alerte #${row.id}`;
+  $("social-form-title").textContent = `Modifier l'alerte #${row.id} (${socialTypeLabel(alertType)})`;
   $("btn-social-save").textContent = "Enregistrer";
   $("btn-social-cancel").hidden = false;
-  const src = $("social-youtube-source");
+  const src = $("social-source");
   if (src) src.disabled = true;
   const hint = $("social-preview-hint");
   if (hint) {
-    hint.textContent = row.source_id
-      ? `Chaîne : ${row.source_label || row.source_id}`
+    hint.textContent = row.source_label
+      ? `${socialTypeLabel(alertType)} · ${row.source_label}`
       : "";
   }
+  updateSocialTypeUI();
 }
 
-async function previewSocialYoutubeSource() {
+async function previewSocialSource() {
   if (!selectedGuildId || !currentGuildHasBot()) return;
-  const source = String($("social-youtube-source")?.value || "").trim();
+  const source = String($("social-source")?.value || "").trim();
+  const alertType = $("social-alert-type")?.value || "youtube-video";
   if (!source) {
-    alert("Indique l'URL ou l'ID de la chaîne YouTube.");
+    alert("Indique la source (URL ou pseudo).");
     return;
   }
   const hint = $("social-preview-hint");
   if (hint) hint.textContent = "Vérification…";
   try {
-    const res = await fetch(
-      apiUrl(
-        `/api/guilds/${encodeURIComponent(selectedGuildId)}/social-feeds/preview-youtube`
-      ),
-      {
-        method: "POST",
-        headers: authHeaders(),
-        credentials: "include",
-        body: JSON.stringify({ source }),
-      }
-    );
+    const isTwitch = alertType.startsWith("twitch");
+    const url = isTwitch
+      ? apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/social-feeds/preview-twitch`
+        )
+      : apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/social-feeds/preview-youtube`
+        );
+    const body = isTwitch
+      ? { source, kind: alertType === "twitch-clip" ? "clip" : "live" }
+      : { source };
+    const res = await fetch(url, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (hint) hint.textContent = "";
-      alert(j.error || "Chaîne introuvable.");
+      alert(j.error || "Source introuvable.");
       socialPreviewData = null;
       return;
     }
     socialPreviewData = j;
     if (hint) {
-      hint.textContent = j.channel_name
-        ? `✓ ${j.channel_name} — dernière vidéo : ${j.latest_video?.title || "—"}`
-        : `✓ Chaîne ${j.channel_id}`;
+      if (isTwitch && alertType === "twitch-live") {
+        hint.textContent = j.is_live
+          ? `✓ ${j.display_name} — en live : ${j.live?.title || "—"}`
+          : `✓ ${j.display_name} — hors ligne`;
+      } else if (isTwitch) {
+        hint.textContent = j.latest_clip?.title
+          ? `✓ ${j.display_name} — dernier clip : ${j.latest_clip.title}`
+          : `✓ ${j.display_name} — aucun clip récent`;
+      } else {
+        hint.textContent = j.channel_name
+          ? `✓ ${j.channel_name} — dernière vidéo : ${j.latest_video?.title || "—"}`
+          : `✓ Chaîne ${j.channel_id}`;
+      }
     }
-    if (!$("social-label").value.trim() && j.channel_name) {
-      $("social-label").value = j.channel_name;
+    const autoName = j.display_name || j.channel_name;
+    if (!$("social-label").value.trim() && autoName) {
+      $("social-label").value = autoName;
     }
   } catch {
     if (hint) hint.textContent = "";
@@ -2098,13 +2190,14 @@ function renderSocialFeedsList(rows) {
   const list = $("social-list");
   if (!list) return;
   if (!rows.length) {
-    list.textContent = "Aucune alerte YouTube configurée.";
+    list.textContent = "Aucune alerte configurée.";
     return;
   }
   list.innerHTML = "";
   for (const row of rows) {
     const ch = lastGuildChannelsList.find((c) => c.id === row.channel_id);
     const chName = ch ? `#${ch.name}` : row.channel_id;
+    const typeLabel = socialTypeLabel(socialAlertTypeFromRow(row));
     const div = document.createElement("div");
     div.className = "warn-row";
     div.style.cssText =
@@ -2113,15 +2206,15 @@ function renderSocialFeedsList(rows) {
     const err = row.last_error
       ? `<div class="muted tiny" style="color:var(--danger,#f04747);margin-top:0.25rem">Erreur : ${escapeHtml(row.last_error)}</div>`
       : "";
-    const ytLink = row.source_url
+    const srcLink = row.source_url
       ? `<a href="${escapeAttr(row.source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.source_label || row.source_id)}</a>`
       : escapeHtml(row.source_label || row.source_id);
     div.innerHTML = `
       <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;align-items:center">
         <strong>${escapeHtml(row.source_label || `Alerte #${row.id}`)}</strong>
-        <span class="muted tiny">${status} · YouTube</span>
+        <span class="muted tiny">${status} · ${escapeHtml(typeLabel)}</span>
       </div>
-      <div class="muted tiny" style="margin-top:0.35rem">${ytLink} → ${escapeHtml(chName)}</div>
+      <div class="muted tiny" style="margin-top:0.35rem">${srcLink} → ${escapeHtml(chName)}</div>
       ${err}
       <div style="margin-top:0.45rem;display:flex;gap:0.35rem;flex-wrap:wrap">
         <button type="button" class="btn link tiny btn-social-edit" data-id="${row.id}">Modifier</button>
@@ -2208,15 +2301,16 @@ async function saveSocialFeed() {
         return;
       }
     } else {
-      const source = String($("social-youtube-source")?.value || "").trim();
+      const source = String($("social-source")?.value || "").trim();
       if (!source) {
-        alert("Indique la chaîne YouTube.");
+        alert("Indique la chaîne ou la source.");
         return;
       }
       const body = {
         label: $("social-label").value,
         channel_id: channelId,
         source,
+        alert_type: $("social-alert-type")?.value || "youtube-video",
         payload,
       };
       const res = await fetch(
@@ -3895,7 +3989,8 @@ $("btn-sched-refresh")?.addEventListener("click", () => loadScheduledMessagesLis
 $("btn-social-save")?.addEventListener("click", () => saveSocialFeed());
 $("btn-social-cancel")?.addEventListener("click", () => resetSocialForm());
 $("btn-social-refresh")?.addEventListener("click", () => loadSocialFeedsList());
-$("btn-social-preview")?.addEventListener("click", () => previewSocialYoutubeSource());
+$("btn-social-preview")?.addEventListener("click", () => previewSocialSource());
+$("social-alert-type")?.addEventListener("change", () => updateSocialTypeUI());
 
 $("btn-refresh-warns")?.addEventListener("click", () => loadWarningsList());
 $("warn-filter-user")?.addEventListener("change", () => loadWarningsList());

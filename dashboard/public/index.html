@@ -870,22 +870,31 @@
           <section class="view" id="view-social" hidden>
             <div class="view-head">
               <h2>Réseaux sociaux</h2>
-              <p class="muted tiny">Alerte Discord quand une chaîne YouTube publie une nouvelle vidéo. Message personnalisable avec variables.</p>
+              <p class="muted tiny">Alertes YouTube (vidéos), Twitch (live ou clips) vers le salon Discord de ton choix. Plusieurs chaînes et types possibles.</p>
             </div>
             <div class="panel-block" id="social-form-panel">
-              <h3 id="social-form-title">Nouvelle alerte YouTube</h3>
+              <h3 id="social-form-title">Nouvelle alerte</h3>
+              <label class="field-row">
+                <span>Type d'alerte</span>
+                <select id="social-alert-type" class="input-sm input-wide">
+                  <option value="youtube-video">YouTube — nouvelle vidéo</option>
+                  <option value="twitch-live">Twitch — début de live</option>
+                  <option value="twitch-clip">Twitch — nouveau clip</option>
+                </select>
+              </label>
               <label class="field-row">
                 <span>Nom interne</span>
                 <input type="text" id="social-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Chaîne principale" />
               </label>
               <label class="field-row">
-                <span>Chaîne YouTube</span>
-                <input type="text" id="social-youtube-source" class="input-sm input-wide" placeholder="URL, @pseudo ou ID UC…" />
+                <span id="social-source-label">Chaîne / source</span>
+                <input type="text" id="social-source" class="input-sm input-wide" placeholder="URL, @pseudo ou ID…" />
               </label>
               <div style="margin:-0.25rem 0 0.65rem">
-                <button type="button" class="btn ghost tiny" id="btn-social-preview">Vérifier la chaîne</button>
+                <button type="button" class="btn ghost tiny" id="btn-social-preview">Vérifier</button>
                 <span id="social-preview-hint" class="muted tiny" style="margin-left:0.5rem"></span>
               </div>
+              <p id="social-vars-hint" class="muted tiny">Variables YouTube : <code>{youtube.title}</code>, <code>{youtube.url}</code>, <code>{youtube.channel}</code>, <code>{youtube.thumbnail}</code>…</p>
               <label class="field-row">
                 <span>Salon Discord</span>
                 <select id="social-channel" class="input-sm input-wide"></select>
@@ -894,17 +903,16 @@
                 <span>Message</span>
                 <textarea id="social-content" class="input-sm input-wide" rows="3" placeholder="🎬 **{youtube.title}**&#10;{youtube.url}"></textarea>
               </label>
-              <p class="muted tiny">Variables : <code>{youtube.title}</code>, <code>{youtube.url}</code>, <code>{youtube.channel}</code>, <code>{youtube.thumbnail}</code>, <code>{guild}</code>, <code>{channel}</code> (mention salon)…</p>
               <details class="custom-guide">
                 <summary>Embed (optionnel)</summary>
                 <div class="custom-guide-body">
                   <label class="field-row">
                     <span>Titre</span>
-                    <input type="text" id="social-embed-title" class="input-sm input-wide" maxlength="256" placeholder="{youtube.title}" />
+                    <input type="text" id="social-embed-title" class="input-sm input-wide" maxlength="256" />
                   </label>
                   <label class="field-row">
                     <span>Description</span>
-                    <textarea id="social-embed-desc" class="input-sm input-wide" rows="2" maxlength="4096" placeholder="Nouvelle vidéo de {youtube.channel}"></textarea>
+                    <textarea id="social-embed-desc" class="input-sm input-wide" rows="2" maxlength="4096"></textarea>
                   </label>
                   <label class="field-row">
                     <span>Couleur</span>
@@ -916,6 +924,7 @@
                   </label>
                 </div>
               </details>
+              <p class="muted tiny">Twitch requiert <code>TWITCH_CLIENT_ID</code> et <code>TWITCH_CLIENT_SECRET</code> dans le <code>.env</code> (app Dev dédiée au bot).</p>
               <div class="fonda-actions" style="margin-top:0.75rem">
                 <button type="button" class="btn primary" id="btn-social-save">Activer l'alerte</button>
                 <button type="button" class="btn ghost" id="btn-social-cancel" hidden>Annuler</button>

@@ -267,6 +267,35 @@ function substituteTokens(text, ctx = {}) {
     ];
     for (const pair of ytTokens) tokens.unshift(pair);
   }
+  const tw = ctx.twitch || null;
+  if (tw && typeof tw === "object") {
+    const clip = tw.clip && typeof tw.clip === "object" ? tw.clip : {};
+    const twTokens = [
+      ["twitch.display_name", String(tw.display_name || "")],
+      ["twitch.login", String(tw.login || "")],
+      ["twitch.url", String(tw.url || "")],
+      ["twitch.title", String(tw.title || "")],
+      ["twitch.game", String(tw.game || "")],
+      ["twitch.viewers", String(tw.viewers ?? "")],
+      ["twitch.thumbnail", String(tw.thumbnail || "")],
+      ["twitch.clip.title", String(clip.title || "")],
+      ["twitch.clip.url", String(clip.url || "")],
+      ["twitch.clip.id", String(clip.id || "")],
+      ["twitch.clip.thumbnail", String(clip.thumbnail || "")],
+      ["twitch.clip.creator", String(clip.creator || "")],
+      ["twitch.clip.views", String(clip.view_count ?? "")],
+      ["clip.title", String(clip.title || "")],
+      ["clip.url", String(clip.url || "")],
+      ["clip.creator", String(clip.creator || "")],
+    ];
+    if (!yt) {
+      twTokens.push(
+        ["title", String(tw.title || clip.title || "")],
+        ["url", String(tw.url || clip.url || "")]
+      );
+    }
+    for (const pair of twTokens) tokens.unshift(pair);
+  }
   let out = s;
   for (const [token, value] of tokens) {
     const re = new RegExp(

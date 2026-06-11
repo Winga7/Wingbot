@@ -12,6 +12,7 @@
  *     (OAuth2 → Redirects → <origine>/api/auth/discord/callback).
  *   DASHBOARD_HOST — optionnel, IP d'écoute HTTP (défaut : 0.0.0.0)
  *   BOT_INVITE_PERMISSIONS — optionnel, entier permissions (défaut : 268438528)
+ *   TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET — app Twitch Dev (alertes live + clips)
  */
 const path = require("node:path");
 const fs = require("node:fs");
@@ -66,6 +67,7 @@ const {
 } = require("../database");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
 const { resolveAndPreviewYoutubeChannel } = require("../lib/youtubeFeed");
+const { resolveAndPreviewTwitchChannel } = require("../lib/twitchApi");
 const {
   defaultEmbedPayload,
   mergeEmbedPayload,
@@ -1284,7 +1286,48 @@ function normalizeScheduledPayloadInput(body) {
   return { content: merged.content, embed: merged.embed };
 }
 
-function normalizeSocialPayloadInput(body) {
+function defaultSocialPayload(platform, eventKind) {
+  if (platform === "twitch" && eventKind === "live") {
+    return {
+      content: "🔴 **{twitch.display_name}** est en live !\n{twitch.url}",
+      embed: {
+        title: "{twitch.title}",
+        description: "{twitch.game} · {twitch.viewers} viewers",
+        url: "{twitch.url}",
+        thumbnail_url: "{twitch.thumbnail}",
+        color: 0x9146ff,
+        fields: [],
+      },
+    };
+  }
+  if (platform === "twitch" && eventKind === "clip") {
+    return {
+      content:
+        "🎬 Nouveau clip — **{twitch.clip.title}**\n{twitch.clip.url}",
+      embed: {
+        title: "{twitch.clip.title}",
+        description: "Par {twitch.clip.creator} · {twitch.display_name}",
+        url: "{twitch.clip.url}",
+        thumbnail_url: "{twitch.clip.thumbnail}",
+        color: 0x9146ff,
+        fields: [],
+      },
+    };
+  }
+  return {
+    content: "🎬 **{youtube.title}**\n{youtube.url}",
+    embed: {
+      title: "{youtube.title}",
+      description: "Nouvelle vidéo de {youtube.channel}",
+      url: "{youtube.url}",
+      thumbnail_url: "{youtube.thumbnail}",
+      color: 0xff0000,
+      fields: [],
+    },
+  };
+}
+
+function normalizeSocialPayloadInput(body, platform = "youtube", eventKind = "video") {
   const raw =
     body?.payload && typeof body.payload === "object" ? body.payload : body;
   let merged = mergeEmbedPayload(defaultEmbedPayload(), {
@@ -1301,19 +1344,36 @@ function normalizeSocialPayloadInput(body) {
     (e.fields && e.fields.length)
   );
   if (!hasText && !hasEmbed) {
-    merged = mergeEmbedPayload(defaultEmbedPayload(), {
-      content: "🎬 **{youtube.title}**\n{youtube.url}",
-      embed: {
-        title: "{youtube.title}",
-        description: "Nouvelle vidéo de {youtube.channel}",
-        url: "{youtube.url}",
-        thumbnail_url: "{youtube.thumbnail}",
-        color: 0xff0000,
-        fields: [],
-      },
-    });
+    merged = mergeEmbedPayload(
+      defaultEmbedPayload(),
+      defaultSocialPayload(platform, eventKind)
+    );
   }
   return { content: merged.content, embed: merged.embed };
+}
+
+function parseSocialFeedCreateInput(body) {
+  const alertType = String(body?.alert_type || body?.type || "youtube-video");
+  if (alertType === "twitch-live") {
+    return { platform: "twitch", event_kind: "live" };
+  }
+  if (alertType === "twitch-clip") {
+    return { platform: "twitch", event_kind: "clip" };
+  }
+  if (body?.platform === "twitch") {
+    const kind = body?.event_kind === "clip" ? "clip" : "live";
+    return { platform: "twitch", event_kind: kind };
+  }
+  return { platform: "youtube", event_kind: "video" };
+}
+
+function socialFeedDuplicate(guildId, platform, sourceId, eventKind) {
+  return listSocialFeeds(guildId).find(
+    (f) =>
+      f.platform === platform &&
+      f.source_id === sourceId &&
+      f.event_kind === eventKind
+  );
 }
 
 function parseSendAtInput(v) {
@@ -1745,6 +1805,29 @@ app.post(
 );
 
 app.post(
+  "/api/guilds/:guildId/social-feeds/preview-twitch",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const source = String(req.body?.source || "").trim();
+      const kind = req.body?.kind === "clip" ? "clip" : "live";
+      if (!source) {
+        return res.status(400).json({ error: "source requis (URL ou pseudo Twitch)" });
+      }
+      const preview = await resolveAndPreviewTwitchChannel(source, kind);
+      res.json(preview);
+    } catch (e) {
+      console.error(e);
+      if (e.code === "NO_TWITCH_CREDS") {
+        return res.status(503).json({ error: String(e.message) });
+      }
+      res.status(e.status || 400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
   "/api/guilds/:guildId/social-feeds",
   requireDiscordSession,
   requireGuildManageAccess,
@@ -1754,8 +1837,9 @@ app.post(
       if (!(await botGuildExists(guildId))) {
         return res.status(400).json({ error: "bot_not_in_guild" });
       }
-      const platform =
-        req.body?.platform === "youtube" ? "youtube" : "youtube";
+      const { platform, event_kind: eventKind } = parseSocialFeedCreateInput(
+        req.body
+      );
       const channelId = normalizeSnowflakeId(req.body?.channel_id);
       if (!channelId) {
         return res.status(400).json({ error: "channel_id requis" });
@@ -1763,31 +1847,82 @@ app.post(
       await assertGuildTextChannel(guildId, channelId);
       const source = String(req.body?.source || "").trim();
       if (!source) {
-        return res.status(400).json({ error: "source requis (URL ou ID chaîne YouTube)" });
+        return res.status(400).json({ error: "source requis" });
       }
-      const preview = await resolveAndPreviewYoutubeChannel(source);
-      const dup = listSocialFeeds(guildId).find(
-        (f) => f.platform === platform && f.source_id === preview.channel_id
-      );
-      if (dup) {
-        return res.status(409).json({
-          error: "Cette chaîne YouTube est déjà suivie sur ce serveur",
-        });
+
+      let insertData;
+      if (platform === "twitch") {
+        const preview = await resolveAndPreviewTwitchChannel(source, eventKind);
+        const dup = socialFeedDuplicate(
+          guildId,
+          "twitch",
+          preview.broadcaster_id,
+          eventKind
+        );
+        if (dup) {
+          const label =
+            eventKind === "clip" ? "alerte clips" : "alerte live";
+          return res.status(409).json({
+            error: `Cette chaîne Twitch a déjà une ${label} sur ce serveur`,
+          });
+        }
+        const payload = normalizeSocialPayloadInput(req.body, "twitch", eventKind);
+        insertData = {
+          channel_id: channelId,
+          platform: "twitch",
+          event_kind: eventKind,
+          source_id: preview.broadcaster_id,
+          source_label:
+            String(req.body?.label || "").trim() ||
+            preview.display_name ||
+            preview.login,
+          source_url: preview.channel_url,
+          payload,
+          enabled: req.body?.enabled !== false,
+          last_state:
+            eventKind === "live"
+              ? preview.is_live
+                ? "online"
+                : "offline"
+              : null,
+          last_video_id:
+            eventKind === "clip" ? preview.latest_clip?.id || null : null,
+        };
+      } else {
+        const preview = await resolveAndPreviewYoutubeChannel(source);
+        const dup = socialFeedDuplicate(
+          guildId,
+          "youtube",
+          preview.channel_id,
+          "video"
+        );
+        if (dup) {
+          return res.status(409).json({
+            error: "Cette chaîne YouTube est déjà suivie sur ce serveur",
+          });
+        }
+        const payload = normalizeSocialPayloadInput(req.body, "youtube", "video");
+        insertData = {
+          channel_id: channelId,
+          platform: "youtube",
+          event_kind: "video",
+          source_id: preview.channel_id,
+          source_label:
+            String(req.body?.label || "").trim() || preview.channel_name || "",
+          source_url: preview.channel_url,
+          payload,
+          enabled: req.body?.enabled !== false,
+          last_video_id: preview.latest_video?.id || null,
+        };
       }
-      const payload = normalizeSocialPayloadInput(req.body);
-      const row = insertSocialFeed(guildId, {
-        channel_id: channelId,
-        platform,
-        source_id: preview.channel_id,
-        source_label: preview.channel_name || "",
-        source_url: preview.channel_url,
-        payload,
-        enabled: req.body?.enabled !== false,
-        last_video_id: preview.latest_video?.id || null,
-      });
+
+      const row = insertSocialFeed(guildId, insertData);
       res.json(row);
     } catch (e) {
       console.error(e);
+      if (e.code === "NO_TWITCH_CREDS") {
+        return res.status(503).json({ error: String(e.message) });
+      }
       res.status(e.status || 400).json({ error: String(e.message) });
     }
   }
@@ -1818,7 +1953,11 @@ app.put(
         patch.channel_id = channelId;
       }
       if (req.body?.payload != null || req.body?.content != null) {
-        patch.payload = normalizeSocialPayloadInput(req.body);
+        patch.payload = normalizeSocialPayloadInput(
+          req.body,
+          cur.platform,
+          cur.event_kind
+        );
       }
       const row = updateSocialFeed(id, guildId, patch);
       res.json(row);
