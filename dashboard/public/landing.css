@@ -24,7 +24,6 @@
   filter: blur(48px);
   opacity: 0.4;
   animation: landing-aurora-drift 22s ease-in-out infinite alternate;
-  will-change: transform;
 }
 
 .landing-aurora-blob--1 {
@@ -384,6 +383,7 @@
   min-height: 340px;
   transform-style: preserve-3d;
   transition: transform 0.15s ease-out;
+  overflow: visible;
 }
 
 .landing-discord-mock {
@@ -645,9 +645,10 @@
 
 .landing-showcase-badge {
   position: absolute;
-  top: -10px;
+  top: 0;
   left: 50%;
-  transform: translateX(-50%);
+  z-index: 5;
+  transform: translate(-50%, -50%);
   padding: 0.28rem 0.75rem;
   font-size: 0.62rem;
   font-weight: 700;
@@ -658,6 +659,11 @@
   border: 1px solid rgba(34, 211, 238, 0.35);
   border-radius: 999px;
   white-space: nowrap;
+  pointer-events: none;
+}
+
+html.fx-lite .landing-showcase {
+  transform: none !important;
 }
 
 /* Bento */

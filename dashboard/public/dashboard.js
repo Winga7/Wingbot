@@ -337,8 +337,18 @@ function restartLandingReveal() {
   inner.classList.add("landing-inner--reveal");
 }
 
+function ensureLandingCss() {
+  if (document.getElementById("landing-css-link")) return;
+  const link = document.createElement("link");
+  link.id = "landing-css-link";
+  link.rel = "stylesheet";
+  link.href = "/landing.css";
+  document.head.appendChild(link);
+}
+
 function showLandingPage() {
   appMode = "landing";
+  ensureLandingCss();
   const app = $("app");
   app?.classList.remove("app--dashboard");
   app?.classList.add("app--landing");
@@ -350,6 +360,8 @@ function showLandingPage() {
   document.querySelector(".foot")?.setAttribute("hidden", "");
   restartLandingReveal();
   initLandingEffects();
+  refreshBotBranding().catch(() => null);
+  refreshLandingInvite().catch(() => null);
 }
 
 function showDashboard() {
@@ -3024,33 +3036,15 @@ async function loadData() {
   discordOAuthConnected = true;
   applyDiscordStatusUi(status);
 
-  const brandingP = Promise.all([
-    refreshBotBranding(),
-    refreshLandingInvite().catch(() => null),
-  ]);
-
-  const [manRes, cmdManRes, cfgRes, statsRes, accessRes, meRes] =
-    await Promise.all([
-      fetch(apiUrl("/api/manifest"), fetchOptsGet()),
-      fetch(apiUrl("/api/commands-manifest"), fetchOptsGet()),
-      fetch(apiUrl("/api/config"), fetchOptsGet()),
-      fetch(apiUrl("/api/stats"), fetchOptsGet()),
-      fetch(apiUrl("/api/internal/access"), fetchOptsGet()),
-      fetch(apiUrl("/api/me/guilds"), fetchOptsGet()),
-    ]);
+  const brandingP = refreshBotBranding();
+  const bootRes = await Promise.all([
+    fetch(apiUrl("/api/bootstrap"), fetchOptsGet()),
+    brandingP.catch(() => null),
+  ]).then(([r]) => r);
   if (gen !== loadDataGen) return;
 
-  if (!manRes.ok || !cmdManRes.ok || !cfgRes.ok || !statsRes.ok || !accessRes.ok) {
-    const bad = !manRes.ok
-      ? manRes
-      : !cmdManRes.ok
-      ? cmdManRes
-      : !cfgRes.ok
-      ? cfgRes
-      : !statsRes.ok
-      ? statsRes
-      : accessRes;
-    let err = await bad.text();
+  if (!bootRes.ok) {
+    let err = await bootRes.text();
     try {
       const j = JSON.parse(err);
       if (j?.message) err = j.message;
@@ -3061,7 +3055,7 @@ async function loadData() {
     if (
       err.includes("Cannot GET") ||
       err.includes("<!DOCTYPE html>") ||
-      bad.status === 404
+      bootRes.status === 404
     ) {
       err =
         "API injoignable. Utilise l’URL du serveur Node (npm run dashboard) ou renseigne l’URL API.";
@@ -3071,14 +3065,15 @@ async function loadData() {
     return;
   }
 
-  manifest = await manRes.json();
-  commandManifest = await cmdManRes.json();
-  const config = await cfgRes.json();
-  const stats = await statsRes.json();
-  internalAccess = await accessRes.json();
+  const boot = await bootRes.json();
   if (gen !== loadDataGen) return;
 
-  brandingP.catch(() => null);
+  manifest = boot.manifest || { groups: [] };
+  commandManifest = boot.commandManifest || { groups: [], commands: [] };
+  const config = boot.config || { guilds: [] };
+  const stats = boot.stats || { messages_en_cache: 0 };
+  internalAccess = boot.internalAccess || { founder: false };
+  const meResOk = !!boot.guildPicker;
 
   const fondaBtn = $("btn-open-fonda");
   if (fondaBtn) fondaBtn.hidden = !internalAccess?.founder;
@@ -3092,9 +3087,8 @@ async function loadData() {
   guilds = config.guilds || [];
   guildMeta = {};
 
-  if (meRes.ok) {
-    const me = await meRes.json();
-    guildPickerList = me.guilds || [];
+  if (meResOk) {
+    guildPickerList = boot.guildPicker.guilds || [];
   } else {
     guildPickerList = (config.guilds || []).map((g) => ({
       guild_id: g.guild_id,

@@ -22,16 +22,12 @@ html.fx-lite .landing-page::before {
   opacity: 0.45;
 }
 
-html.fx-lite .landing-showcase,
 html.fx-lite .landing-showcase:hover {
   transform: none !important;
   transition: none !important;
 }
 
-html.fx-lite .landing-marquee-track {
-  animation: none !important;
-}
-
+/* Marquee + carte flottante : légers, on les garde même en mode perf */
 html.fx-lite .landing-headline-line--accent {
   animation: none !important;
   background-position: 50% center;
@@ -39,11 +35,16 @@ html.fx-lite .landing-headline-line--accent {
 
 html.fx-lite .landing-headline-bridge,
 html.fx-lite .landing-kicker-dot,
-html.fx-lite .landing-dash-card,
 html.fx-lite .landing-float-card,
 html.fx-lite .landing-bento-in,
 html.fx-lite .bento {
   animation: none !important;
+}
+
+html.fx-lite .landing-dash-card {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(13, 16, 38, 0.98);
 }
 
 html.fx-lite .fonda-backdrop {
@@ -54,12 +55,4 @@ html.fx-lite .fonda-backdrop {
 
 html.is-firefox {
   scrollbar-color: rgba(148, 163, 255, 0.35) rgba(6, 8, 22, 0.55);
-}
-
-html.is-firefox .landing-page {
-  contain: layout style;
-}
-
-html.is-firefox .landing-aurora {
-  contain: strict;
 }

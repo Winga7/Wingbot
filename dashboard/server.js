@@ -517,13 +517,13 @@ function requireDiscordSession(req, res, next) {
 }
 
 // Evite de spammer /users/@me/guilds pendant le chargement initial du dashboard.
-// Clé = sessionId, TTL court pour rester frais.
-const manageableGuildIdsCache = new Map();
-const MANAGEABLE_CACHE_TTL_MS = 15000;
+// Un seul appel Discord partagé (config + stats + me/guilds + bootstrap).
+const userGuildsCache = new Map();
+const USER_GUILDS_CACHE_TTL_MS = 30000;
 
 /** Cache court salons/rôles Discord (évite 2 appels API identiques au chargement). */
 const guildDiscordListCache = new Map();
-const GUILD_DISCORD_LIST_TTL_MS = 30000;
+const GUILD_DISCORD_LIST_TTL_MS = 60000;
 
 function getGuildDiscordListCache(key) {
   const hit = guildDiscordListCache.get(key);
@@ -542,32 +542,106 @@ function setGuildDiscordListCache(key, data) {
   });
 }
 
-async function getManageableGuildIds(accessToken, cacheKey = "") {
+async function getUserGuildsCached(accessToken, cacheKey = "") {
   const now = Date.now();
   if (cacheKey) {
-    const hit = manageableGuildIdsCache.get(cacheKey);
-    if (hit && hit.expiresAt > now) return hit.ids;
+    const hit = userGuildsCache.get(cacheKey);
+    if (hit?.guilds && hit.expiresAt > now) return hit.guilds;
+    if (hit?.inflight) return hit.inflight;
   }
 
-  const rawGuilds = await fetchUserGuilds(accessToken);
-  const manageable = rawGuilds.filter((g) => canManageGuild(g));
-  const ids = new Set(
-    manageable
-      .map((g) => normalizeSnowflakeId(g.id))
-      .filter((id) => !!id)
-  );
-  if (cacheKey) {
-    manageableGuildIdsCache.set(cacheKey, {
-      ids,
-      expiresAt: now + MANAGEABLE_CACHE_TTL_MS,
-    });
-    if (manageableGuildIdsCache.size > 300) {
-      for (const [k, v] of manageableGuildIdsCache) {
-        if (v.expiresAt <= now) manageableGuildIdsCache.delete(k);
+  const inflight = fetchUserGuilds(accessToken)
+    .then((guilds) => {
+      if (cacheKey) {
+        userGuildsCache.set(cacheKey, {
+          guilds,
+          expiresAt: Date.now() + USER_GUILDS_CACHE_TTL_MS,
+          inflight: null,
+        });
+        if (userGuildsCache.size > 300) {
+          for (const [k, v] of userGuildsCache) {
+            if (v.expiresAt <= now) userGuildsCache.delete(k);
+          }
+        }
       }
+      return guilds;
+    })
+    .catch((err) => {
+      if (cacheKey) {
+        const hit = userGuildsCache.get(cacheKey);
+        if (hit?.inflight === inflight) userGuildsCache.delete(cacheKey);
+      }
+      throw err;
+    });
+
+  if (cacheKey) {
+    userGuildsCache.set(cacheKey, {
+      guilds: null,
+      expiresAt: 0,
+      inflight,
+    });
+  }
+  return inflight;
+}
+
+async function getManageableGuildIds(accessToken, cacheKey = "") {
+  const rawGuilds = await getUserGuildsCached(accessToken, cacheKey);
+  return new Set(
+    rawGuilds
+      .filter((g) => canManageGuild(g))
+      .map((g) => normalizeSnowflakeId(g.id))
+      .filter(Boolean)
+  );
+}
+
+async function buildGuildPickerList(rawGuilds, clientId) {
+  const seen = new Set();
+  let manageable = rawGuilds.filter((g) => {
+    const ok = canManageGuild(g);
+    if (ok) seen.add(normalizeSnowflakeId(g.id));
+    return ok;
+  });
+
+  const dbGuildIds = db
+    .prepare("SELECT guild_id FROM guild_config")
+    .all()
+    .map((row) => normalizeSnowflakeId(row.guild_id));
+  for (const gid of dbGuildIds) {
+    if (!gid || seen.has(gid)) continue;
+    const raw = rawGuilds.find((g) => normalizeSnowflakeId(g.id) === gid);
+    if (raw && canManageGuild(raw)) {
+      manageable.push(raw);
+      seen.add(gid);
     }
   }
-  return ids;
+
+  const byId = new Map();
+  for (const g of manageable) {
+    const gid = normalizeSnowflakeId(g.id);
+    if (gid) byId.set(gid, g);
+  }
+  manageable = [...byId.values()];
+
+  const hasRowInDb = (gid) =>
+    !!db.prepare("SELECT 1 FROM guild_config WHERE guild_id = ?").get(gid);
+
+  const perms = process.env.BOT_INVITE_PERMISSIONS || "268438528";
+  const botIds = await getBotGuildIdsCached().catch(() => new Set());
+
+  const out = manageable.map((g) => {
+    const gid = normalizeSnowflakeId(g.id);
+    return {
+      guild_id: gid,
+      name: g.name,
+      icon_url: userGuildIconUrl(gid, g.icon),
+      bot_in_guild: botIds.has(gid),
+      has_config_in_db: hasRowInDb(gid),
+      invite_url: buildInviteUrl(gid, clientId, perms),
+    };
+  });
+
+  out.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  return out;
 }
 
 async function requireGuildManageAccess(req, res, next) {
@@ -1062,67 +1136,18 @@ app.get(
   requireDiscordSession,
   async (req, res) => {
     try {
-      const accessToken = req.discordSession.accessToken;
       const clientId = process.env.CLIENT_ID;
       if (!clientId) {
         return res.status(503).json({ error: "CLIENT_ID manquant" });
       }
 
-      const rawGuilds = await fetchUserGuilds(accessToken);
-      /** IDs déjà couverts (snowflakes en string) */
-      const seen = new Set();
-      let manageable = rawGuilds.filter((g) => {
-        const ok = canManageGuild(g);
-        if (ok) seen.add(normalizeSnowflakeId(g.id));
-        return ok;
-      });
-
-      /** Guilde en base mais absente du filtre (ex. bug permissions) : on réintègre si OAuth dit encore « gérable » */
-      const dbGuildIds = db
-        .prepare("SELECT guild_id FROM guild_config")
-        .all()
-        .map((row) => normalizeSnowflakeId(row.guild_id));
-      for (const gid of dbGuildIds) {
-        if (!gid || seen.has(gid)) continue;
-        const raw = rawGuilds.find((g) => normalizeSnowflakeId(g.id) === gid);
-        if (raw && canManageGuild(raw)) {
-          manageable.push(raw);
-          seen.add(gid);
-        }
-      }
-
-      const byId = new Map();
-      for (const g of manageable) {
-        const gid = normalizeSnowflakeId(g.id);
-        if (gid) byId.set(gid, g);
-      }
-      manageable = [...byId.values()];
-
-      const hasRowInDb = (gid) =>
-        !!db
-          .prepare("SELECT 1 FROM guild_config WHERE guild_id = ?")
-          .get(gid);
-
-      const perms = process.env.BOT_INVITE_PERMISSIONS || "268438528";
-
-      /* Un seul appel Discord pour TOUTES les guildes du bot, en parallèle
-         avec le rendu — plus besoin d'await par serveur. */
-      const botIdsPromise = getBotGuildIdsCached().catch(() => new Set());
-      const botIds = await botIdsPromise;
-
-      const out = manageable.map((g) => {
-        const gid = normalizeSnowflakeId(g.id);
-        return {
-          guild_id: gid,
-          name: g.name,
-          icon_url: userGuildIconUrl(gid, g.icon),
-          bot_in_guild: botIds.has(gid),
-          has_config_in_db: hasRowInDb(gid),
-          invite_url: buildInviteUrl(gid, clientId, perms),
-        };
-      });
-
-      out.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+      const cacheKey =
+        req.discordSession.sessionId || req.discordSession.userId;
+      const rawGuilds = await getUserGuildsCached(
+        req.discordSession.accessToken,
+        cacheKey
+      );
+      const out = await buildGuildPickerList(rawGuilds, clientId);
 
       res.json({
         discord_username: req.discordSession.username,
@@ -1134,6 +1159,55 @@ app.get(
     }
   }
 );
+
+/** Chargement initial dashboard : 1 requête au lieu de 6 + 1 appel Discord. */
+app.get("/api/bootstrap", requireDiscordSession, async (req, res) => {
+  try {
+    const clientId = process.env.CLIENT_ID;
+    if (!clientId) {
+      return res.status(503).json({ error: "CLIENT_ID manquant" });
+    }
+
+    const cacheKey =
+      req.discordSession.sessionId || req.discordSession.userId;
+    const accessToken = req.discordSession.accessToken;
+
+    const rawGuilds = await getUserGuildsCached(accessToken, cacheKey);
+    const manageableIds = await getManageableGuildIds(accessToken, cacheKey);
+
+    const [cacheCount, guildPicker] = await Promise.all([
+      Promise.resolve(
+        db.prepare("SELECT COUNT(*) AS n FROM message_cache").get()
+      ),
+      buildGuildPickerList(rawGuilds, clientId),
+    ]);
+
+    const rows = db
+      .prepare("SELECT guild_id FROM guild_config ORDER BY updated_at DESC")
+      .all();
+    const configGuilds = rows
+      .map((r) => normalizeSnowflakeId(r.guild_id))
+      .filter((id) => manageableIds.has(id))
+      .map((gid) => getGuildDashboardPayload(gid));
+
+    res.json({
+      manifest: { groups: DASHBOARD_GROUPS },
+      commandManifest: { groups: COMMAND_GROUPS, commands: COMMANDS },
+      config: { guilds: configGuilds },
+      internalAccess: {
+        founder: isFounderUser(req.discordSession.userId),
+      },
+      stats: { messages_en_cache: cacheCount?.n ?? 0 },
+      guildPicker: {
+        discord_username: req.discordSession.username,
+        guilds: guildPicker,
+      },
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: String(e.message) });
+  }
+});
 
 app.get("/api/manifest", requireDiscordSession, (_req, res) => {
   res.json({ groups: DASHBOARD_GROUPS });
@@ -2019,24 +2093,12 @@ app.get("/api/commands-manifest", requireDiscordSession, (_req, res) => {
   res.json({ groups: COMMAND_GROUPS, commands: COMMANDS });
 });
 
-app.get("/api/stats", requireDiscordSession, async (req, res) => {
+app.get("/api/stats", requireDiscordSession, (_req, res) => {
   try {
     const cacheCount = db
       .prepare("SELECT COUNT(*) AS n FROM message_cache")
       .get();
-    const manageableIds = await getManageableGuildIds(
-      req.discordSession.accessToken,
-      req.discordSession.sessionId || req.discordSession.userId
-    );
-    const rows = db.prepare("SELECT guild_id FROM guild_config").all();
-    const guildCount = rows
-      .map((r) => normalizeSnowflakeId(r.guild_id))
-      .filter((id) => manageableIds.has(id)).length;
-
-    res.json({
-      serveurs_configures: guildCount,
-      messages_en_cache: cacheCount?.n ?? 0,
-    });
+    res.json({ messages_en_cache: cacheCount?.n ?? 0 });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: String(e.message) });
@@ -2475,8 +2537,15 @@ app.use(
       } else if (/\.css$/i.test(filePath)) {
         res.setHeader("Content-Type", "text/css; charset=utf-8");
       }
-      if (/\.(html|js|css)$/i.test(filePath)) {
+      if (/\.(js|css)$/i.test(filePath)) {
+        res.setHeader(
+          "Cache-Control",
+          "public, max-age=600, stale-while-revalidate=86400"
+        );
+      } else if (/\.html$/i.test(filePath)) {
         res.setHeader("Cache-Control", "no-cache, must-revalidate");
+      } else if (/\.svg$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "public, max-age=86400");
       }
     },
   })
