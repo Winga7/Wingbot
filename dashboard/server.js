@@ -17,6 +17,7 @@
 const path = require("node:path");
 const fs = require("node:fs");
 const express = require("express");
+const compression = require("compression");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { DASHBOARD_GROUPS } = require("../logFeatureDefinitions");
@@ -479,6 +480,7 @@ function formatRolesForUi(roles) {
     }));
 }
 
+app.use(compression());
 app.use(express.json({ limit: "512kb" }));
 
 app.use((req, res, next) => {
@@ -495,6 +497,7 @@ app.use((req, res, next) => {
     "Authorization, Content-Type"
   );
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
   }
@@ -517,6 +520,27 @@ function requireDiscordSession(req, res, next) {
 // Clé = sessionId, TTL court pour rester frais.
 const manageableGuildIdsCache = new Map();
 const MANAGEABLE_CACHE_TTL_MS = 15000;
+
+/** Cache court salons/rôles Discord (évite 2 appels API identiques au chargement). */
+const guildDiscordListCache = new Map();
+const GUILD_DISCORD_LIST_TTL_MS = 30000;
+
+function getGuildDiscordListCache(key) {
+  const hit = guildDiscordListCache.get(key);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) {
+    guildDiscordListCache.delete(key);
+    return null;
+  }
+  return hit.data;
+}
+
+function setGuildDiscordListCache(key, data) {
+  guildDiscordListCache.set(key, {
+    data,
+    expires: Date.now() + GUILD_DISCORD_LIST_TTL_MS,
+  });
+}
 
 async function getManageableGuildIds(accessToken, cacheKey = "") {
   const now = Date.now();
@@ -2058,10 +2082,17 @@ app.get(
       return res.status(404).json({ error: "Bot non présent sur ce serveur" });
     }
     ensureGuildLogRow(guildId);
+    const cacheKey = `${guildId}:channels`;
+    const cached = getGuildDiscordListCache(cacheKey);
+    if (cached) {
+      return res.json({ channels: cached });
+    }
     const channels = await discordFetchJson(
       `/guilds/${encodeURIComponent(guildId)}/channels`
     );
-    res.json({ channels: formatChannelsForUi(channels) });
+    const formatted = formatChannelsForUi(channels);
+    setGuildDiscordListCache(cacheKey, formatted);
+    res.json({ channels: formatted });
   } catch (e) {
     if (e.code === "NO_BOT_TOKEN") {
       return res.status(503).json({ error: e.message });
@@ -2083,10 +2114,17 @@ app.get(
         return res.status(404).json({ error: "Bot non présent sur ce serveur" });
       }
       ensureGuildLogRow(guildId);
+      const cacheKey = `${guildId}:roles`;
+      const cached = getGuildDiscordListCache(cacheKey);
+      if (cached) {
+        return res.json({ roles: cached });
+      }
       const roles = await discordFetchJson(
         `/guilds/${encodeURIComponent(guildId)}/roles`
       );
-      res.json({ roles: formatRolesForUi(roles) });
+      const formatted = formatRolesForUi(roles);
+      setGuildDiscordListCache(cacheKey, formatted);
+      res.json({ roles: formatted });
     } catch (e) {
       if (e.code === "NO_BOT_TOKEN") {
         return res.status(503).json({ error: e.message });
@@ -2431,6 +2469,12 @@ app.use(
     etag: true,
     lastModified: true,
     setHeaders: (res, filePath) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      if (/\.js$/i.test(filePath)) {
+        res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+      } else if (/\.css$/i.test(filePath)) {
+        res.setHeader("Content-Type", "text/css; charset=utf-8");
+      }
       if (/\.(html|js|css)$/i.test(filePath)) {
         res.setHeader("Cache-Control", "no-cache, must-revalidate");
       }

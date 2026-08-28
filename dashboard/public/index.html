@@ -4,15 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Wingbot — Dashboard</title>
+    <script>
+      (function () {
+        try {
+          var root = document.documentElement;
+          var ua = navigator.userAgent;
+          var firefox =
+            /Firefox\//.test(ua) &&
+            !/Seamonkey|Waterfox|Edg\//.test(ua);
+          if (firefox) root.classList.add("is-firefox");
+          var lite =
+            firefox ||
+            window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if (lite) root.classList.add("fx-lite");
+        } catch (e) {
+          /* ignore */
+        }
+      })();
+    </script>
     <link id="site-favicon" rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/landing.css" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap"
-      rel="stylesheet"
-    />
+    <link rel="stylesheet" href="/compat.css" />
   </head>
   <body>
     <div class="app app--landing" id="app">
@@ -1254,7 +1267,6 @@
       Wingbot · même base SQLite que le bot · <code>TOKEN</code> bot requis pour noms Discord
     </footer>
 
-    <script src="/app.js"></script>
-    <script src="/embedWorkbench.js"></script>
+    <script src="/dashboard.js" defer></script>
   </body>
 </html>

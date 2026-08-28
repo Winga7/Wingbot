@@ -92,6 +92,24 @@ const viewEls = new Map();
 const navLinkEls = new Map();
 let currentViewName = null;
 let embedsLastGuildId = null;
+let embedWorkbenchLoadPromise = null;
+
+function ensureEmbedWorkbenchLoaded() {
+  if (window.wingbotEmbedWorkbench) return Promise.resolve();
+  if (embedWorkbenchLoadPromise) return embedWorkbenchLoadPromise;
+  embedWorkbenchLoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "/embedWorkbench.js";
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => {
+      embedWorkbenchLoadPromise = null;
+      reject(new Error("Impossible de charger le constructeur d’embeds."));
+    };
+    document.body.appendChild(s);
+  });
+  return embedWorkbenchLoadPromise;
+}
 
 function initViewNavCache() {
   document.querySelectorAll(".view[id^='view-']").forEach((el) => {
@@ -244,12 +262,17 @@ function navigate(force = false) {
     link.classList.toggle("active", view === name);
   }
 
-  if (name === "embeds" && window.wingbotEmbedWorkbench && selectedGuildId) {
+  if (name === "embeds" && selectedGuildId) {
     const gid = selectedGuildId;
-    queueMicrotask(() => {
-      if (embedsLastGuildId !== gid) {
-        embedsLastGuildId = gid;
-        window.wingbotEmbedWorkbench.refresh();
+    queueMicrotask(async () => {
+      try {
+        await ensureEmbedWorkbenchLoaded();
+        if (embedsLastGuildId !== gid) {
+          embedsLastGuildId = gid;
+          window.wingbotEmbedWorkbench.refresh();
+        }
+      } catch {
+        /* non bloquant */
       }
     });
   }
@@ -390,6 +413,7 @@ const landingFx = {
   typeIdx: 0,
   charIdx: 0,
   typeTimer: null,
+  spotlightRaf: null,
   phrases: [
     "Configuration enregistrée depuis le dashboard.",
     "Log envoyé · Membre expulsé par @Admin",
@@ -404,6 +428,10 @@ function stopLandingEffects() {
   landingFx.active = false;
   if (landingFx.typeTimer) clearTimeout(landingFx.typeTimer);
   landingFx.typeTimer = null;
+  if (landingFx.spotlightRaf) {
+    cancelAnimationFrame(landingFx.spotlightRaf);
+    landingFx.spotlightRaf = null;
+  }
   if (landingFx.onMove) {
     document.removeEventListener("mousemove", landingFx.onMove);
     landingFx.onMove = null;
@@ -436,7 +464,13 @@ function landingTypewriterTick() {
 function initLandingEffects() {
   if (landingFx.active) return;
   if (!$("landing-page") || $("landing-page").hidden) return;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+
+  const lite = document.documentElement.classList.contains("fx-lite");
+  const reduceMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)"
+  ).matches;
+
+  if (reduceMotion) {
     const el = $("landing-typewriter");
     if (el) el.textContent = landingFx.phrases[0];
     return;
@@ -447,22 +481,28 @@ function initLandingEffects() {
   landingFx.charIdx = 0;
   landingTypewriterTick();
 
+  if (lite) return;
+
   const spotlight = $("landing-spotlight");
   const showcase = $("landing-showcase");
 
   landingFx.onMove = (e) => {
-    if (spotlight) {
-      spotlight.style.setProperty("--spot-x", `${e.clientX}px`);
-      spotlight.style.setProperty("--spot-y", `${e.clientY}px`);
-    }
-    if (showcase) {
-      const rect = showcase.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const dx = (e.clientX - cx) / rect.width;
-      const dy = (e.clientY - cy) / rect.height;
-      showcase.style.transform = `rotateY(${dx * 6}deg) rotateX(${-dy * 4}deg)`;
-    }
+    if (landingFx.spotlightRaf) return;
+    landingFx.spotlightRaf = requestAnimationFrame(() => {
+      landingFx.spotlightRaf = null;
+      if (spotlight) {
+        spotlight.style.setProperty("--spot-x", `${e.clientX}px`);
+        spotlight.style.setProperty("--spot-y", `${e.clientY}px`);
+      }
+      if (showcase) {
+        const rect = showcase.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dx = (e.clientX - cx) / rect.width;
+        const dy = (e.clientY - cy) / rect.height;
+        showcase.style.transform = `rotateY(${dx * 6}deg) rotateX(${-dy * 4}deg)`;
+      }
+    });
   };
 
   document.addEventListener("mousemove", landingFx.onMove);
@@ -2760,8 +2800,10 @@ async function refreshDiscordForGuild(guildId) {
   }
   updateGuildHeader(guildId);
   if (currentGuildHasBot()) {
-    await loadChannelSelect(guildId);
-    await loadGuildRoles(guildId);
+    await Promise.all([
+      loadChannelSelect(guildId),
+      loadGuildRoles(guildId),
+    ]);
   } else {
     lastGuildChannelsList = [];
     lastGuildRolesList = [];
@@ -2853,14 +2895,18 @@ async function applyGuildData(data) {
   if (getHashView() === "warns") loadWarningsList();
   updateOverview();
 
-  await refreshDiscordForGuild(data.guild_id);
-  await loadBotProfileForGuild(data.guild_id);
+  await Promise.all([
+    refreshDiscordForGuild(data.guild_id),
+    loadBotProfileForGuild(data.guild_id),
+  ]);
   renderCommandAccessPanel();
   if (getHashView() === "announcements") loadScheduledMessagesList();
   if (getHashView() === "reactionroles") loadReactionRolesList();
   if (getHashView() === "social") loadSocialFeedsList();
-  if (getHashView() === "embeds" && window.wingbotEmbedWorkbench) {
-    window.wingbotEmbedWorkbench.refresh();
+  if (getHashView() === "embeds") {
+    ensureEmbedWorkbenchLoaded()
+      .then(() => window.wingbotEmbedWorkbench?.refresh())
+      .catch(() => null);
   }
 
   const sel = $("log-channel-select");
@@ -2914,22 +2960,25 @@ async function clearGuildUiForNoBot() {
 
 async function refreshDiscordStatus() {
   const res = await fetch(apiUrl("/api/auth/discord/status"), fetchOptsGet());
+  if (res.ok) {
+    applyDiscordStatusUi(await res.json());
+  }
+}
+
+function applyDiscordStatusUi(j) {
+  discordOAuthConnected = !!j.connected;
   const u = $("discord-user-label");
   const lo = $("btn-discord-logout");
   const li = $("discord-oauth-link");
-  if (res.ok) {
-    const j = await res.json();
-    discordOAuthConnected = !!j.connected;
-    if (j.connected && j.username) {
-      u.hidden = false;
-      u.textContent = `Discord : ${j.username}`;
-      if (lo) lo.hidden = false;
-      if (li) li.hidden = true;
-    } else {
-      u.hidden = true;
-      if (lo) lo.hidden = true;
-      if (li) li.hidden = false;
-    }
+  if (j.connected && j.username) {
+    u.hidden = false;
+    u.textContent = `Discord : ${j.username}`;
+    if (lo) lo.hidden = false;
+    if (li) li.hidden = true;
+  } else {
+    u.hidden = true;
+    if (lo) lo.hidden = true;
+    if (li) li.hidden = false;
   }
 }
 
@@ -2973,19 +3022,22 @@ async function loadData() {
   showDashboard();
   clearOAuthConnectedQuery();
   discordOAuthConnected = true;
+  applyDiscordStatusUi(status);
 
   const brandingP = Promise.all([
     refreshBotBranding(),
     refreshLandingInvite().catch(() => null),
   ]);
 
-  const [manRes, cmdManRes, cfgRes, statsRes, accessRes] = await Promise.all([
-    fetch(apiUrl("/api/manifest"), fetchOptsGet()),
-    fetch(apiUrl("/api/commands-manifest"), fetchOptsGet()),
-    fetch(apiUrl("/api/config"), fetchOptsGet()),
-    fetch(apiUrl("/api/stats"), fetchOptsGet()),
-    fetch(apiUrl("/api/internal/access"), fetchOptsGet()),
-  ]);
+  const [manRes, cmdManRes, cfgRes, statsRes, accessRes, meRes] =
+    await Promise.all([
+      fetch(apiUrl("/api/manifest"), fetchOptsGet()),
+      fetch(apiUrl("/api/commands-manifest"), fetchOptsGet()),
+      fetch(apiUrl("/api/config"), fetchOptsGet()),
+      fetch(apiUrl("/api/stats"), fetchOptsGet()),
+      fetch(apiUrl("/api/internal/access"), fetchOptsGet()),
+      fetch(apiUrl("/api/me/guilds"), fetchOptsGet()),
+    ]);
   if (gen !== loadDataGen) return;
 
   if (!manRes.ok || !cmdManRes.ok || !cfgRes.ok || !statsRes.ok || !accessRes.ok) {
@@ -3039,10 +3091,6 @@ async function loadData() {
 
   guilds = config.guilds || [];
   guildMeta = {};
-
-  await refreshDiscordStatus();
-
-  const meRes = await fetch(apiUrl("/api/me/guilds"), fetchOptsGet());
 
   if (meRes.ok) {
     const me = await meRes.json();

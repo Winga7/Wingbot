@@ -1,6 +1,6 @@
 /**
  * Constructeur d’embeds (salon Discord, aperçu, édition du message).
- * Dépend de window.wingbotDashboard (défini dans app.js).
+ * Dépend de window.wingbotDashboard (défini dans dashboard.js).
  */
 (function () {
   const D = () => window.wingbotDashboard;

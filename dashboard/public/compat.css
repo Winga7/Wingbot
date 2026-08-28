@@ -1,0 +1,65 @@
+/* Compatibilité cross-navigateur — effets GPU coûteux (Firefox surtout) */
+
+html.fx-lite .landing-aurora-blob {
+  filter: none !important;
+  opacity: 0.32;
+  animation: none !important;
+  will-change: auto;
+}
+
+html.fx-lite .landing-nav {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(6, 8, 22, 0.94);
+}
+
+html.fx-lite .landing-spotlight {
+  display: none !important;
+}
+
+html.fx-lite .landing-page::before {
+  mask-image: none;
+  opacity: 0.45;
+}
+
+html.fx-lite .landing-showcase,
+html.fx-lite .landing-showcase:hover {
+  transform: none !important;
+  transition: none !important;
+}
+
+html.fx-lite .landing-marquee-track {
+  animation: none !important;
+}
+
+html.fx-lite .landing-headline-line--accent {
+  animation: none !important;
+  background-position: 50% center;
+}
+
+html.fx-lite .landing-headline-bridge,
+html.fx-lite .landing-kicker-dot,
+html.fx-lite .landing-dash-card,
+html.fx-lite .landing-float-card,
+html.fx-lite .landing-bento-in,
+html.fx-lite .bento {
+  animation: none !important;
+}
+
+html.fx-lite .fonda-backdrop {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(6, 8, 22, 0.9);
+}
+
+html.is-firefox {
+  scrollbar-color: rgba(148, 163, 255, 0.35) rgba(6, 8, 22, 0.55);
+}
+
+html.is-firefox .landing-page {
+  contain: layout style;
+}
+
+html.is-firefox .landing-aurora {
+  contain: strict;
+}
