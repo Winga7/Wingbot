@@ -64,9 +64,22 @@ const {
   insertSocialFeed,
   updateSocialFeed,
   deleteSocialFeed,
+  listTicketPanels,
+  getTicketPanel,
+  ticketPanelExistsForMessage,
+  insertTicketPanel,
+  updateTicketPanel,
+  deleteTicketPanel,
+  listTickets,
   DB_PATH,
 } = require("../database");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
+const {
+  parseCategories,
+  parseSupportRoleIds,
+  buildPanelComponents,
+  defaultPanelContent,
+} = require("../lib/ticketConfig");
 const { resolveAndPreviewYoutubeChannel } = require("../lib/youtubeFeed");
 const { resolveAndPreviewTwitchChannel } = require("../lib/twitchApi");
 const {
@@ -1865,6 +1878,178 @@ app.delete(
   }
 );
 
+function normalizeTicketCategoriesInput(raw) {
+  const cats = parseCategories(
+    Array.isArray(raw) ? JSON.stringify(raw) : raw || "[]"
+  );
+  if (!cats.length) {
+    throw new Error("Au moins une catégorie (label + emoji) requise");
+  }
+  return cats;
+}
+
+async function publishTicketPanelMessage(panel) {
+  await assertGuildTextChannel(panel.guild_id, panel.channel_id);
+  const apiBody = buildReactionRoleMessageBody({
+    content: panel.content,
+    embed: panel.embed,
+  });
+  apiBody.components = buildPanelComponents(panel);
+  const msg = await discordBotJson(
+    "POST",
+    `/channels/${encodeURIComponent(panel.channel_id)}/messages`,
+    apiBody
+  );
+  return String(msg.id);
+}
+
+app.get(
+  "/api/guilds/:guildId/ticket-panels",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      res.json({ panels: listTicketPanels(guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/tickets",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      const status =
+        req.query.status === "open" || req.query.status === "closed"
+          ? req.query.status
+          : null;
+      res.json({ tickets: listTickets(guildId, { status, limit: 150 }) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/ticket-panels",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      const channelId = normalizeSnowflakeId(req.body?.channel_id);
+      const ticketCategoryId = normalizeSnowflakeId(
+        req.body?.ticket_category_id
+      );
+      if (!channelId) {
+        return res.status(400).json({ error: "channel_id requis" });
+      }
+      if (!ticketCategoryId) {
+        return res.status(400).json({ error: "ticket_category_id requis" });
+      }
+      const categories = normalizeTicketCategoriesInput(req.body?.categories);
+      const support_role_ids = parseSupportRoleIds(req.body?.support_role_ids);
+      const content =
+        String(req.body?.content || "").trim() || defaultPanelContent();
+      const embed =
+        req.body?.embed && typeof req.body.embed === "object"
+          ? req.body.embed
+          : null;
+
+      let panel = insertTicketPanel(guildId, {
+        channel_id: channelId,
+        ticket_category_id: ticketCategoryId,
+        log_channel_id: normalizeSnowflakeId(req.body?.log_channel_id) || null,
+        support_role_ids,
+        categories,
+        label: req.body?.label || "",
+        content,
+        embed,
+        ui_mode:
+          req.body?.ui_mode === "select" || categories.length > 5
+            ? "select"
+            : "buttons",
+        max_open_per_user: Number(req.body?.max_open_per_user) || 1,
+        enabled: true,
+      });
+
+      const messageId = await publishTicketPanelMessage(panel);
+      panel = updateTicketPanel(panel.id, guildId, { message_id: messageId });
+      res.json(panel);
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/ticket-panels/:panelId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.panelId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      if (!getTicketPanel(id, guildId)) {
+        return res.status(404).json({ error: "not_found" });
+      }
+      const patch = {};
+      if (req.body?.label != null) patch.label = req.body.label;
+      if (req.body?.enabled != null) patch.enabled = !!req.body.enabled;
+      const row = updateTicketPanel(id, guildId, patch);
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.delete(
+  "/api/guilds/:guildId/ticket-panels/:panelId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.panelId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      const row = getTicketPanel(id, guildId);
+      if (!row) return res.status(404).json({ error: "not_found" });
+      if (req.query.delete_message === "1" && row.channel_id && row.message_id) {
+        await discordDeleteMessage(row.channel_id, row.message_id);
+      }
+      deleteTicketPanel(id, guildId);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
 app.get(
   "/api/guilds/:guildId/social-feeds",
   requireDiscordSession,
@@ -2147,14 +2332,24 @@ app.get(
     const cacheKey = `${guildId}:channels`;
     const cached = getGuildDiscordListCache(cacheKey);
     if (cached) {
-      return res.json({ channels: cached });
+      if (cached.channels) {
+        return res.json({
+          channels: cached.channels,
+          categories: cached.categories || [],
+        });
+      }
+      return res.json({ channels: cached, categories: [] });
     }
     const channels = await discordFetchJson(
       `/guilds/${encodeURIComponent(guildId)}/channels`
     );
     const formatted = formatChannelsForUi(channels);
-    setGuildDiscordListCache(cacheKey, formatted);
-    res.json({ channels: formatted });
+    const categories = channels
+      .filter((c) => c.type === 4)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      .map((c) => ({ id: c.id, name: c.name }));
+    setGuildDiscordListCache(cacheKey, { channels: formatted, categories });
+    res.json({ channels: formatted, categories });
   } catch (e) {
     if (e.code === "NO_BOT_TOKEN") {
       return res.status(503).json({ error: e.message });

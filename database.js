@@ -121,6 +121,8 @@ function initDatabase() {
   migrateScheduledMessagesTable();
   migrateReactionRolePanelsTable();
   migrateSocialFeedsTable();
+  migrateTicketPanelsTable();
+  migrateTicketsTable();
 
   console.log("✅ Base de données initialisée");
 }
@@ -500,6 +502,349 @@ function deleteReactionRolePanel(id, guildId) {
     .prepare(`DELETE FROM reaction_role_panels WHERE id = ? AND guild_id = ?`)
     .run(id, guildId);
   return r.changes > 0;
+}
+
+const { parseCategories, parseSupportRoleIds, UI_MODES } = require("./lib/ticketConfig");
+
+function migrateTicketPanelsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS ticket_panels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      message_id TEXT,
+      label TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      embed_json TEXT,
+      ticket_category_id TEXT NOT NULL,
+      log_channel_id TEXT,
+      support_role_ids TEXT NOT NULL DEFAULT '[]',
+      categories TEXT NOT NULL DEFAULT '[]',
+      ui_mode TEXT NOT NULL DEFAULT 'buttons',
+      max_open_per_user INTEGER NOT NULL DEFAULT 1,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_ticket_panels_guild ON ticket_panels(guild_id)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_ticket_panels_message ON ticket_panels(guild_id, message_id)`
+  ).run();
+}
+
+function migrateTicketsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS tickets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      panel_id INTEGER NOT NULL,
+      category_key TEXT NOT NULL DEFAULT 'general',
+      channel_id TEXT NOT NULL,
+      opener_user_id TEXT NOT NULL,
+      opener_tag TEXT NOT NULL DEFAULT '',
+      ticket_number INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'open',
+      claimed_by TEXT,
+      closed_by TEXT,
+      close_reason TEXT,
+      opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      closed_at DATETIME,
+      FOREIGN KEY (panel_id) REFERENCES ticket_panels(id) ON DELETE CASCADE
+    )
+  `
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_tickets_guild_status ON tickets(guild_id, status)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(guild_id, channel_id)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_tickets_opener ON tickets(guild_id, opener_user_id, status)`
+  ).run();
+}
+
+function formatTicketPanelRow(row) {
+  if (!row) return null;
+  let embed = null;
+  if (row.embed_json) {
+    try {
+      embed = JSON.parse(row.embed_json);
+    } catch {
+      embed = null;
+    }
+  }
+  const categories = parseCategories(row.categories);
+  return {
+    id: row.id,
+    guild_id: row.guild_id,
+    channel_id: row.channel_id,
+    message_id: row.message_id || null,
+    label: row.label || "",
+    content: row.content || "",
+    embed,
+    ticket_category_id: row.ticket_category_id,
+    log_channel_id: row.log_channel_id || null,
+    support_role_ids: parseSupportRoleIds(row.support_role_ids),
+    categories,
+    ui_mode: UI_MODES.has(row.ui_mode) ? row.ui_mode : "buttons",
+    max_open_per_user: Math.min(5, Math.max(1, Number(row.max_open_per_user) || 1)),
+    enabled: !!row.enabled,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function listTicketPanels(guildId) {
+  const rows = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, message_id, label, content, embed_json,
+              ticket_category_id, log_channel_id, support_role_ids, categories,
+              ui_mode, max_open_per_user, enabled, created_at, updated_at
+       FROM ticket_panels WHERE guild_id = ? ORDER BY id DESC`
+    )
+    .all(guildId);
+  return rows.map(formatTicketPanelRow);
+}
+
+function getTicketPanel(id, guildId) {
+  const row = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, message_id, label, content, embed_json,
+              ticket_category_id, log_channel_id, support_role_ids, categories,
+              ui_mode, max_open_per_user, enabled, created_at, updated_at
+       FROM ticket_panels WHERE id = ? AND guild_id = ?`
+    )
+    .get(id, guildId);
+  return formatTicketPanelRow(row);
+}
+
+function getTicketPanelByMessage(guildId, messageId) {
+  const row = db
+    .prepare(
+      `SELECT id, guild_id, channel_id, message_id, label, content, embed_json,
+              ticket_category_id, log_channel_id, support_role_ids, categories,
+              ui_mode, max_open_per_user, enabled, created_at, updated_at
+       FROM ticket_panels WHERE guild_id = ? AND message_id = ? AND enabled = 1`
+    )
+    .get(guildId, String(messageId));
+  return formatTicketPanelRow(row);
+}
+
+function ticketPanelExistsForMessage(guildId, messageId) {
+  const row = db
+    .prepare(
+      `SELECT id FROM ticket_panels WHERE guild_id = ? AND message_id = ?`
+    )
+    .get(guildId, String(messageId));
+  return !!row;
+}
+
+function insertTicketPanel(guildId, data) {
+  const categories = Array.isArray(data.categories)
+    ? parseCategories(JSON.stringify(data.categories))
+    : parseCategories(data.categories);
+  if (!categories.length) throw new Error("Au moins une catégorie requise");
+  const uiMode =
+    data.ui_mode === "select" || categories.length > 5 ? "select" : "buttons";
+  const r = db
+    .prepare(
+      `INSERT INTO ticket_panels
+        (guild_id, channel_id, message_id, label, content, embed_json,
+         ticket_category_id, log_channel_id, support_role_ids, categories,
+         ui_mode, max_open_per_user, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      guildId,
+      data.channel_id,
+      data.message_id || null,
+      String(data.label || "").slice(0, 80),
+      String(data.content || ""),
+      data.embed ? JSON.stringify(data.embed) : null,
+      data.ticket_category_id,
+      data.log_channel_id || null,
+      JSON.stringify(parseSupportRoleIds(data.support_role_ids)),
+      JSON.stringify(categories),
+      uiMode,
+      Math.min(5, Math.max(1, Number(data.max_open_per_user) || 1)),
+      data.enabled === false ? 0 : 1
+    );
+  return getTicketPanel(r.lastInsertRowid, guildId);
+}
+
+function updateTicketPanel(id, guildId, patch) {
+  const cur = getTicketPanel(id, guildId);
+  if (!cur) return null;
+  const fields = [];
+  const vals = [];
+  if (patch.label != null) {
+    fields.push("label = ?");
+    vals.push(String(patch.label).slice(0, 80));
+  }
+  if (patch.enabled != null) {
+    fields.push("enabled = ?");
+    vals.push(patch.enabled ? 1 : 0);
+  }
+  if (patch.message_id != null) {
+    fields.push("message_id = ?");
+    vals.push(patch.message_id);
+  }
+  if (!fields.length) return cur;
+  fields.push("updated_at = CURRENT_TIMESTAMP");
+  vals.push(id, guildId);
+  db.prepare(
+    `UPDATE ticket_panels SET ${fields.join(", ")} WHERE id = ? AND guild_id = ?`
+  ).run(...vals);
+  return getTicketPanel(id, guildId);
+}
+
+function deleteTicketPanel(id, guildId) {
+  const r = db
+    .prepare(`DELETE FROM ticket_panels WHERE id = ? AND guild_id = ?`)
+    .run(id, guildId);
+  return r.changes > 0;
+}
+
+function formatTicketRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    guild_id: row.guild_id,
+    panel_id: row.panel_id,
+    category_key: row.category_key,
+    channel_id: row.channel_id,
+    opener_user_id: row.opener_user_id,
+    opener_tag: row.opener_tag,
+    ticket_number: row.ticket_number,
+    status: row.status === "closed" ? "closed" : "open",
+    claimed_by: row.claimed_by || null,
+    closed_by: row.closed_by || null,
+    close_reason: row.close_reason || null,
+    opened_at: row.opened_at,
+    closed_at: row.closed_at || null,
+  };
+}
+
+function listTickets(guildId, { status = null, limit = 100 } = {}) {
+  let sql = `SELECT id, guild_id, panel_id, category_key, channel_id, opener_user_id,
+                    opener_tag, ticket_number, status, claimed_by, closed_by, close_reason,
+                    opened_at, closed_at
+             FROM tickets WHERE guild_id = ?`;
+  const params = [guildId];
+  if (status === "open" || status === "closed") {
+    sql += ` AND status = ?`;
+    params.push(status);
+  }
+  sql += ` ORDER BY id DESC LIMIT ?`;
+  params.push(Math.min(500, Math.max(1, limit)));
+  return db.prepare(sql).all(...params).map(formatTicketRow);
+}
+
+function getTicket(id, guildId) {
+  const row = db
+    .prepare(
+      `SELECT id, guild_id, panel_id, category_key, channel_id, opener_user_id,
+              opener_tag, ticket_number, status, claimed_by, closed_by, close_reason,
+              opened_at, closed_at
+       FROM tickets WHERE id = ? AND guild_id = ?`
+    )
+    .get(id, guildId);
+  return formatTicketRow(row);
+}
+
+function getTicketByChannel(guildId, channelId) {
+  const row = db
+    .prepare(
+      `SELECT id, guild_id, panel_id, category_key, channel_id, opener_user_id,
+              opener_tag, ticket_number, status, claimed_by, closed_by, close_reason,
+              opened_at, closed_at
+       FROM tickets WHERE guild_id = ? AND channel_id = ? AND status = 'open'`
+    )
+    .get(guildId, String(channelId));
+  return formatTicketRow(row);
+}
+
+function countOpenTicketsForUser(guildId, userId) {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM tickets
+       WHERE guild_id = ? AND opener_user_id = ? AND status = 'open'`
+    )
+    .get(guildId, String(userId));
+  return row?.n ?? 0;
+}
+
+function getNextTicketNumber(guildId) {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(MAX(ticket_number), 0) + 1 AS n FROM tickets WHERE guild_id = ?`
+    )
+    .get(guildId);
+  return row?.n ?? 1;
+}
+
+function insertTicket(guildId, data) {
+  const ticketNumber = getNextTicketNumber(guildId);
+  const r = db
+    .prepare(
+      `INSERT INTO tickets
+        (guild_id, panel_id, category_key, channel_id, opener_user_id, opener_tag,
+         ticket_number, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`
+    )
+    .run(
+      guildId,
+      data.panel_id,
+      String(data.category_key || "general").slice(0, 32),
+      data.channel_id,
+      data.opener_user_id,
+      String(data.opener_tag || "").slice(0, 128),
+      ticketNumber
+    );
+  return getTicket(r.lastInsertRowid, guildId);
+}
+
+function updateTicket(id, guildId, patch) {
+  const cur = getTicket(id, guildId);
+  if (!cur) return null;
+  const fields = [];
+  const vals = [];
+  if (patch.status != null) {
+    fields.push("status = ?");
+    vals.push(patch.status === "closed" ? "closed" : "open");
+  }
+  if (patch.claimed_by !== undefined) {
+    fields.push("claimed_by = ?");
+    vals.push(patch.claimed_by);
+  }
+  if (patch.closed_by !== undefined) {
+    fields.push("closed_by = ?");
+    vals.push(patch.closed_by);
+  }
+  if (patch.close_reason !== undefined) {
+    fields.push("close_reason = ?");
+    vals.push(patch.close_reason);
+  }
+  if (patch.channel_id != null) {
+    fields.push("channel_id = ?");
+    vals.push(String(patch.channel_id));
+  }
+  if (patch.status === "closed") {
+    fields.push("closed_at = CURRENT_TIMESTAMP");
+  }
+  if (!fields.length) return cur;
+  vals.push(id, guildId);
+  db.prepare(
+    `UPDATE tickets SET ${fields.join(", ")} WHERE id = ? AND guild_id = ?`
+  ).run(...vals);
+  return getTicket(id, guildId);
 }
 
 const SOCIAL_PLATFORMS = new Set(["youtube", "twitch"]);
@@ -2289,6 +2634,19 @@ module.exports = {
   insertReactionRolePanel,
   updateReactionRolePanel,
   deleteReactionRolePanel,
+  listTicketPanels,
+  getTicketPanel,
+  getTicketPanelByMessage,
+  ticketPanelExistsForMessage,
+  insertTicketPanel,
+  updateTicketPanel,
+  deleteTicketPanel,
+  listTickets,
+  getTicket,
+  getTicketByChannel,
+  countOpenTicketsForUser,
+  insertTicket,
+  updateTicket,
   listSocialFeeds,
   getSocialFeed,
   listEnabledSocialFeeds,

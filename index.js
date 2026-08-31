@@ -158,6 +158,9 @@ loadReactionRoles(client);
 const loadSocialFeeds = require("./events/socialFeeds");
 loadSocialFeeds(client);
 
+const loadTickets = require("./events/tickets");
+loadTickets(client);
+
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);

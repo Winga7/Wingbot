@@ -205,7 +205,6 @@
                   <svg viewBox="0 0 24 24"><path d="M2 9a3 3 0 013-3h14a3 3 0 013 3v2a3 3 0 01-3 3H5a3 3 0 01-3-3V9z"/><path d="M2 15a3 3 0 013-3h14a3 3 0 013 3v2a3 3 0 01-3 3H5a3 3 0 01-3-3v-2z"/></svg>
                 </span>
                 <span class="nav-label">Tickets</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
               <a href="#tempvoice" class="nav-link" data-view="tempvoice">
                 <span class="nav-ico" aria-hidden="true">
@@ -760,6 +759,82 @@
                 <button type="button" class="btn ghost tiny" id="btn-rr-refresh">Rafraîchir</button>
               </div>
               <div id="rr-list" class="muted tiny">Charge un serveur pour voir les panneaux.</div>
+            </div>
+          </section>
+
+          <section class="view" id="view-ticketing" hidden>
+            <div class="view-head">
+              <h2>Tickets</h2>
+              <p class="muted tiny">
+                Publie un panneau avec boutons ou menu : chaque clic crée un salon privé pour le membre et ton équipe support.
+              </p>
+            </div>
+            <div class="panel-block" id="ticket-form-panel">
+              <h3>Nouveau panneau tickets</h3>
+              <label class="field-row">
+                <span>Nom interne</span>
+                <input type="text" id="ticket-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Support serveur" />
+              </label>
+              <label class="field-row">
+                <span>Salon du panneau</span>
+                <select id="ticket-panel-channel" class="input-sm input-wide"></select>
+              </label>
+              <label class="field-row">
+                <span>Catégorie tickets</span>
+                <select id="ticket-category" class="input-sm input-wide"></select>
+              </label>
+              <p class="muted tiny">Les nouveaux tickets seront créés dans cette catégorie Discord.</p>
+              <label class="field-row">
+                <span>Salon logs (optionnel)</span>
+                <select id="ticket-log-channel" class="input-sm input-wide"></select>
+              </label>
+              <label class="field-row">
+                <span>Rôles support</span>
+                <select id="ticket-support-roles" class="input-sm input-wide" multiple size="4"></select>
+              </label>
+              <p class="muted tiny">Ctrl+clic pour sélectionner plusieurs rôles. Ils verront tous les tickets et pourront les prendre en charge.</p>
+              <label class="field-row">
+                <span>Max tickets ouverts / membre</span>
+                <input type="number" id="ticket-max-open" class="input-sm" min="1" max="5" value="1" />
+              </label>
+              <label class="field-row">
+                <span>Message du panneau</span>
+                <textarea id="ticket-content" class="input-sm input-wide" rows="3" placeholder="Besoin d'aide ? Ouvre un ticket ci-dessous…"></textarea>
+              </label>
+              <details class="custom-guide">
+                <summary>Embed (optionnel)</summary>
+                <div class="custom-guide-body">
+                  <label class="field-row">
+                    <span>Titre</span>
+                    <input type="text" id="ticket-embed-title" class="input-sm input-wide" maxlength="256" />
+                  </label>
+                  <label class="field-row">
+                    <span>Description</span>
+                    <textarea id="ticket-embed-desc" class="input-sm input-wide" rows="2" maxlength="4096"></textarea>
+                  </label>
+                  <label class="field-row">
+                    <span>Couleur</span>
+                    <input type="text" id="ticket-embed-color" class="input-sm mono" value="#5865f2" maxlength="7" />
+                  </label>
+                </div>
+              </details>
+              <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Catégories (boutons ou menu)</h4>
+              <div id="ticket-categories-root"></div>
+              <button type="button" class="btn secondary tiny" id="btn-ticket-add-cat">+ Catégorie</button>
+              <div class="fonda-actions" style="margin-top:0.75rem">
+                <button type="button" class="btn primary" id="btn-ticket-publish">Publier le panneau tickets</button>
+              </div>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
+                <h3 style="margin:0">Panneaux actifs</h3>
+                <button type="button" class="btn ghost tiny" id="btn-ticket-refresh">Rafraîchir</button>
+              </div>
+              <div id="ticket-panels-list" class="muted tiny">Charge un serveur pour voir les panneaux.</div>
+            </div>
+            <div class="panel-block">
+              <h3>Tickets ouverts</h3>
+              <div id="ticket-open-list" class="muted tiny">—</div>
             </div>
           </section>
 
