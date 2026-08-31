@@ -18,6 +18,15 @@ const {
   insertTicket,
   updateTicket,
 } = require("../database");
+
+function getPublicBaseUrl() {
+  const u =
+    process.env.DASHBOARD_PUBLIC_URL ||
+    process.env.PUBLIC_URL ||
+    process.env.WINGBOT_PUBLIC_URL ||
+    "";
+  return String(u).replace(/\/+$/, "");
+}
 const {
   parseTicketCustomId,
   closeCustomId,
@@ -29,6 +38,7 @@ const {
   resolveCategorySetting,
   resolveCategoryRoles,
   resolveTicketCategoryId,
+  resolveTranscriptChannelId,
   applyChannelNameTemplate,
 } = require("../lib/ticketConfig");
 const { sendTicketTranscript } = require("../lib/ticketTranscript");
@@ -397,16 +407,17 @@ async function closeTicket(interaction, ticketId) {
     "transcript_enabled"
   );
   if (panel && transcriptEnabled && channel) {
-    const transcriptChannelId =
-      panel.settings?.transcript_channel_id ||
-      panel.log_channel_id ||
-      null;
+    const transcriptChannelId = resolveTranscriptChannelId(category, panel);
     await sendTicketTranscript({
       guild,
       channel,
       ticket: closedTicket,
+      panel,
+      category,
       targetChannelId: transcriptChannelId,
       closedByTag: member.user.tag,
+      publicBaseUrl: getPublicBaseUrl(),
+      updateTicket,
     });
   }
 

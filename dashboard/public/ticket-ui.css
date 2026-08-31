@@ -1,4 +1,36 @@
-/* Tickets — UI fractionnée type Ticket Tool */
+/* Tickets — lisibilité + UI fractionnée */
+#view-ticketing {
+  color: var(--text, #e8ecff);
+}
+
+#view-ticketing .view-head p,
+#view-ticketing .muted,
+#view-ticketing .tiny.muted {
+  color: var(--text-dim, #aab0cf) !important;
+}
+
+#view-ticketing h2,
+#view-ticketing h3,
+#view-ticketing h4,
+#view-ticketing .field-row > span,
+#view-ticketing label > span {
+  color: var(--text-dim, #c8cce6);
+}
+
+#view-ticketing .panel-block {
+  background: rgba(24, 30, 52, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+}
+
+#view-ticketing .ticket-toolbar {
+  background: rgba(28, 34, 58, 0.98);
+}
+
+#view-ticketing .ticket-toolbar-row .btn {
+  color: var(--text, #e8ecff);
+}
+
 .ticket-toolbar-row {
   display: flex;
   flex-wrap: wrap;
@@ -12,38 +44,43 @@
   margin: 0;
 }
 
+#view-ticketing #ticket-panel-status {
+  color: var(--text-dim, #b8bdd8);
+}
+
 .ticket-subnav {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
   margin: 0.65rem 0 0.85rem;
-  padding: 0.35rem;
+  padding: 0.45rem;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.22);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: rgba(20, 25, 44, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .ticket-subnav-btn {
   appearance: none;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted, #9ca3af);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim, #b8bdd8);
   font-size: 0.78rem;
-  padding: 0.35rem 0.65rem;
+  padding: 0.4rem 0.7rem;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .ticket-subnav-btn:hover {
-  color: var(--text, #e5e7eb);
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--text, #fff);
+  background: rgba(88, 101, 242, 0.15);
+  border-color: rgba(88, 101, 242, 0.35);
 }
 
 .ticket-subnav-btn.active {
   color: #fff;
-  background: rgba(88, 101, 242, 0.35);
-  border-color: rgba(88, 101, 242, 0.5);
+  background: rgba(88, 101, 242, 0.45);
+  border-color: rgba(120, 130, 255, 0.65);
 }
 
 .ticket-hub-grid {
@@ -55,24 +92,58 @@
 .ticket-hub-card {
   appearance: none;
   text-align: left;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
-  padding: 0.75rem 0.85rem;
-  background: rgba(0, 0, 0, 0.25);
+  padding: 0.85rem 0.95rem;
+  background: rgba(32, 38, 62, 0.96);
+  color: var(--text, #e8ecff);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, transform 0.12s;
 }
 
 .ticket-hub-card:hover {
-  border-color: rgba(88, 101, 242, 0.45);
-  background: rgba(88, 101, 242, 0.08);
+  border-color: rgba(88, 101, 242, 0.55);
+  background: rgba(44, 52, 88, 0.98);
   transform: translateY(-1px);
 }
 
 .ticket-hub-card strong {
   display: block;
-  font-size: 0.88rem;
-  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+  margin-bottom: 0.3rem;
+  color: #fff;
+}
+
+.ticket-hub-card .muted {
+  color: var(--text-dim, #aab0cf) !important;
+}
+
+#view-ticketing #ticket-hub-summary {
+  color: var(--text-dim, #c8cce6);
+  background: rgba(28, 34, 58, 0.9);
+}
+
+#view-ticketing .ticket-cat-row {
+  background: rgba(32, 38, 62, 0.95) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: var(--text, #e8ecff);
+}
+
+#view-ticketing .custom-guide summary {
+  color: var(--text-dim, #c8cce6);
+  cursor: pointer;
+}
+
+#view-ticketing .input-sm,
+#view-ticketing select.input-sm,
+#view-ticketing textarea.input-sm {
+  background: rgba(8, 10, 20, 0.65);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text, #e8ecff);
+}
+
+#view-ticketing .input-sm::placeholder {
+  color: #7a819e;
 }
 
 .ticket-color-row {
@@ -84,6 +155,10 @@
 
 .ticket-color-row .input-sm {
   width: 6.5rem;
+}
+
+.ticket-color-row .ticket-color-pick {
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .ticket-section[hidden] {

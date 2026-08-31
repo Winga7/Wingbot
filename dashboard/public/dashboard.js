@@ -2309,7 +2309,11 @@ function addTicketCategoryRow(data = {}) {
         </div>
         <label class="field-row checkbox-row">
           <input type="checkbox" class="ticket-cat-transcript"${data.transcript_enabled ? " checked" : ""} />
-          <span class="tiny">Transcript à la fermeture (surcharge)</span>
+          <span class="tiny">Transcript HTML à la fermeture (surcharge)</span>
+        </label>
+        <label class="field-row">
+          <span class="tiny">Salon transcript (surcharge)</span>
+          <select class="input-sm ticket-cat-transcript-channel"></select>
         </label>
         <label class="field-row checkbox-row">
           <input type="checkbox" class="ticket-cat-delete"${data.delete_channel_on_close === false ? "" : data.delete_channel_on_close === true ? " checked" : ""} />
@@ -2332,6 +2336,22 @@ function addTicketCategoryRow(data = {}) {
       opt.textContent = c.name;
       if (data.ticket_category_id === c.id) opt.selected = true;
       catSel.appendChild(opt);
+    }
+  }
+
+  const trSel = row.querySelector(".ticket-cat-transcript-channel");
+  if (trSel) {
+    trSel.innerHTML = "";
+    const emptyTr = document.createElement("option");
+    emptyTr.value = "";
+    emptyTr.textContent = "— Hériter du panneau —";
+    trSel.appendChild(emptyTr);
+    for (const ch of lastGuildChannelsList) {
+      const opt = document.createElement("option");
+      opt.value = ch.id;
+      opt.textContent = `#${ch.name}`;
+      if (data.transcript_channel_id === ch.id) opt.selected = true;
+      trSel.appendChild(opt);
     }
   }
 
@@ -2439,6 +2459,8 @@ function collectTicketCategoriesFromForm() {
     if (row.querySelector(".ticket-cat-transcript")?.checked) {
       cat.transcript_enabled = true;
     }
+    const transcriptCh = row.querySelector(".ticket-cat-transcript-channel")?.value;
+    if (transcriptCh) cat.transcript_channel_id = transcriptCh;
     const delCb = row.querySelector(".ticket-cat-delete");
     if (delCb?.checked) cat.delete_channel_on_close = true;
 

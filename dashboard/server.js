@@ -2844,6 +2844,26 @@ app.get(
 // les assets fréquemment modifiés (html/js/css). Sinon le navigateur garde
 // l'ancienne version après un redéploiement et l'utilisateur voit "rien n'a
 // changé".
+app.get("/transcripts/:guildId/:ticketId/:token.html", (req, res) => {
+  try {
+    const { readTranscriptFile } = require("../lib/ticketTranscript");
+    const guildId = String(req.params.guildId || "");
+    const ticketId = Number(req.params.ticketId);
+    const token = String(req.params.token || "").replace(/[^\w-]/g, "");
+    if (!guildId || !Number.isInteger(ticketId) || ticketId < 1 || !token) {
+      return res.status(400).send("Requête invalide");
+    }
+    const html = readTranscriptFile(guildId, ticketId, token);
+    if (!html) return res.status(404).send("Transcript introuvable");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(html);
+  } catch (e) {
+    console.error("[transcript]", e?.message || e);
+    res.status(500).send("Erreur serveur");
+  }
+});
+
 app.use(
   express.static(path.join(__dirname, "public"), {
     etag: true,

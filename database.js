@@ -571,6 +571,11 @@ function migrateTicketsTable() {
   } catch {
     /* déjà migré */
   }
+  try {
+    db.prepare(`ALTER TABLE tickets ADD COLUMN transcript_token TEXT`).run();
+  } catch {
+    /* déjà migré */
+  }
   db.prepare(
     `CREATE INDEX IF NOT EXISTS idx_tickets_guild_status ON tickets(guild_id, status)`
   ).run();
@@ -926,6 +931,10 @@ function updateTicket(id, guildId, patch) {
   if (patch.channel_id != null) {
     fields.push("channel_id = ?");
     vals.push(String(patch.channel_id));
+  }
+  if (patch.transcript_token != null) {
+    fields.push("transcript_token = ?");
+    vals.push(String(patch.transcript_token));
   }
   if (patch.status === "closed") {
     fields.push("closed_at = CURRENT_TIMESTAMP");

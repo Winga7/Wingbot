@@ -989,10 +989,12 @@
                 </label>
                 <label class="field-row checkbox-row">
                   <input type="checkbox" id="ticket-transcript-enabled" />
-                  <span>Générer un transcript .txt à la fermeture</span>
+                  <span>Transcript HTML à la fermeture (fichier + lien direct)</span>
                 </label>
+                <p class="muted tiny">Salon par défaut pour ce panneau. Chaque type de ticket peut surcharger dans « Boutons » → options avancées.</p>
+                <p class="muted tiny">Nécessite <code>DASHBOARD_PUBLIC_URL</code> (ex. https://wingbot.winga.be) pour le bouton « Direct Link ».</p>
                 <label class="field-row">
-                  <span>Salon transcript (vide = salon logs)</span>
+                  <span>Salon transcript par défaut (vide = salon logs)</span>
                   <select id="ticket-transcript-channel" class="input-sm input-wide"></select>
                 </label>
               </div>
