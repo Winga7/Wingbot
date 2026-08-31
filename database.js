@@ -695,6 +695,26 @@ function insertTicketPanel(guildId, data) {
   return getTicketPanel(r.lastInsertRowid, guildId);
 }
 
+function cloneTicketPanel(id, guildId) {
+  const src = getTicketPanel(id, guildId);
+  if (!src) return null;
+  const label = `${src.label || `Panneau #${id}`}`.slice(0, 70) + " (copie)";
+  return insertTicketPanel(guildId, {
+    channel_id: src.channel_id,
+    ticket_category_id: src.ticket_category_id,
+    log_channel_id: src.log_channel_id,
+    support_role_ids: src.support_role_ids,
+    categories: src.categories,
+    settings: src.settings,
+    label,
+    content: src.content,
+    embed: src.embed,
+    ui_mode: src.ui_mode,
+    max_open_per_user: src.max_open_per_user,
+    enabled: false,
+  });
+}
+
 function updateTicketPanel(id, guildId, patch) {
   const cur = getTicketPanel(id, guildId);
   if (!cur) return null;
@@ -724,6 +744,38 @@ function updateTicketPanel(id, guildId, patch) {
       fields.push("categories = ?");
       vals.push(JSON.stringify(cats));
     }
+  }
+  if (patch.content != null) {
+    fields.push("content = ?");
+    vals.push(String(patch.content));
+  }
+  if (patch.embed !== undefined) {
+    fields.push("embed_json = ?");
+    vals.push(patch.embed ? JSON.stringify(patch.embed) : null);
+  }
+  if (patch.channel_id != null) {
+    fields.push("channel_id = ?");
+    vals.push(String(patch.channel_id));
+  }
+  if (patch.ticket_category_id != null) {
+    fields.push("ticket_category_id = ?");
+    vals.push(String(patch.ticket_category_id));
+  }
+  if (patch.log_channel_id !== undefined) {
+    fields.push("log_channel_id = ?");
+    vals.push(patch.log_channel_id || null);
+  }
+  if (patch.support_role_ids != null) {
+    fields.push("support_role_ids = ?");
+    vals.push(JSON.stringify(parseSupportRoleIds(patch.support_role_ids)));
+  }
+  if (patch.ui_mode != null && UI_MODES.has(patch.ui_mode)) {
+    fields.push("ui_mode = ?");
+    vals.push(patch.ui_mode);
+  }
+  if (patch.max_open_per_user != null) {
+    fields.push("max_open_per_user = ?");
+    vals.push(Math.min(5, Math.max(1, Number(patch.max_open_per_user) || 1)));
   }
   if (!fields.length) return cur;
   fields.push("updated_at = CURRENT_TIMESTAMP");
@@ -2678,6 +2730,7 @@ module.exports = {
   getTicketPanelByMessage,
   ticketPanelExistsForMessage,
   insertTicketPanel,
+  cloneTicketPanel,
   updateTicketPanel,
   deleteTicketPanel,
   listTickets,

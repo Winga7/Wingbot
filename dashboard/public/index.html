@@ -26,6 +26,7 @@
     <link id="site-favicon" rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/compat.css" />
+    <link rel="stylesheet" href="/ticket-ui.css" />
   </head>
   <body>
     <div class="app app--landing" id="app">
@@ -783,137 +784,228 @@
             <div class="view-head">
               <h2>Tickets</h2>
               <p class="muted tiny">
-                Un seul message peut contenir jusqu'à <strong>25 boutons</strong> (plusieurs types : support, modération, etc.).
-                Chaque catégorie a ses propres emoji, rôles, modal, nom de salon et permissions.
+                Gère plusieurs panneaux indépendants ou un hub multi-boutons. Chaque panneau a sa config fractionnée (message, boutons, permissions, formulaires…).
               </p>
             </div>
-            <div class="panel-block" id="ticket-form-panel">
-              <h3>Nouveau panneau tickets</h3>
-              <label class="field-row">
-                <span>Nom interne</span>
-                <input type="text" id="ticket-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Hub support" />
-              </label>
-              <label class="field-row">
-                <span>Salon du panneau</span>
-                <select id="ticket-panel-channel" class="input-sm input-wide"></select>
-              </label>
-              <label class="field-row">
-                <span>Catégorie Discord par défaut</span>
-                <select id="ticket-category" class="input-sm input-wide"></select>
-              </label>
-              <p class="muted tiny">Chaque type de ticket peut surcharger cette catégorie individuellement.</p>
-              <label class="field-row">
-                <span>Salon logs (optionnel)</span>
-                <select id="ticket-log-channel" class="input-sm input-wide"></select>
-              </label>
-              <label class="field-row">
-                <span>Rôles support (défaut)</span>
-                <select id="ticket-support-roles" class="input-sm input-wide" multiple size="4"></select>
-              </label>
-              <label class="field-row">
-                <span>Max tickets ouverts / membre</span>
-                <input type="number" id="ticket-max-open" class="input-sm" min="1" max="5" value="1" />
-              </label>
-              <label class="field-row">
-                <span>Interface panneau</span>
-                <select id="ticket-ui-mode" class="input-sm input-wide">
-                  <option value="buttons">Boutons (jusqu'à 25, plusieurs lignes)</option>
-                  <option value="select">Menu déroulant</option>
-                </select>
-              </label>
-              <label class="field-row">
-                <span>Message du panneau</span>
-                <textarea id="ticket-content" class="input-sm input-wide" rows="3" placeholder="Besoin d'aide ? Choisis une catégorie ci-dessous…"></textarea>
-              </label>
-              <details class="custom-guide">
-                <summary>Embed panneau (optionnel)</summary>
-                <div class="custom-guide-body">
-                  <label class="field-row">
-                    <span>Titre</span>
-                    <input type="text" id="ticket-embed-title" class="input-sm input-wide" maxlength="256" />
-                  </label>
-                  <label class="field-row">
-                    <span>Description</span>
-                    <textarea id="ticket-embed-desc" class="input-sm input-wide" rows="2" maxlength="4096"></textarea>
-                  </label>
-                  <label class="field-row">
-                    <span>Couleur</span>
+
+            <div class="ticket-toolbar panel-block">
+              <div class="ticket-toolbar-row">
+                <label class="field-row ticket-select-wrap">
+                  <span class="tiny muted">Panneau</span>
+                  <select id="ticket-panel-select" class="input-sm input-wide"></select>
+                </label>
+                <button type="button" class="btn secondary tiny" id="btn-ticket-new" title="Nouveau panneau">+</button>
+                <button type="button" class="btn secondary tiny" id="btn-ticket-clone" title="Dupliquer">Cloner</button>
+                <button type="button" class="btn primary tiny" id="btn-ticket-save">Enregistrer</button>
+                <button type="button" class="btn primary tiny" id="btn-ticket-send">Envoyer / MAJ Discord</button>
+                <button type="button" class="btn ghost tiny" id="btn-ticket-delete-panel">Supprimer</button>
+              </div>
+              <p id="ticket-panel-status" class="muted tiny" style="margin:0.35rem 0 0"></p>
+            </div>
+
+            <nav class="ticket-subnav" id="ticket-subnav" aria-label="Sections panneau tickets">
+              <button type="button" class="ticket-subnav-btn active" data-ticket-section="hub">Accueil</button>
+              <button type="button" class="ticket-subnav-btn" data-ticket-section="panel">Message panneau</button>
+              <button type="button" class="ticket-subnav-btn" data-ticket-section="buttons">Boutons</button>
+              <button type="button" class="ticket-subnav-btn" data-ticket-section="permissions">Permissions</button>
+              <button type="button" class="ticket-subnav-btn" data-ticket-section="forms">Formulaires</button>
+              <button type="button" class="ticket-subnav-btn" data-ticket-section="behavior">Comportement</button>
+              <button type="button" class="ticket-subnav-btn" data-ticket-section="transcripts">Transcripts</button>
+              <button type="button" class="ticket-subnav-btn" data-ticket-section="open">Tickets ouverts</button>
+            </nav>
+
+            <div class="ticket-section active" id="ticket-section-hub" data-ticket-section="hub">
+              <div class="ticket-hub-grid">
+                <button type="button" class="ticket-hub-card" data-go-ticket-section="panel">
+                  <strong>Message panneau</strong>
+                  <span class="muted tiny">Embed, couleur, salon de publication</span>
+                </button>
+                <button type="button" class="ticket-hub-card" data-go-ticket-section="buttons">
+                  <strong>Boutons &amp; types</strong>
+                  <span class="muted tiny">Emoji, couleur bouton, menu ou boutons</span>
+                </button>
+                <button type="button" class="ticket-hub-card" data-go-ticket-section="permissions">
+                  <strong>Permissions</strong>
+                  <span class="muted tiny">Rôles support, fermeture, claim</span>
+                </button>
+                <button type="button" class="ticket-hub-card" data-go-ticket-section="forms">
+                  <strong>Formulaires</strong>
+                  <span class="muted tiny">Modal avant ouverture, champs embed</span>
+                </button>
+                <button type="button" class="ticket-hub-card" data-go-ticket-section="behavior">
+                  <strong>Comportement</strong>
+                  <span class="muted tiny">Limites, nom salon, suppression</span>
+                </button>
+                <button type="button" class="ticket-hub-card" data-go-ticket-section="transcripts">
+                  <strong>Transcripts &amp; logs</strong>
+                  <span class="muted tiny">Historique à la fermeture</span>
+                </button>
+                <button type="button" class="ticket-hub-card" data-go-ticket-section="open">
+                  <strong>Tickets ouverts</strong>
+                  <span class="muted tiny">Salons actifs sur ce serveur</span>
+                </button>
+              </div>
+              <div id="ticket-hub-summary" class="panel-block muted tiny" style="margin-top:0.75rem"></div>
+            </div>
+
+            <div class="ticket-section" id="ticket-section-panel" data-ticket-section="panel" hidden>
+              <div class="panel-block">
+                <h3>Message panneau Discord</h3>
+                <label class="field-row">
+                  <span>Nom interne du panneau</span>
+                  <input type="text" id="ticket-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Contact · Partenariat · Candidatures" />
+                </label>
+                <label class="field-row">
+                  <span>Salon de publication</span>
+                  <select id="ticket-panel-channel" class="input-sm input-wide"></select>
+                </label>
+                <label class="field-row">
+                  <span>Texte au-dessus des boutons</span>
+                  <textarea id="ticket-content" class="input-sm input-wide" rows="3" placeholder="Pour toutes demandes…"></textarea>
+                </label>
+                <h4 class="muted tiny">Embed (recommandé — style Ticket Tool)</h4>
+                <label class="field-row">
+                  <span>Titre embed</span>
+                  <input type="text" id="ticket-embed-title" class="input-sm input-wide" maxlength="256" placeholder="Contact" />
+                </label>
+                <label class="field-row">
+                  <span>Description embed</span>
+                  <textarea id="ticket-embed-desc" class="input-sm input-wide" rows="4" maxlength="4096" placeholder="Une ligne par type de demande…"></textarea>
+                </label>
+                <label class="field-row">
+                  <span>Couleur barre embed</span>
+                  <div class="ticket-color-row">
                     <input type="text" id="ticket-embed-color" class="input-sm mono" value="#5865f2" maxlength="7" />
-                  </label>
-                </div>
-              </details>
-              <details class="custom-guide" open>
-                <summary>Paramètres globaux du panneau</summary>
-                <div class="custom-guide-body">
-                  <label class="field-row checkbox-row">
-                    <input type="checkbox" id="ticket-modal-enabled" />
-                    <span>Formulaire modal avant ouverture (par défaut)</span>
-                  </label>
-                  <label class="field-row checkbox-row">
-                    <input type="checkbox" id="ticket-claim-enabled" checked />
-                    <span>Bouton « Prendre en charge » activé</span>
-                  </label>
-                  <label class="field-row checkbox-row">
-                    <input type="checkbox" id="ticket-delete-channel" checked />
-                    <span>Supprimer le salon à la fermeture</span>
-                  </label>
-                  <label class="field-row">
-                    <span>Délai suppression (secondes)</span>
-                    <input type="number" id="ticket-delete-delay" class="input-sm" min="0" max="120" value="5" />
-                  </label>
-                  <label class="field-row checkbox-row">
-                    <input type="checkbox" id="ticket-transcript-enabled" />
-                    <span>Transcript à la fermeture</span>
-                  </label>
-                  <label class="field-row">
-                    <span>Salon transcript (vide = logs)</span>
-                    <select id="ticket-transcript-channel" class="input-sm input-wide"></select>
-                  </label>
-                  <label class="field-row">
-                    <span>Qui peut fermer</span>
-                    <select id="ticket-close-allowed" class="input-sm input-wide">
-                      <option value="both">Auteur + staff</option>
-                      <option value="staff">Staff uniquement</option>
-                      <option value="opener">Auteur uniquement</option>
-                    </select>
-                  </label>
-                  <label class="field-row checkbox-row">
-                    <input type="checkbox" id="ticket-use-default-name" checked />
-                    <span>Nom de salon personnalisé (template)</span>
-                  </label>
-                  <label class="field-row">
-                    <span>Template nom salon</span>
-                    <input type="text" id="ticket-channel-template" class="input-sm input-wide mono" value="ticket-{number}-{user}" maxlength="100" />
-                  </label>
-                  <p class="muted tiny">Variables : <code>{number}</code> <code>{user}</code> <code>{category}</code> <code>{label}</code></p>
-                  <label class="field-row">
-                    <span>Libellé bouton claim</span>
-                    <input type="text" id="ticket-claim-label" class="input-sm input-wide" value="Prendre en charge" maxlength="80" />
-                  </label>
-                  <label class="field-row">
-                    <span>Libellé bouton fermer</span>
-                    <input type="text" id="ticket-close-label" class="input-sm input-wide" value="Fermer" maxlength="80" />
-                  </label>
-                </div>
-              </details>
-              <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Types de tickets (boutons / menu)</h4>
-              <p class="muted tiny">Ex. 🎫 Support · 🅰️ Général · 🤠 Modération — emoji seul possible, modal et rôles par type.</p>
-              <div id="ticket-categories-root"></div>
-              <button type="button" class="btn secondary tiny" id="btn-ticket-add-cat">+ Type de ticket</button>
-              <div class="fonda-actions" style="margin-top:0.75rem">
-                <button type="button" class="btn primary" id="btn-ticket-publish">Publier le panneau tickets</button>
+                    <button type="button" class="btn ghost tiny ticket-color-pick" data-color="#5865f2" title="Bleu">Bleu</button>
+                    <button type="button" class="btn ghost tiny ticket-color-pick" data-color="#747f8d" title="Gris">Gris</button>
+                    <button type="button" class="btn ghost tiny ticket-color-pick" data-color="#57f287" title="Vert">Vert</button>
+                    <button type="button" class="btn ghost tiny ticket-color-pick" data-color="#ed4245" title="Rouge">Rouge</button>
+                    <button type="button" class="btn ghost tiny ticket-color-pick" data-color="#fee75c" title="Jaune">Jaune</button>
+                    <button type="button" class="btn ghost tiny ticket-color-pick" data-color="#eb459e" title="Rose">Rose</button>
+                  </div>
+                </label>
+                <p class="muted tiny">Les boutons Discord : bleu, gris, vert ou rouge — configurable par type dans « Boutons ».</p>
               </div>
             </div>
-            <div class="panel-block">
-              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
-                <h3 style="margin:0">Panneaux actifs</h3>
-                <button type="button" class="btn ghost tiny" id="btn-ticket-refresh">Rafraîchir</button>
+
+            <div class="ticket-section" id="ticket-section-buttons" data-ticket-section="buttons" hidden>
+              <div class="panel-block">
+                <h3>Boutons &amp; types de tickets</h3>
+                <p class="muted tiny">Un panneau = un message. Ajoute plusieurs types (Contact modération, Partenariat, Plainte…) ou crée un panneau séparé par type.</p>
+                <label class="field-row">
+                  <span>Style interface</span>
+                  <select id="ticket-ui-mode" class="input-sm input-wide">
+                    <option value="buttons">Boutons (jusqu'à 25, plusieurs lignes)</option>
+                    <option value="select">Menu déroulant</option>
+                  </select>
+                </label>
+                <label class="field-row">
+                  <span>Catégorie Discord par défaut</span>
+                  <select id="ticket-category" class="input-sm input-wide"></select>
+                </label>
+                <div id="ticket-categories-root"></div>
+                <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:0.35rem">
+                  <button type="button" class="btn secondary tiny" id="btn-ticket-add-cat">+ Type de ticket</button>
+                  <button type="button" class="btn ghost tiny" id="btn-ticket-hub-template">Modèle hub (4 boutons)</button>
+                </div>
               </div>
-              <div id="ticket-panels-list" class="muted tiny">Charge un serveur pour voir les panneaux.</div>
             </div>
-            <div class="panel-block">
-              <h3>Tickets ouverts</h3>
-              <div id="ticket-open-list" class="muted tiny">—</div>
+
+            <div class="ticket-section" id="ticket-section-permissions" data-ticket-section="permissions" hidden>
+              <div class="panel-block">
+                <h3>Permissions &amp; équipe</h3>
+                <label class="field-row">
+                  <span>Rôles support (accès aux tickets)</span>
+                  <select id="ticket-support-roles" class="input-sm input-wide" multiple size="5"></select>
+                </label>
+                <p class="muted tiny">Ctrl+clic pour plusieurs rôles. Surcharge possible par type dans « Boutons » → options avancées.</p>
+                <label class="field-row">
+                  <span>Qui peut fermer un ticket</span>
+                  <select id="ticket-close-allowed" class="input-sm input-wide">
+                    <option value="both">Auteur + staff</option>
+                    <option value="staff">Staff uniquement</option>
+                    <option value="opener">Auteur uniquement</option>
+                  </select>
+                </label>
+                <label class="field-row checkbox-row">
+                  <input type="checkbox" id="ticket-claim-enabled" checked />
+                  <span>Autoriser la prise en charge (claim) par le staff</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="ticket-section" id="ticket-section-forms" data-ticket-section="forms" hidden>
+              <div class="panel-block">
+                <h3>Formulaires (modals)</h3>
+                <label class="field-row checkbox-row">
+                  <input type="checkbox" id="ticket-modal-enabled" />
+                  <span>Demander un formulaire avant ouverture (défaut panneau)</span>
+                </label>
+                <p class="muted tiny">Configure les champs par type dans « Boutons » → options avancées de chaque type. Les réponses apparaissent en embed dans le ticket.</p>
+              </div>
+            </div>
+
+            <div class="ticket-section" id="ticket-section-behavior" data-ticket-section="behavior" hidden>
+              <div class="panel-block">
+                <h3>Comportement des tickets</h3>
+                <label class="field-row">
+                  <span>Max tickets ouverts / membre</span>
+                  <input type="number" id="ticket-max-open" class="input-sm" min="1" max="5" value="1" />
+                </label>
+                <label class="field-row checkbox-row">
+                  <input type="checkbox" id="ticket-use-default-name" checked />
+                  <span>Nom de salon personnalisé (template)</span>
+                </label>
+                <label class="field-row">
+                  <span>Template nom salon</span>
+                  <input type="text" id="ticket-channel-template" class="input-sm input-wide mono" value="ticket-{number}-{user}" maxlength="100" />
+                </label>
+                <p class="muted tiny"><code>{number}</code> <code>{user}</code> <code>{category}</code> <code>{label}</code></p>
+                <label class="field-row checkbox-row">
+                  <input type="checkbox" id="ticket-delete-channel" checked />
+                  <span>Supprimer le salon à la fermeture</span>
+                </label>
+                <label class="field-row">
+                  <span>Délai avant suppression (s)</span>
+                  <input type="number" id="ticket-delete-delay" class="input-sm" min="0" max="120" value="5" />
+                </label>
+                <label class="field-row">
+                  <span>Libellé bouton claim</span>
+                  <input type="text" id="ticket-claim-label" class="input-sm input-wide" value="Prendre en charge" maxlength="80" />
+                </label>
+                <label class="field-row">
+                  <span>Libellé bouton fermer</span>
+                  <input type="text" id="ticket-close-label" class="input-sm input-wide" value="Fermer" maxlength="80" />
+                </label>
+              </div>
+            </div>
+
+            <div class="ticket-section" id="ticket-section-transcripts" data-ticket-section="transcripts" hidden>
+              <div class="panel-block">
+                <h3>Transcripts &amp; logs</h3>
+                <label class="field-row">
+                  <span>Salon logs ouverture/fermeture</span>
+                  <select id="ticket-log-channel" class="input-sm input-wide"></select>
+                </label>
+                <label class="field-row checkbox-row">
+                  <input type="checkbox" id="ticket-transcript-enabled" />
+                  <span>Générer un transcript .txt à la fermeture</span>
+                </label>
+                <label class="field-row">
+                  <span>Salon transcript (vide = salon logs)</span>
+                  <select id="ticket-transcript-channel" class="input-sm input-wide"></select>
+                </label>
+              </div>
+            </div>
+
+            <div class="ticket-section" id="ticket-section-open" data-ticket-section="open" hidden>
+              <div class="panel-block">
+                <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
+                  <h3 style="margin:0">Tickets ouverts</h3>
+                  <button type="button" class="btn ghost tiny" id="btn-ticket-refresh">Rafraîchir</button>
+                </div>
+                <div id="ticket-open-list" class="muted tiny">—</div>
+              </div>
             </div>
           </section>
 

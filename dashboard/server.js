@@ -68,6 +68,7 @@ const {
   getTicketPanel,
   ticketPanelExistsForMessage,
   insertTicketPanel,
+  cloneTicketPanel,
   updateTicketPanel,
   deleteTicketPanel,
   listTickets,
@@ -1904,6 +1905,127 @@ async function publishTicketPanelMessage(panel) {
   return String(msg.id);
 }
 
+async function syncTicketPanelMessage(panel) {
+  await assertGuildTextChannel(panel.guild_id, panel.channel_id);
+  const apiBody = buildReactionRoleMessageBody({
+    content: panel.content,
+    embed: panel.embed,
+  });
+  apiBody.components = buildPanelComponents(panel);
+  if (panel.message_id) {
+    try {
+      await discordBotJson(
+        "PATCH",
+        `/channels/${encodeURIComponent(panel.channel_id)}/messages/${encodeURIComponent(panel.message_id)}`,
+        apiBody
+      );
+      return String(panel.message_id);
+    } catch {
+      /* message supprimé ou salon changé → republier */
+    }
+  }
+  return publishTicketPanelMessage(panel);
+}
+
+function buildTicketPanelPatch(body) {
+  const patch = {};
+  if (body?.label != null) patch.label = body.label;
+  if (body?.enabled != null) patch.enabled = !!body.enabled;
+  if (body?.settings != null) patch.settings = body.settings;
+  if (body?.categories != null) patch.categories = body.categories;
+  if (body?.content != null) patch.content = body.content;
+  if (body?.embed !== undefined) patch.embed = body.embed;
+  const channelId = normalizeSnowflakeId(body?.channel_id);
+  if (channelId) patch.channel_id = channelId;
+  const ticketCat = normalizeSnowflakeId(body?.ticket_category_id);
+  if (ticketCat) patch.ticket_category_id = ticketCat;
+  if (body?.log_channel_id !== undefined) {
+    patch.log_channel_id = normalizeSnowflakeId(body.log_channel_id) || null;
+  }
+  if (body?.support_role_ids != null) {
+    patch.support_role_ids = parseSupportRoleIds(body.support_role_ids);
+  }
+  if (body?.ui_mode === "select" || body?.ui_mode === "buttons") {
+    patch.ui_mode = body.ui_mode;
+  }
+  if (body?.max_open_per_user != null) {
+    patch.max_open_per_user = Number(body.max_open_per_user) || 1;
+  }
+  return patch;
+}
+
+app.get(
+  "/api/guilds/:guildId/ticket-panels/:panelId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.panelId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      const row = getTicketPanel(id, guildId);
+      if (!row) return res.status(404).json({ error: "not_found" });
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/ticket-panels/:panelId/clone",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.panelId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      const row = cloneTicketPanel(id, guildId);
+      if (!row) return res.status(404).json({ error: "not_found" });
+      res.json(row);
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/ticket-panels/:panelId/send",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const id = Number(req.params.panelId);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "id invalide" });
+      }
+      let panel = getTicketPanel(id, guildId);
+      if (!panel) return res.status(404).json({ error: "not_found" });
+      const patch = buildTicketPanelPatch(req.body || {});
+      if (Object.keys(patch).length) {
+        panel = updateTicketPanel(id, guildId, patch) || panel;
+      }
+      const messageId = await syncTicketPanelMessage(panel);
+      panel = updateTicketPanel(id, guildId, {
+        message_id: messageId,
+        enabled: true,
+      });
+      res.json(panel);
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({ error: String(e.message) });
+    }
+  }
+);
+
 app.get(
   "/api/guilds/:guildId/ticket-panels",
   requireDiscordSession,
@@ -1990,11 +2112,9 @@ app.post(
         embed,
         ui_mode: uiMode,
         max_open_per_user: Number(req.body?.max_open_per_user) || 1,
-        enabled: true,
+        enabled: false,
       });
 
-      const messageId = await publishTicketPanelMessage(panel);
-      panel = updateTicketPanel(panel.id, guildId, { message_id: messageId });
       res.json(panel);
     } catch (e) {
       console.error(e);
@@ -2017,11 +2137,8 @@ app.put(
       if (!getTicketPanel(id, guildId)) {
         return res.status(404).json({ error: "not_found" });
       }
-      const patch = {};
-      if (req.body?.label != null) patch.label = req.body.label;
+      const patch = buildTicketPanelPatch(req.body || {});
       if (req.body?.enabled != null) patch.enabled = !!req.body.enabled;
-      if (req.body?.settings != null) patch.settings = req.body.settings;
-      if (req.body?.categories != null) patch.categories = req.body.categories;
       const row = updateTicketPanel(id, guildId, patch);
       res.json(row);
     } catch (e) {

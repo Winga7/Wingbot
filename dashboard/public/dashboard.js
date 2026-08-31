@@ -127,6 +127,9 @@ let guilds = [];
 /** Dernières listes Discord (UI accès commandes) */
 let lastGuildChannelsList = [];
 let lastGuildCategoriesList = [];
+let ticketPanelsCache = [];
+let activeTicketPanelId = null;
+let activeTicketSection = "hub";
 let lastGuildRolesList = [];
 
 /** @type {Record<string, { id: string, name: string, icon_url: string | null }>} */
@@ -1813,23 +1816,416 @@ function ticketCategoryRolesOptionsHtml(selectedIds = []) {
     .join("");
 }
 
-function resetTicketCategoryRows() {
+async function loadTicketingView() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  fillTicketChannelSelects();
+  fillTicketSupportRolesSelect();
+  await loadTicketPanelsList();
+  await loadTicketsList();
+  if (activeTicketPanelId == null && !ticketPanelsCache.length) {
+    newTicketPanelDraft();
+  }
+  showTicketSection(activeTicketSection || "hub");
+}
+
+function showTicketSection(name) {
+  activeTicketSection = name || "hub";
+  document.querySelectorAll(".ticket-section").forEach((el) => {
+    const on = el.dataset.ticketSection === activeTicketSection;
+    el.hidden = !on;
+    el.classList.toggle("active", on);
+  });
+  document.querySelectorAll(".ticket-subnav-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.ticketSection === activeTicketSection);
+  });
+}
+
+function embedColorToHex(color) {
+  if (typeof color === "number" && Number.isFinite(color)) {
+    return `#${(color & 0xffffff).toString(16).padStart(6, "0")}`;
+  }
+  return "#5865f2";
+}
+
+function updateTicketPanelStatus() {
+  const el = $("ticket-panel-status");
+  if (!el) return;
+  const p = ticketPanelsCache.find((x) => x.id === activeTicketPanelId);
+  if (!p && activeTicketPanelId == null) {
+    el.textContent = "Brouillon — enregistre puis envoie sur Discord.";
+    return;
+  }
+  if (!p) {
+    el.textContent = "";
+    return;
+  }
+  const ch = lastGuildChannelsList.find((c) => c.id === p.channel_id);
+  const link =
+    p.message_id && selectedGuildId
+      ? `https://discord.com/channels/${selectedGuildId}/${p.channel_id}/${p.message_id}`
+      : null;
+  el.innerHTML = `${p.enabled ? "🟢 Actif" : "⏸ Pause"} · ${p.categories?.length || 0} type(s) · ${ch ? `#${escapeHtml(ch.name)}` : "salon ?"}${link ? ` · <a href="${escapeAttr(link)}" target="_blank" rel="noopener noreferrer">Voir sur Discord</a>` : " · pas encore envoyé"}`;
+}
+
+function updateTicketHubSummary() {
+  const el = $("ticket-hub-summary");
+  if (!el) return;
+  const p = ticketPanelsCache.find((x) => x.id === activeTicketPanelId);
+  if (!p && activeTicketPanelId == null) {
+    el.innerHTML =
+      "<strong>Nouveau panneau</strong> — configure chaque section via les cartes ci-dessus, puis <em>Enregistrer</em> et <em>Envoyer / MAJ Discord</em>.";
+    return;
+  }
+  if (!p) {
+    el.textContent = "";
+    return;
+  }
+  const s = p.settings || {};
+  el.innerHTML = `
+    <strong>${escapeHtml(p.label || `Panneau #${p.id}`)}</strong><br/>
+    ${p.categories?.length || 0} bouton(s) · modal ${s.modal_enabled ? "oui" : "non"} · transcript ${s.transcript_enabled ? "oui" : "non"} · max ${p.max_open_per_user}/membre · ${p.ui_mode === "select" ? "menu" : "boutons"}
+  `;
+}
+
+function populateTicketPanelSelect() {
+  const sel = $("ticket-panel-select");
+  if (!sel) return;
+  const prev = activeTicketPanelId;
+  sel.innerHTML = "";
+  const draft = document.createElement("option");
+  draft.value = "";
+  draft.textContent = "+ Nouveau panneau (brouillon)";
+  sel.appendChild(draft);
+  for (const p of ticketPanelsCache) {
+    const opt = document.createElement("option");
+    opt.value = String(p.id);
+    opt.textContent = `${p.id} | ${p.label || `Panneau #${p.id}`}`;
+    sel.appendChild(opt);
+  }
+  if (prev != null && ticketPanelsCache.some((p) => p.id === prev)) {
+    sel.value = String(prev);
+  } else if (prev == null) {
+    sel.value = "";
+  } else if (ticketPanelsCache.length) {
+    activeTicketPanelId = ticketPanelsCache[0].id;
+    sel.value = String(activeTicketPanelId);
+  }
+}
+
+function loadPanelIntoForm(panel) {
+  $("ticket-label").value = panel?.label || "";
+  $("ticket-panel-channel").value = panel?.channel_id || "";
+  $("ticket-category").value = panel?.ticket_category_id || "";
+  $("ticket-log-channel").value = panel?.log_channel_id || "";
+  $("ticket-transcript-channel").value = panel?.settings?.transcript_channel_id || "";
+  $("ticket-max-open").value = String(panel?.max_open_per_user ?? 1);
+  $("ticket-ui-mode").value = panel?.ui_mode || "buttons";
+  $("ticket-content").value = panel?.content || "";
+
+  const embed = panel?.embed;
+  $("ticket-embed-title").value = embed?.title || "";
+  $("ticket-embed-desc").value = embed?.description || "";
+  $("ticket-embed-color").value = embedColorToHex(embed?.color);
+
+  const s = panel?.settings || {};
+  $("ticket-modal-enabled").checked = !!s.modal_enabled;
+  $("ticket-claim-enabled").checked = s.claim_enabled !== false;
+  $("ticket-delete-channel").checked = s.delete_channel_on_close !== false;
+  $("ticket-delete-delay").value = String(s.delete_delay_seconds ?? 5);
+  $("ticket-transcript-enabled").checked = !!s.transcript_enabled;
+  $("ticket-close-allowed").value = s.close_allowed || "both";
+  $("ticket-use-default-name").checked = s.use_default_channel_name !== false;
+  $("ticket-channel-template").value =
+    s.channel_name_template || "ticket-{number}-{user}";
+  $("ticket-claim-label").value = s.claim_button_label || "Prendre en charge";
+  $("ticket-close-label").value = s.close_button_label || "Fermer";
+
+  const supportSel = $("ticket-support-roles");
+  if (supportSel) {
+    const ids = new Set(panel?.support_role_ids || []);
+    [...supportSel.options].forEach((o) => {
+      o.selected = ids.has(o.value);
+    });
+  }
+
+  const root = $("ticket-categories-root");
+  if (root) {
+    root.innerHTML = "";
+    const cats = panel?.categories?.length ? panel.categories : null;
+    if (cats) {
+      for (const c of cats) addTicketCategoryRow(c);
+    } else {
+      resetTicketCategoryRows(true);
+    }
+  }
+  fillTicketSupportRolesSelect();
+  updateTicketPanelStatus();
+  updateTicketHubSummary();
+}
+
+function newTicketPanelDraft() {
+  activeTicketPanelId = null;
+  const sel = $("ticket-panel-select");
+  if (sel) sel.value = "";
+  loadPanelIntoForm(null);
+  updateTicketPanelStatus();
+  updateTicketHubSummary();
+}
+
+function selectTicketPanelById(id) {
+  if (id == null || id === "") {
+    newTicketPanelDraft();
+    return;
+  }
+  const num = Number(id);
+  const panel = ticketPanelsCache.find((p) => p.id === num);
+  if (!panel) return;
+  activeTicketPanelId = num;
+  loadPanelIntoForm(panel);
+}
+
+function resetTicketCategoryRows(singleOnly = false) {
   const root = $("ticket-categories-root");
   if (!root) return;
   root.innerHTML = "";
+  if (singleOnly) {
+    addTicketCategoryRow({
+      label: "Contact",
+      emoji: "📖",
+      description: "Demande générale",
+      button_style: "primary",
+    });
+    return;
+  }
   addTicketCategoryRow({
-    label: "Support",
-    emoji: "🎫",
-    description: "Aide générale",
-    button_style: "primary",
-  });
-  addTicketCategoryRow({
-    label: "Modération",
-    emoji: "🤠",
-    description: "Signalement",
+    label: "Contact Modération",
+    emoji: "📖",
+    description: "Contacter la modération",
     button_style: "danger",
-    emoji_only: true,
   });
+  addTicketCategoryRow({
+    label: "Candidater Modérateur",
+    emoji: "🙋",
+    description: "Candidature staff",
+    button_style: "success",
+  });
+  addTicketCategoryRow({
+    label: "Partenariat",
+    emoji: "📄",
+    description: "Proposition partenariat",
+    button_style: "success",
+  });
+  addTicketCategoryRow({
+    label: "Plainte Modo",
+    emoji: "👮",
+    description: "Signaler un modérateur",
+    button_style: "danger",
+  });
+}
+
+function collectTicketPanelBody() {
+  const channelId = $("ticket-panel-channel")?.value;
+  const ticketCategoryId = $("ticket-category")?.value;
+  const categories = collectTicketCategoriesFromForm();
+  const supportSel = $("ticket-support-roles");
+  const support_role_ids = supportSel
+    ? [...supportSel.selectedOptions].map((o) => o.value)
+    : [];
+  const embedTitle = $("ticket-embed-title")?.value?.trim();
+  const embedDesc = $("ticket-embed-desc")?.value?.trim();
+  const embedColor = $("ticket-embed-color")?.value?.trim();
+  const embed =
+    embedTitle || embedDesc || embedColor
+      ? {
+          title: embedTitle || "",
+          description: embedDesc || "",
+          color: parseEmbedColorInput(embedColor),
+        }
+      : null;
+  return {
+    label: $("ticket-label")?.value || "",
+    channel_id: channelId,
+    ticket_category_id: ticketCategoryId,
+    log_channel_id: $("ticket-log-channel")?.value || null,
+    support_role_ids,
+    max_open_per_user: Number($("ticket-max-open")?.value) || 1,
+    content: $("ticket-content")?.value || "",
+    embed,
+    categories,
+    settings: collectTicketPanelSettings(),
+    ui_mode: $("ticket-ui-mode")?.value || "buttons",
+  };
+}
+
+function validateTicketPanelBody(body) {
+  if (!body.channel_id) {
+    alert("Choisis le salon du panneau (section Message panneau).");
+    showTicketSection("panel");
+    return false;
+  }
+  if (!body.ticket_category_id) {
+    alert("Choisis la catégorie Discord (section Boutons).");
+    showTicketSection("buttons");
+    return false;
+  }
+  if (!body.categories?.length) {
+    alert("Ajoute au moins un type de ticket (section Boutons).");
+    showTicketSection("buttons");
+    return false;
+  }
+  return true;
+}
+
+async function loadTicketPanelsList() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  try {
+    const res = await fetch(
+      apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels`),
+      fetchOptsGet()
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    ticketPanelsCache = data.panels || [];
+    populateTicketPanelSelect();
+    if (activeTicketPanelId != null) {
+      const p = ticketPanelsCache.find((x) => x.id === activeTicketPanelId);
+      if (p) loadPanelIntoForm(p);
+      else if (ticketPanelsCache.length) {
+        activeTicketPanelId = ticketPanelsCache[0].id;
+        loadPanelIntoForm(ticketPanelsCache[0]);
+      } else {
+        newTicketPanelDraft();
+      }
+    }
+    updateTicketPanelStatus();
+    updateTicketHubSummary();
+  } catch {
+    /* non bloquant */
+  }
+}
+
+async function saveTicketPanel() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  const body = collectTicketPanelBody();
+  if (!validateTicketPanelBody(body)) return;
+  const btn = $("btn-ticket-save");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Enregistrement…";
+  }
+  try {
+    const url = activeTicketPanelId
+      ? apiUrl(
+          `/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels/${activeTicketPanelId}`
+        )
+      : apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels`);
+    const res = await fetch(url, {
+      method: activeTicketPanelId ? "PUT" : "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error || "Échec de l'enregistrement.");
+      return;
+    }
+    const panel = await res.json();
+    activeTicketPanelId = panel.id;
+    await loadTicketPanelsList();
+    loadPanelIntoForm(panel);
+    const status = $("ticket-panel-status");
+    if (status) status.textContent = "✓ Enregistré.";
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Enregistrer";
+    }
+  }
+}
+
+async function sendTicketPanelToDiscord() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  const body = collectTicketPanelBody();
+  if (!validateTicketPanelBody(body)) return;
+  if (!activeTicketPanelId) {
+    await saveTicketPanel();
+    if (!activeTicketPanelId) return;
+  }
+  const btn = $("btn-ticket-send");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Envoi…";
+  }
+  try {
+    const res = await fetch(
+      apiUrl(
+        `/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels/${activeTicketPanelId}/send`
+      ),
+      {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify(body),
+      }
+    );
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error || "Échec de l'envoi Discord.");
+      return;
+    }
+    const panel = await res.json();
+    await loadTicketPanelsList();
+    loadPanelIntoForm(panel);
+    alert("Panneau envoyé / mis à jour sur Discord.");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Envoyer / MAJ Discord";
+    }
+  }
+}
+
+async function cloneActiveTicketPanel() {
+  if (!activeTicketPanelId || !selectedGuildId) {
+    alert("Sélectionne un panneau à cloner.");
+    return;
+  }
+  const res = await fetch(
+    apiUrl(
+      `/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels/${activeTicketPanelId}/clone`
+    ),
+    { method: "POST", credentials: "include" }
+  );
+  if (!res.ok) {
+    alert("Impossible de cloner.");
+    return;
+  }
+  const panel = await res.json();
+  activeTicketPanelId = panel.id;
+  await loadTicketPanelsList();
+  loadPanelIntoForm(panel);
+}
+
+async function deleteActiveTicketPanel() {
+  if (!activeTicketPanelId || !selectedGuildId) {
+    alert("Aucun panneau sélectionné.");
+    return;
+  }
+  const delMsg = confirm(
+    "Supprimer aussi le message Discord ?\n\nOK = supprimer le message\nAnnuler = garder le message"
+  );
+  if (!confirm("Confirmer la suppression de ce panneau ?")) return;
+  const q = delMsg ? "?delete_message=1" : "";
+  await fetch(
+    apiUrl(
+      `/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels/${activeTicketPanelId}${q}`
+    ),
+    { method: "DELETE", credentials: "include" }
+  );
+  activeTicketPanelId = null;
+  await loadTicketPanelsList();
+  newTicketPanelDraft();
 }
 
 function addTicketCategoryRow(data = {}) {
@@ -2072,108 +2468,6 @@ function fillTicketSupportRolesSelect() {
   });
 }
 
-async function loadTicketingView() {
-  await Promise.all([
-    loadTicketPanelsList(),
-    loadTicketsList(),
-  ]);
-}
-
-async function loadTicketPanelsList() {
-  const list = $("ticket-panels-list");
-  if (!list || !selectedGuildId || !currentGuildHasBot()) return;
-  fillTicketChannelSelects();
-  fillTicketSupportRolesSelect();
-  const root = $("ticket-categories-root");
-  if (root && !root.children.length) resetTicketCategoryRows();
-  list.textContent = "Chargement…";
-  try {
-    const res = await fetch(
-      apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels`),
-      fetchOptsGet()
-    );
-    if (!res.ok) {
-      list.textContent = "Impossible de charger les panneaux.";
-      return;
-    }
-    const data = await res.json();
-    renderTicketPanelsList(data.panels || []);
-  } catch {
-    list.textContent = "Erreur réseau.";
-  }
-}
-
-function renderTicketPanelsList(panels) {
-  const list = $("ticket-panels-list");
-  if (!list) return;
-  if (!panels.length) {
-    list.textContent = "Aucun panneau publié.";
-    return;
-  }
-  list.innerHTML = "";
-  for (const p of panels) {
-    const ch = lastGuildChannelsList.find((c) => c.id === p.channel_id);
-    const chName = ch ? `#${ch.name}` : p.channel_id;
-    const cat = lastGuildCategoriesList.find((c) => c.id === p.ticket_category_id);
-    const catName = cat ? cat.name : p.ticket_category_id;
-    const link =
-      p.message_id && selectedGuildId
-        ? `https://discord.com/channels/${selectedGuildId}/${p.channel_id}/${p.message_id}`
-        : null;
-    const div = document.createElement("div");
-    div.className = "warn-row";
-    div.style.cssText =
-      "border:1px solid var(--border, #333);border-radius:8px;padding:0.65rem 0.75rem;margin-bottom:0.5rem;";
-    div.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;align-items:center">
-        <strong>${escapeHtml(p.label || `Panneau #${p.id}`)}</strong>
-        <span class="muted tiny">${p.enabled ? "Actif" : "Pause"} · ${p.categories.length} type(s) · ${p.settings?.transcript_enabled ? "transcript" : "sans transcript"} · max ${p.max_open_per_user}/user</span>
-      </div>
-      <div class="muted tiny" style="margin-top:0.35rem">Panel ${escapeHtml(chName)} · Tickets → ${escapeHtml(catName)}${link ? ` · <a href="${escapeAttr(link)}" target="_blank" rel="noopener noreferrer">Voir le message</a>` : ""}</div>
-      <div style="margin-top:0.45rem;display:flex;gap:0.35rem;flex-wrap:wrap">
-        <button type="button" class="btn link tiny btn-ticket-toggle" data-id="${p.id}" data-on="${p.enabled ? "1" : "0"}">${p.enabled ? "Pause" : "Activer"}</button>
-        <button type="button" class="btn link tiny btn-ticket-del" data-id="${p.id}">Supprimer</button>
-      </div>
-    `;
-    list.appendChild(div);
-  }
-  list.querySelectorAll(".btn-ticket-toggle").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = Number(btn.dataset.id);
-      const enabled = btn.dataset.on !== "1";
-      await fetch(
-        apiUrl(
-          `/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels/${id}`
-        ),
-        {
-          method: "PUT",
-          headers: authHeaders(),
-          credentials: "include",
-          body: JSON.stringify({ enabled }),
-        }
-      );
-      loadTicketPanelsList();
-    });
-  });
-  list.querySelectorAll(".btn-ticket-del").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = Number(btn.dataset.id);
-      const delMsg = confirm(
-        "Supprimer aussi le message Discord ?\n\nOK = supprimer le message\nAnnuler = garder le message"
-      );
-      const q = delMsg ? "?delete_message=1" : "";
-      if (!confirm(`Confirmer la suppression du panneau #${id} ?`)) return;
-      await fetch(
-        apiUrl(
-          `/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels/${id}${q}`
-        ),
-        { method: "DELETE", credentials: "include" }
-      );
-      loadTicketPanelsList();
-    });
-  });
-}
-
 async function loadTicketsList() {
   const list = $("ticket-open-list");
   if (!list || !selectedGuildId || !currentGuildHasBot()) return;
@@ -2215,82 +2509,6 @@ function renderTicketsList(tickets) {
       <span><a href="https://discord.com/channels/${escapeAttr(selectedGuildId)}/${escapeAttr(t.channel_id)}" target="_blank" rel="noopener noreferrer">Ouvrir le salon</a></span>
     `;
     list.appendChild(div);
-  }
-}
-
-async function publishTicketPanel() {
-  if (!selectedGuildId || !currentGuildHasBot()) return;
-  const channelId = $("ticket-panel-channel")?.value;
-  const ticketCategoryId = $("ticket-category")?.value;
-  if (!channelId) {
-    alert("Choisis le salon du panneau.");
-    return;
-  }
-  if (!ticketCategoryId) {
-    alert("Choisis la catégorie où créer les tickets.");
-    return;
-  }
-  const categories = collectTicketCategoriesFromForm();
-  if (!categories.length) {
-    alert("Ajoute au moins une catégorie.");
-    return;
-  }
-  const supportSel = $("ticket-support-roles");
-  const support_role_ids = supportSel
-    ? [...supportSel.selectedOptions].map((o) => o.value)
-    : [];
-  const embedTitle = $("ticket-embed-title")?.value?.trim();
-  const embedDesc = $("ticket-embed-desc")?.value?.trim();
-  const embed =
-    embedTitle || embedDesc
-      ? {
-          title: embedTitle || "",
-          description: embedDesc || "",
-          color: parseEmbedColorInput($("ticket-embed-color")?.value),
-        }
-      : null;
-  const body = {
-    label: $("ticket-label")?.value || "",
-    channel_id: channelId,
-    ticket_category_id: ticketCategoryId,
-    log_channel_id: $("ticket-log-channel")?.value || null,
-    support_role_ids,
-    max_open_per_user: Number($("ticket-max-open")?.value) || 1,
-    content: $("ticket-content")?.value || "",
-    embed,
-    categories,
-    settings: collectTicketPanelSettings(),
-    ui_mode: $("ticket-ui-mode")?.value || "buttons",
-  };
-  const btn = $("btn-ticket-publish");
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Publication…";
-  }
-  try {
-    const res = await fetch(
-      apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/ticket-panels`),
-      {
-        method: "POST",
-        headers: authHeaders(),
-        credentials: "include",
-        body: JSON.stringify(body),
-      }
-    );
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      alert(j.error || "Échec de la publication.");
-      return;
-    }
-    $("ticket-label").value = "";
-    $("ticket-content").value = "";
-    resetTicketCategoryRows();
-    loadTicketPanelsList();
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Publier le panneau tickets";
-    }
   }
 }
 
@@ -4558,9 +4776,29 @@ document.querySelectorAll(".fonda-tab").forEach((b) => {
   b.addEventListener("click", () => switchFondaTab(b.dataset.fondaTab));
 });
 $("btn-rr-add-entry")?.addEventListener("click", () => addRrEntryRow());
-$("btn-ticket-publish")?.addEventListener("click", () => publishTicketPanel());
+$("btn-ticket-save")?.addEventListener("click", () => saveTicketPanel());
+$("btn-ticket-send")?.addEventListener("click", () => sendTicketPanelToDiscord());
+$("btn-ticket-new")?.addEventListener("click", () => newTicketPanelDraft());
+$("btn-ticket-clone")?.addEventListener("click", () => cloneActiveTicketPanel());
+$("btn-ticket-delete-panel")?.addEventListener("click", () => deleteActiveTicketPanel());
 $("btn-ticket-add-cat")?.addEventListener("click", () => addTicketCategoryRow());
+$("btn-ticket-hub-template")?.addEventListener("click", () => resetTicketCategoryRows(false));
 $("btn-ticket-refresh")?.addEventListener("click", () => loadTicketingView());
+$("ticket-panel-select")?.addEventListener("change", (e) => {
+  selectTicketPanelById(e.target.value);
+});
+document.querySelectorAll(".ticket-subnav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => showTicketSection(btn.dataset.ticketSection));
+});
+document.querySelectorAll("[data-go-ticket-section]").forEach((btn) => {
+  btn.addEventListener("click", () => showTicketSection(btn.dataset.goTicketSection));
+});
+document.querySelectorAll(".ticket-color-pick").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const inp = $("ticket-embed-color");
+    if (inp && btn.dataset.color) inp.value = btn.dataset.color;
+  });
+});
 
 $("btn-rr-publish")?.addEventListener("click", () => publishReactionRolePanel());
 $("btn-rr-refresh")?.addEventListener("click", () => loadReactionRolesList());
