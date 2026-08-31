@@ -77,6 +77,7 @@ const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji
 const {
   parseCategories,
   parseSupportRoleIds,
+  parsePanelSettings,
   buildPanelComponents,
   defaultPanelContent,
 } = require("../lib/ticketConfig");
@@ -1965,12 +1966,17 @@ app.post(
       }
       const categories = normalizeTicketCategoriesInput(req.body?.categories);
       const support_role_ids = parseSupportRoleIds(req.body?.support_role_ids);
+      const settings = parsePanelSettings(req.body?.settings || {});
       const content =
         String(req.body?.content || "").trim() || defaultPanelContent();
       const embed =
         req.body?.embed && typeof req.body.embed === "object"
           ? req.body.embed
           : null;
+      const uiMode =
+        req.body?.ui_mode === "select" || categories.length > 25
+          ? "select"
+          : "buttons";
 
       let panel = insertTicketPanel(guildId, {
         channel_id: channelId,
@@ -1978,13 +1984,11 @@ app.post(
         log_channel_id: normalizeSnowflakeId(req.body?.log_channel_id) || null,
         support_role_ids,
         categories,
+        settings,
         label: req.body?.label || "",
         content,
         embed,
-        ui_mode:
-          req.body?.ui_mode === "select" || categories.length > 5
-            ? "select"
-            : "buttons",
+        ui_mode: uiMode,
         max_open_per_user: Number(req.body?.max_open_per_user) || 1,
         enabled: true,
       });
@@ -2016,6 +2020,8 @@ app.put(
       const patch = {};
       if (req.body?.label != null) patch.label = req.body.label;
       if (req.body?.enabled != null) patch.enabled = !!req.body.enabled;
+      if (req.body?.settings != null) patch.settings = req.body.settings;
+      if (req.body?.categories != null) patch.categories = req.body.categories;
       const row = updateTicketPanel(id, guildId, patch);
       res.json(row);
     } catch (e) {

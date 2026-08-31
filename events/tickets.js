@@ -6,6 +6,9 @@ const {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } = require("discord.js");
 const {
   getTicketPanel,
@@ -20,28 +23,40 @@ const {
   closeCustomId,
   claimCustomId,
   defaultWelcomeContent,
+  buildOpenModal,
+  buildFormDataEmbed,
+  isModalEnabled,
+  resolveCategorySetting,
+  resolveCategoryRoles,
+  resolveTicketCategoryId,
+  applyChannelNameTemplate,
 } = require("../lib/ticketConfig");
+const { sendTicketTranscript } = require("../lib/ticketTranscript");
 
 function findCategory(panel, key) {
   return (panel.categories || []).find((c) => c.key === key) || null;
 }
 
-function isSupport(member, panel) {
+function isStaff(member, panel, category, kind = "support") {
   if (!member) return false;
   if (member.permissions.has(PermissionFlagsBits.ManageGuild)) return true;
   if (member.permissions.has(PermissionFlagsBits.ManageChannels)) return true;
-  for (const roleId of panel.support_role_ids || []) {
+  const roles = resolveCategoryRoles(category, panel);
+  const list =
+    kind === "claim" ? roles.claim_role_ids : roles.support_role_ids;
+  for (const roleId of list) {
     if (member.roles.cache.has(roleId)) return true;
   }
   return false;
 }
 
-function sanitizeChannelName(username, ticketNumber) {
-  const base = String(username || "user")
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "")
-    .slice(0, 18);
-  return `ticket-${ticketNumber}-${base || "user"}`.slice(0, 100);
+function canClose(member, ticket, panel, category) {
+  const rule = resolveCategorySetting(category, panel, "close_allowed");
+  const isOpener = member.id === ticket.opener_user_id;
+  const staff = isStaff(member, panel, category, "support");
+  if (rule === "opener") return isOpener;
+  if (rule === "staff") return staff;
+  return isOpener || staff;
 }
 
 async function sendLog(guild, panel, embed) {
@@ -53,9 +68,33 @@ async function sendLog(guild, panel, embed) {
   await ch.send({ embeds: [embed] }).catch(() => null);
 }
 
-async function openTicket(interaction, panel, categoryKey) {
-  const guild = interaction.guild;
-  const member = interaction.member;
+function buildControlButtons(panel, category, ticketId) {
+  const settings = panel.settings || {};
+  const claimEnabled = resolveCategorySetting(category, panel, "claim_enabled");
+  const buttons = [];
+  if (settings.show_claim_button !== false && claimEnabled) {
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(claimCustomId(ticketId))
+        .setLabel(settings.claim_button_label || "Prendre en charge")
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji("🙋")
+    );
+  }
+  if (settings.show_close_button !== false) {
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(closeCustomId(ticketId))
+        .setLabel(settings.close_button_label || "Fermer")
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji("🔒")
+    );
+  }
+  if (!buttons.length) return [];
+  return [new ActionRowBuilder().addComponents(...buttons)];
+}
+
+async function beginOpenTicket(interaction, panel, categoryKey) {
   const category = findCategory(panel, categoryKey);
   if (!category) {
     return interaction.reply({
@@ -64,7 +103,8 @@ async function openTicket(interaction, panel, categoryKey) {
     });
   }
 
-  const openCount = countOpenTicketsForUser(guild.id, member.id);
+  const member = interaction.member;
+  const openCount = countOpenTicketsForUser(interaction.guild.id, member.id);
   if (openCount >= panel.max_open_per_user) {
     return interaction.reply({
       content: `Tu as déjà **${openCount}** ticket(s) ouvert(s) (max ${panel.max_open_per_user}). Ferme-en un avant d'en rouvrir.`,
@@ -72,11 +112,43 @@ async function openTicket(interaction, panel, categoryKey) {
     });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  if (isModalEnabled(category, panel)) {
+    const modalData = buildOpenModal(panel, category);
+    const modal = new ModalBuilder()
+      .setCustomId(modalData.custom_id)
+      .setTitle(modalData.title);
+    for (const row of modalData.components) {
+      const input = row.components[0];
+      const textInput = new TextInputBuilder()
+        .setCustomId(input.custom_id)
+        .setLabel(input.label)
+        .setStyle(
+          input.style === 2 ? TextInputStyle.Paragraph : TextInputStyle.Short
+        )
+        .setRequired(input.required !== false);
+      if (input.placeholder) textInput.setPlaceholder(input.placeholder);
+      if (input.min_length) textInput.setMinLength(input.min_length);
+      if (input.max_length) textInput.setMaxLength(input.max_length);
+      modal.addComponents(new ActionRowBuilder().addComponents(textInput));
+    }
+    return interaction.showModal(modal);
+  }
 
+  return createTicket(interaction, panel, category, null);
+}
+
+async function createTicket(interaction, panel, category, formData) {
+  const guild = interaction.guild;
+  const member = interaction.member;
+
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferReply({ ephemeral: true });
+  }
+
+  const parentId = resolveTicketCategoryId(category, panel);
   const parent =
-    guild.channels.cache.get(panel.ticket_category_id) ||
-    (await guild.channels.fetch(panel.ticket_category_id).catch(() => null));
+    guild.channels.cache.get(parentId) ||
+    (await guild.channels.fetch(parentId).catch(() => null));
   if (!parent || parent.type !== ChannelType.GuildCategory) {
     return interaction.editReply({
       content:
@@ -101,8 +173,10 @@ async function openTicket(interaction, panel, categoryKey) {
     channel_id: "pending",
     opener_user_id: member.id,
     opener_tag: member.user.tag,
+    form_data: formData,
   });
 
+  const { support_role_ids } = resolveCategoryRoles(category, panel);
   const overwrites = [
     {
       id: guild.roles.everyone.id,
@@ -130,7 +204,7 @@ async function openTicket(interaction, panel, categoryKey) {
       ],
     },
   ];
-  for (const roleId of panel.support_role_ids || []) {
+  for (const roleId of support_role_ids) {
     overwrites.push({
       id: roleId,
       allow: [
@@ -143,10 +217,34 @@ async function openTicket(interaction, panel, categoryKey) {
     });
   }
 
+  const useDefaultName = resolveCategorySetting(
+    category,
+    panel,
+    "use_default_channel_name"
+  );
+  const template = resolveCategorySetting(
+    category,
+    panel,
+    "channel_name_template"
+  );
+  const channelName = useDefaultName
+    ? applyChannelNameTemplate(template, {
+        ticketNumber: ticketRow.ticket_number,
+        username: member.user.username,
+        categoryKey: category.key,
+        categoryLabel: category.label,
+      })
+    : applyChannelNameTemplate("ticket-{number}", {
+        ticketNumber: ticketRow.ticket_number,
+        username: member.user.username,
+        categoryKey: category.key,
+        categoryLabel: category.label,
+      });
+
   let channel;
   try {
     channel = await guild.channels.create({
-      name: sanitizeChannelName(member.user.username, ticketRow.ticket_number),
+      name: channelName,
       type: ChannelType.GuildText,
       parent: parent.id,
       topic: `Ticket #${ticketRow.ticket_number} · ${category.label} · ${member.user.tag}`,
@@ -166,36 +264,40 @@ async function openTicket(interaction, panel, categoryKey) {
 
   updateTicket(ticketRow.id, guild.id, { channel_id: channel.id });
 
-  const welcome = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle(`${category.emoji || "🎫"} ${category.label}`)
-    .setDescription(
-      defaultWelcomeContent({
-        opener: member.toString(),
-        categoryLabel: category.label,
-        ticketNumber: ticketRow.ticket_number,
-      })
-    )
-    .setFooter({ text: `Ticket #${ticketRow.ticket_number}` })
-    .setTimestamp();
+  const welcomeColor =
+    category.welcome_embed_color ??
+    panel.settings?.welcome_embed_color ??
+    0x5865f2;
+  const welcomeTitle =
+    category.welcome_title || `${category.emoji || "🎫"} ${category.label}`;
+  const welcomeDesc =
+    category.welcome_description ||
+    defaultWelcomeContent({
+      opener: member.toString(),
+      categoryLabel: category.label,
+      ticketNumber: ticketRow.ticket_number,
+    });
 
-  const controls = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(claimCustomId(ticketRow.id))
-      .setLabel("Prendre en charge")
-      .setStyle(ButtonStyle.Primary)
-      .setEmoji("🙋"),
-    new ButtonBuilder()
-      .setCustomId(closeCustomId(ticketRow.id))
-      .setLabel("Fermer")
-      .setStyle(ButtonStyle.Danger)
-      .setEmoji("🔒")
-  );
+  const embeds = [
+    new EmbedBuilder()
+      .setColor(welcomeColor)
+      .setTitle(welcomeTitle)
+      .setDescription(welcomeDesc)
+      .setFooter({ text: `Ticket #${ticketRow.ticket_number}` })
+      .setTimestamp(),
+  ];
+
+  if (formData && Object.keys(formData).length) {
+    const formEmbed = buildFormDataEmbed(formData, category);
+    if (formEmbed) embeds.push(new EmbedBuilder(formEmbed));
+  }
+
+  const components = buildControlButtons(panel, category, ticketRow.id);
 
   await channel.send({
     content: `${member}`,
-    embeds: [welcome],
-    components: [controls],
+    embeds,
+    components,
   });
 
   await sendLog(
@@ -218,6 +320,43 @@ async function openTicket(interaction, panel, categoryKey) {
   });
 }
 
+async function handleModalSubmit(interaction) {
+  const parsed = parseTicketCustomId(interaction.customId);
+  if (parsed?.action !== "modal") return false;
+
+  const panel = getTicketPanel(parsed.panelId, interaction.guild.id);
+  if (!panel || !panel.enabled) {
+    await interaction.reply({
+      content: "Ce panneau tickets n'est plus actif.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const category = findCategory(panel, parsed.categoryKey);
+  if (!category) {
+    await interaction.reply({
+      content: "Catégorie introuvable.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const fields =
+    category.modal_fields?.length > 0
+      ? category.modal_fields
+      : [{ id: "reason", label: "Décris ta demande" }];
+
+  const formData = {};
+  for (const f of fields) {
+    const val = interaction.fields.getTextInputValue(f.id).trim();
+    formData[f.label || f.id] = val;
+  }
+
+  await createTicket(interaction, panel, category, formData);
+  return true;
+}
+
 async function closeTicket(interaction, ticketId) {
   const guild = interaction.guild;
   const ticket = getTicket(ticketId, guild.id);
@@ -229,13 +368,12 @@ async function closeTicket(interaction, ticketId) {
   }
 
   const panel = getTicketPanel(ticket.panel_id, guild.id);
+  const category = panel ? findCategory(panel, ticket.category_key) : null;
   const member = interaction.member;
-  const isOpener = member.id === ticket.opener_user_id;
-  const staff = panel ? isSupport(member, panel) : member.permissions.has(PermissionFlagsBits.ManageChannels);
 
-  if (!isOpener && !staff) {
+  if (!canClose(member, ticket, panel, category)) {
     return interaction.reply({
-      content: "Seul l'auteur du ticket ou le staff peut le fermer.",
+      content: "Tu n'as pas la permission de fermer ce ticket.",
       ephemeral: true,
     });
   }
@@ -248,9 +386,29 @@ async function closeTicket(interaction, ticketId) {
     close_reason: "Fermé via bouton",
   });
 
+  const closedTicket = getTicket(ticket.id, guild.id);
   const channel =
     guild.channels.cache.get(ticket.channel_id) ||
     (await guild.channels.fetch(ticket.channel_id).catch(() => null));
+
+  const transcriptEnabled = resolveCategorySetting(
+    category,
+    panel,
+    "transcript_enabled"
+  );
+  if (panel && transcriptEnabled && channel) {
+    const transcriptChannelId =
+      panel.settings?.transcript_channel_id ||
+      panel.log_channel_id ||
+      null;
+    await sendTicketTranscript({
+      guild,
+      channel,
+      ticket: closedTicket,
+      targetChannelId: transcriptChannelId,
+      closedByTag: member.user.tag,
+    });
+  }
 
   if (panel) {
     await sendLog(
@@ -272,21 +430,49 @@ async function closeTicket(interaction, ticketId) {
     );
   }
 
+  const deleteChannel = resolveCategorySetting(
+    category,
+    panel,
+    "delete_channel_on_close"
+  );
+  const deleteDelay = panel?.settings?.delete_delay_seconds ?? 5;
+
   if (channel) {
-    await channel
-      .send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xef4444)
-            .setDescription(
-              `Ticket fermé par ${member}.\nCe salon sera supprimé dans quelques secondes…`
-            ),
-        ],
-      })
-      .catch(() => null);
-    setTimeout(() => {
-      channel.delete("Ticket fermé").catch(() => null);
-    }, 5000);
+    if (deleteChannel) {
+      await channel
+        .send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xef4444)
+              .setDescription(
+                `Ticket fermé par ${member}.\nCe salon sera supprimé${deleteDelay > 0 ? ` dans ${deleteDelay}s` : ""}…`
+              ),
+          ],
+        })
+        .catch(() => null);
+      if (deleteDelay > 0) {
+        setTimeout(() => {
+          channel.delete("Ticket fermé").catch(() => null);
+        }, deleteDelay * 1000);
+      } else {
+        await channel.delete("Ticket fermé").catch(() => null);
+      }
+    } else {
+      await channel.permissionOverwrites
+        .edit(ticket.opener_user_id, { SendMessages: false })
+        .catch(() => null);
+      await channel
+        .send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xef4444)
+              .setDescription(
+                `Ticket fermé par ${member}.\nLe salon est conservé en lecture seule.`
+              ),
+          ],
+        })
+        .catch(() => null);
+    }
   }
 
   return interaction.editReply({ content: "Ticket fermé." });
@@ -303,9 +489,18 @@ async function claimTicket(interaction, ticketId) {
   }
 
   const panel = getTicketPanel(ticket.panel_id, guild.id);
-  if (!panel || !isSupport(interaction.member, panel)) {
+  const category = panel ? findCategory(panel, ticket.category_key) : null;
+  const claimEnabled = resolveCategorySetting(category, panel, "claim_enabled");
+  if (!claimEnabled) {
     return interaction.reply({
-      content: "Réservé aux rôles support configurés sur le panneau.",
+      content: "La prise en charge est désactivée sur ce type de ticket.",
+      ephemeral: true,
+    });
+  }
+
+  if (!panel || !isStaff(interaction.member, panel, category, "claim")) {
+    return interaction.reply({
+      content: "Réservé aux rôles autorisés sur ce panneau.",
       ephemeral: true,
     });
   }
@@ -335,6 +530,10 @@ async function claimTicket(interaction, ticketId) {
 }
 
 async function handleInteraction(interaction) {
+  if (interaction.isModalSubmit()) {
+    return handleModalSubmit(interaction);
+  }
+
   if (interaction.isStringSelectMenu()) {
     const parsed = parseTicketCustomId(interaction.customId);
     if (parsed?.action === "select") {
@@ -347,7 +546,7 @@ async function handleInteraction(interaction) {
       }
       const key = interaction.values?.[0];
       if (!key) return;
-      return openTicket(interaction, panel, key);
+      return beginOpenTicket(interaction, panel, key);
     }
   }
 
@@ -363,7 +562,7 @@ async function handleInteraction(interaction) {
         ephemeral: true,
       });
     }
-    return openTicket(interaction, panel, parsed.categoryKey);
+    return beginOpenTicket(interaction, panel, parsed.categoryKey);
   }
 
   if (parsed.action === "close") {
@@ -378,8 +577,15 @@ async function handleInteraction(interaction) {
 module.exports = function loadTickets(client) {
   client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.guild) return;
-    if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
-    if (!String(interaction.customId || "").startsWith("wingbot:ticket:")) return;
+    const cid = String(interaction.customId || "");
+    if (!cid.startsWith("wingbot:ticket:")) return;
+    if (
+      !interaction.isButton() &&
+      !interaction.isStringSelectMenu() &&
+      !interaction.isModalSubmit()
+    ) {
+      return;
+    }
     try {
       await handleInteraction(interaction);
     } catch (e) {

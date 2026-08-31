@@ -150,6 +150,22 @@
             </div>
           </div>
 
+          <!-- Tickets -->
+          <div class="nav-section" data-nav-section="tickets">
+            <button type="button" class="nav-section-head" aria-expanded="true">
+              <span>Tickets</span>
+              <svg class="nav-section-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="nav-section-body">
+              <a href="#ticketing" class="nav-link" data-view="ticketing">
+                <span class="nav-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M2 9a3 3 0 013-3h14a3 3 0 013 3v2a3 3 0 01-3 3H5a3 3 0 01-3-3V9z"/><path d="M2 15a3 3 0 013-3h14a3 3 0 013 3v2a3 3 0 01-3 3H5a3 3 0 01-3-3v-2z"/></svg>
+                </span>
+                <span class="nav-label">Panneaux &amp; config</span>
+              </a>
+            </div>
+          </div>
+
           <!-- Commandes -->
           <div class="nav-section" data-nav-section="commands">
             <button type="button" class="nav-section-head" aria-expanded="true">
@@ -199,12 +215,6 @@
                 </span>
                 <span class="nav-label">Giveaways</span>
                 <span class="nav-badge soon">Bientôt</span>
-              </a>
-              <a href="#ticketing" class="nav-link" data-view="ticketing">
-                <span class="nav-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M2 9a3 3 0 013-3h14a3 3 0 013 3v2a3 3 0 01-3 3H5a3 3 0 01-3-3V9z"/><path d="M2 15a3 3 0 013-3h14a3 3 0 013 3v2a3 3 0 01-3 3H5a3 3 0 01-3-3v-2z"/></svg>
-                </span>
-                <span class="nav-label">Tickets</span>
               </a>
               <a href="#tempvoice" class="nav-link" data-view="tempvoice">
                 <span class="nav-ico" aria-hidden="true">
@@ -616,6 +626,13 @@
                   <span class="ov-quick-label">Réseaux sociaux</span>
                   <span class="ov-quick-sub muted tiny">YouTube · Twitch live · clips</span>
                 </button>
+                <button type="button" class="ov-quick-btn" data-go="ticketing">
+                  <span class="ov-quick-ico">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 9a3 3 0 013-3h14a3 3 0 013 3v2a3 3 0 01-3 3H5a3 3 0 01-3-3V9z"/><path d="M2 15a3 3 0 013-3h14a3 3 0 013 3v2a3 3 0 01-3 3H5a3 3 0 01-3-3v-2z"/></svg>
+                  </span>
+                  <span class="ov-quick-label">Tickets</span>
+                  <span class="ov-quick-sub muted tiny">Panneaux · modals · transcripts</span>
+                </button>
                 <button type="button" class="ov-quick-btn" data-go="reactionroles">
                   <span class="ov-quick-ico">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
@@ -766,43 +783,50 @@
             <div class="view-head">
               <h2>Tickets</h2>
               <p class="muted tiny">
-                Publie un panneau avec boutons ou menu : chaque clic crée un salon privé pour le membre et ton équipe support.
+                Un seul message peut contenir jusqu'à <strong>25 boutons</strong> (plusieurs types : support, modération, etc.).
+                Chaque catégorie a ses propres emoji, rôles, modal, nom de salon et permissions.
               </p>
             </div>
             <div class="panel-block" id="ticket-form-panel">
               <h3>Nouveau panneau tickets</h3>
               <label class="field-row">
                 <span>Nom interne</span>
-                <input type="text" id="ticket-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Support serveur" />
+                <input type="text" id="ticket-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Hub support" />
               </label>
               <label class="field-row">
                 <span>Salon du panneau</span>
                 <select id="ticket-panel-channel" class="input-sm input-wide"></select>
               </label>
               <label class="field-row">
-                <span>Catégorie tickets</span>
+                <span>Catégorie Discord par défaut</span>
                 <select id="ticket-category" class="input-sm input-wide"></select>
               </label>
-              <p class="muted tiny">Les nouveaux tickets seront créés dans cette catégorie Discord.</p>
+              <p class="muted tiny">Chaque type de ticket peut surcharger cette catégorie individuellement.</p>
               <label class="field-row">
                 <span>Salon logs (optionnel)</span>
                 <select id="ticket-log-channel" class="input-sm input-wide"></select>
               </label>
               <label class="field-row">
-                <span>Rôles support</span>
+                <span>Rôles support (défaut)</span>
                 <select id="ticket-support-roles" class="input-sm input-wide" multiple size="4"></select>
               </label>
-              <p class="muted tiny">Ctrl+clic pour sélectionner plusieurs rôles. Ils verront tous les tickets et pourront les prendre en charge.</p>
               <label class="field-row">
                 <span>Max tickets ouverts / membre</span>
                 <input type="number" id="ticket-max-open" class="input-sm" min="1" max="5" value="1" />
               </label>
               <label class="field-row">
+                <span>Interface panneau</span>
+                <select id="ticket-ui-mode" class="input-sm input-wide">
+                  <option value="buttons">Boutons (jusqu'à 25, plusieurs lignes)</option>
+                  <option value="select">Menu déroulant</option>
+                </select>
+              </label>
+              <label class="field-row">
                 <span>Message du panneau</span>
-                <textarea id="ticket-content" class="input-sm input-wide" rows="3" placeholder="Besoin d'aide ? Ouvre un ticket ci-dessous…"></textarea>
+                <textarea id="ticket-content" class="input-sm input-wide" rows="3" placeholder="Besoin d'aide ? Choisis une catégorie ci-dessous…"></textarea>
               </label>
               <details class="custom-guide">
-                <summary>Embed (optionnel)</summary>
+                <summary>Embed panneau (optionnel)</summary>
                 <div class="custom-guide-body">
                   <label class="field-row">
                     <span>Titre</span>
@@ -818,9 +842,64 @@
                   </label>
                 </div>
               </details>
-              <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Catégories (boutons ou menu)</h4>
+              <details class="custom-guide" open>
+                <summary>Paramètres globaux du panneau</summary>
+                <div class="custom-guide-body">
+                  <label class="field-row checkbox-row">
+                    <input type="checkbox" id="ticket-modal-enabled" />
+                    <span>Formulaire modal avant ouverture (par défaut)</span>
+                  </label>
+                  <label class="field-row checkbox-row">
+                    <input type="checkbox" id="ticket-claim-enabled" checked />
+                    <span>Bouton « Prendre en charge » activé</span>
+                  </label>
+                  <label class="field-row checkbox-row">
+                    <input type="checkbox" id="ticket-delete-channel" checked />
+                    <span>Supprimer le salon à la fermeture</span>
+                  </label>
+                  <label class="field-row">
+                    <span>Délai suppression (secondes)</span>
+                    <input type="number" id="ticket-delete-delay" class="input-sm" min="0" max="120" value="5" />
+                  </label>
+                  <label class="field-row checkbox-row">
+                    <input type="checkbox" id="ticket-transcript-enabled" />
+                    <span>Transcript à la fermeture</span>
+                  </label>
+                  <label class="field-row">
+                    <span>Salon transcript (vide = logs)</span>
+                    <select id="ticket-transcript-channel" class="input-sm input-wide"></select>
+                  </label>
+                  <label class="field-row">
+                    <span>Qui peut fermer</span>
+                    <select id="ticket-close-allowed" class="input-sm input-wide">
+                      <option value="both">Auteur + staff</option>
+                      <option value="staff">Staff uniquement</option>
+                      <option value="opener">Auteur uniquement</option>
+                    </select>
+                  </label>
+                  <label class="field-row checkbox-row">
+                    <input type="checkbox" id="ticket-use-default-name" checked />
+                    <span>Nom de salon personnalisé (template)</span>
+                  </label>
+                  <label class="field-row">
+                    <span>Template nom salon</span>
+                    <input type="text" id="ticket-channel-template" class="input-sm input-wide mono" value="ticket-{number}-{user}" maxlength="100" />
+                  </label>
+                  <p class="muted tiny">Variables : <code>{number}</code> <code>{user}</code> <code>{category}</code> <code>{label}</code></p>
+                  <label class="field-row">
+                    <span>Libellé bouton claim</span>
+                    <input type="text" id="ticket-claim-label" class="input-sm input-wide" value="Prendre en charge" maxlength="80" />
+                  </label>
+                  <label class="field-row">
+                    <span>Libellé bouton fermer</span>
+                    <input type="text" id="ticket-close-label" class="input-sm input-wide" value="Fermer" maxlength="80" />
+                  </label>
+                </div>
+              </details>
+              <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Types de tickets (boutons / menu)</h4>
+              <p class="muted tiny">Ex. 🎫 Support · 🅰️ Général · 🤠 Modération — emoji seul possible, modal et rôles par type.</p>
               <div id="ticket-categories-root"></div>
-              <button type="button" class="btn secondary tiny" id="btn-ticket-add-cat">+ Catégorie</button>
+              <button type="button" class="btn secondary tiny" id="btn-ticket-add-cat">+ Type de ticket</button>
               <div class="fonda-actions" style="margin-top:0.75rem">
                 <button type="button" class="btn primary" id="btn-ticket-publish">Publier le panneau tickets</button>
               </div>

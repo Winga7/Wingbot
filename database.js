@@ -504,7 +504,7 @@ function deleteReactionRolePanel(id, guildId) {
   return r.changes > 0;
 }
 
-const { parseCategories, parseSupportRoleIds, UI_MODES } = require("./lib/ticketConfig");
+const { parseCategories, parseSupportRoleIds, parsePanelSettings, UI_MODES } = require("./lib/ticketConfig");
 
 function migrateTicketPanelsTable() {
   db.prepare(
@@ -521,6 +521,7 @@ function migrateTicketPanelsTable() {
       log_channel_id TEXT,
       support_role_ids TEXT NOT NULL DEFAULT '[]',
       categories TEXT NOT NULL DEFAULT '[]',
+      settings_json TEXT NOT NULL DEFAULT '{}',
       ui_mode TEXT NOT NULL DEFAULT 'buttons',
       max_open_per_user INTEGER NOT NULL DEFAULT 1,
       enabled INTEGER NOT NULL DEFAULT 1,
@@ -529,6 +530,11 @@ function migrateTicketPanelsTable() {
     )
   `
   ).run();
+  try {
+    db.prepare(`ALTER TABLE ticket_panels ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'`).run();
+  } catch {
+    /* déjà migré */
+  }
   db.prepare(
     `CREATE INDEX IF NOT EXISTS idx_ticket_panels_guild ON ticket_panels(guild_id)`
   ).run();
@@ -553,12 +559,18 @@ function migrateTicketsTable() {
       claimed_by TEXT,
       closed_by TEXT,
       close_reason TEXT,
+      form_data_json TEXT,
       opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       closed_at DATETIME,
       FOREIGN KEY (panel_id) REFERENCES ticket_panels(id) ON DELETE CASCADE
     )
   `
   ).run();
+  try {
+    db.prepare(`ALTER TABLE tickets ADD COLUMN form_data_json TEXT`).run();
+  } catch {
+    /* déjà migré */
+  }
   db.prepare(
     `CREATE INDEX IF NOT EXISTS idx_tickets_guild_status ON tickets(guild_id, status)`
   ).run();
@@ -581,6 +593,7 @@ function formatTicketPanelRow(row) {
     }
   }
   const categories = parseCategories(row.categories);
+  const settings = parsePanelSettings(row.settings_json);
   return {
     id: row.id,
     guild_id: row.guild_id,
@@ -593,6 +606,7 @@ function formatTicketPanelRow(row) {
     log_channel_id: row.log_channel_id || null,
     support_role_ids: parseSupportRoleIds(row.support_role_ids),
     categories,
+    settings,
     ui_mode: UI_MODES.has(row.ui_mode) ? row.ui_mode : "buttons",
     max_open_per_user: Math.min(5, Math.max(1, Number(row.max_open_per_user) || 1)),
     enabled: !!row.enabled,
@@ -606,7 +620,7 @@ function listTicketPanels(guildId) {
     .prepare(
       `SELECT id, guild_id, channel_id, message_id, label, content, embed_json,
               ticket_category_id, log_channel_id, support_role_ids, categories,
-              ui_mode, max_open_per_user, enabled, created_at, updated_at
+              settings_json, ui_mode, max_open_per_user, enabled, created_at, updated_at
        FROM ticket_panels WHERE guild_id = ? ORDER BY id DESC`
     )
     .all(guildId);
@@ -618,7 +632,7 @@ function getTicketPanel(id, guildId) {
     .prepare(
       `SELECT id, guild_id, channel_id, message_id, label, content, embed_json,
               ticket_category_id, log_channel_id, support_role_ids, categories,
-              ui_mode, max_open_per_user, enabled, created_at, updated_at
+              settings_json, ui_mode, max_open_per_user, enabled, created_at, updated_at
        FROM ticket_panels WHERE id = ? AND guild_id = ?`
     )
     .get(id, guildId);
@@ -630,7 +644,7 @@ function getTicketPanelByMessage(guildId, messageId) {
     .prepare(
       `SELECT id, guild_id, channel_id, message_id, label, content, embed_json,
               ticket_category_id, log_channel_id, support_role_ids, categories,
-              ui_mode, max_open_per_user, enabled, created_at, updated_at
+              settings_json, ui_mode, max_open_per_user, enabled, created_at, updated_at
        FROM ticket_panels WHERE guild_id = ? AND message_id = ? AND enabled = 1`
     )
     .get(guildId, String(messageId));
@@ -652,14 +666,15 @@ function insertTicketPanel(guildId, data) {
     : parseCategories(data.categories);
   if (!categories.length) throw new Error("Au moins une catégorie requise");
   const uiMode =
-    data.ui_mode === "select" || categories.length > 5 ? "select" : "buttons";
+    data.ui_mode === "select" || categories.length > 25 ? "select" : "buttons";
+  const settings = parsePanelSettings(data.settings);
   const r = db
     .prepare(
       `INSERT INTO ticket_panels
         (guild_id, channel_id, message_id, label, content, embed_json,
          ticket_category_id, log_channel_id, support_role_ids, categories,
-         ui_mode, max_open_per_user, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         settings_json, ui_mode, max_open_per_user, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       guildId,
@@ -672,6 +687,7 @@ function insertTicketPanel(guildId, data) {
       data.log_channel_id || null,
       JSON.stringify(parseSupportRoleIds(data.support_role_ids)),
       JSON.stringify(categories),
+      JSON.stringify(settings),
       uiMode,
       Math.min(5, Math.max(1, Number(data.max_open_per_user) || 1)),
       data.enabled === false ? 0 : 1
@@ -696,6 +712,19 @@ function updateTicketPanel(id, guildId, patch) {
     fields.push("message_id = ?");
     vals.push(patch.message_id);
   }
+  if (patch.settings != null) {
+    fields.push("settings_json = ?");
+    vals.push(JSON.stringify(parsePanelSettings(patch.settings)));
+  }
+  if (patch.categories != null) {
+    const cats = Array.isArray(patch.categories)
+      ? parseCategories(JSON.stringify(patch.categories))
+      : parseCategories(patch.categories);
+    if (cats.length) {
+      fields.push("categories = ?");
+      vals.push(JSON.stringify(cats));
+    }
+  }
   if (!fields.length) return cur;
   fields.push("updated_at = CURRENT_TIMESTAMP");
   vals.push(id, guildId);
@@ -714,6 +743,14 @@ function deleteTicketPanel(id, guildId) {
 
 function formatTicketRow(row) {
   if (!row) return null;
+  let form_data = null;
+  if (row.form_data_json) {
+    try {
+      form_data = JSON.parse(row.form_data_json);
+    } catch {
+      form_data = null;
+    }
+  }
   return {
     id: row.id,
     guild_id: row.guild_id,
@@ -727,6 +764,7 @@ function formatTicketRow(row) {
     claimed_by: row.claimed_by || null,
     closed_by: row.closed_by || null,
     close_reason: row.close_reason || null,
+    form_data,
     opened_at: row.opened_at,
     closed_at: row.closed_at || null,
   };
@@ -735,7 +773,7 @@ function formatTicketRow(row) {
 function listTickets(guildId, { status = null, limit = 100 } = {}) {
   let sql = `SELECT id, guild_id, panel_id, category_key, channel_id, opener_user_id,
                     opener_tag, ticket_number, status, claimed_by, closed_by, close_reason,
-                    opened_at, closed_at
+                    form_data_json, opened_at, closed_at
              FROM tickets WHERE guild_id = ?`;
   const params = [guildId];
   if (status === "open" || status === "closed") {
@@ -752,7 +790,7 @@ function getTicket(id, guildId) {
     .prepare(
       `SELECT id, guild_id, panel_id, category_key, channel_id, opener_user_id,
               opener_tag, ticket_number, status, claimed_by, closed_by, close_reason,
-              opened_at, closed_at
+              form_data_json, opened_at, closed_at
        FROM tickets WHERE id = ? AND guild_id = ?`
     )
     .get(id, guildId);
@@ -764,7 +802,7 @@ function getTicketByChannel(guildId, channelId) {
     .prepare(
       `SELECT id, guild_id, panel_id, category_key, channel_id, opener_user_id,
               opener_tag, ticket_number, status, claimed_by, closed_by, close_reason,
-              opened_at, closed_at
+              form_data_json, opened_at, closed_at
        FROM tickets WHERE guild_id = ? AND channel_id = ? AND status = 'open'`
     )
     .get(guildId, String(channelId));
@@ -796,8 +834,8 @@ function insertTicket(guildId, data) {
     .prepare(
       `INSERT INTO tickets
         (guild_id, panel_id, category_key, channel_id, opener_user_id, opener_tag,
-         ticket_number, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`
+         ticket_number, status, form_data_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`
     )
     .run(
       guildId,
@@ -806,7 +844,8 @@ function insertTicket(guildId, data) {
       data.channel_id,
       data.opener_user_id,
       String(data.opener_tag || "").slice(0, 128),
-      ticketNumber
+      ticketNumber,
+      data.form_data ? JSON.stringify(data.form_data) : null
     );
   return getTicket(r.lastInsertRowid, guildId);
 }

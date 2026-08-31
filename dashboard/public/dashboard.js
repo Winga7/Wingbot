@@ -1755,15 +1755,19 @@ async function publishReactionRolePanel() {
 }
 
 function fillTicketChannelSelects() {
-  for (const id of ["ticket-panel-channel", "ticket-log-channel"]) {
+  for (const id of [
+    "ticket-panel-channel",
+    "ticket-log-channel",
+    "ticket-transcript-channel",
+  ]) {
     const sel = $(id);
     if (!sel) continue;
     const prev = sel.value;
-    const isLog = id === "ticket-log-channel";
+    const isOptional = id !== "ticket-panel-channel";
     sel.innerHTML = "";
     const empty = document.createElement("option");
     empty.value = "";
-    empty.textContent = isLog ? "— Aucun —" : "— Choisir un salon —";
+    empty.textContent = isOptional ? "— Aucun —" : "— Choisir un salon —";
     sel.appendChild(empty);
     for (const ch of lastGuildChannelsList) {
       const opt = document.createElement("option");
@@ -1774,24 +1778,277 @@ function fillTicketChannelSelects() {
     if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
   }
 
-  const catSel = $("ticket-category");
+  for (const id of ["ticket-category"]) {
+    fillTicketDiscordCategorySelect(id, "", "— Catégorie Discord —");
+  }
+}
+
+function fillTicketDiscordCategorySelect(selectId, prevValue = "", emptyLabel = "— Par défaut —") {
+  const catSel = selectId ? $(selectId) : null;
+  if (!catSel) return;
+  const prev = prevValue || catSel.value;
+  catSel.innerHTML = "";
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = emptyLabel;
+  catSel.appendChild(empty);
+  for (const c of lastGuildCategoriesList) {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.name;
+    catSel.appendChild(opt);
+  }
+  if (prev && [...catSel.options].some((o) => o.value === prev)) {
+    catSel.value = prev;
+  }
+}
+
+function ticketCategoryRolesOptionsHtml(selectedIds = []) {
+  const set = new Set(selectedIds);
+  return lastGuildRolesList
+    .map(
+      (r) =>
+        `<option value="${escapeAttr(r.id)}"${set.has(r.id) ? " selected" : ""}>${escapeHtml(r.name)}</option>`
+    )
+    .join("");
+}
+
+function resetTicketCategoryRows() {
+  const root = $("ticket-categories-root");
+  if (!root) return;
+  root.innerHTML = "";
+  addTicketCategoryRow({
+    label: "Support",
+    emoji: "🎫",
+    description: "Aide générale",
+    button_style: "primary",
+  });
+  addTicketCategoryRow({
+    label: "Modération",
+    emoji: "🤠",
+    description: "Signalement",
+    button_style: "danger",
+    emoji_only: true,
+  });
+}
+
+function addTicketCategoryRow(data = {}) {
+  const root = $("ticket-categories-root");
+  if (!root) return;
+  const row = document.createElement("div");
+  row.className = "ticket-cat-row panel-block";
+  row.style.cssText = "padding:0.65rem;margin-bottom:0.55rem;";
+  const modalFields =
+    Array.isArray(data.modal_fields) && data.modal_fields.length
+      ? data.modal_fields
+      : [{ label: "Décris ta demande", style: "paragraph", required: true }];
+  const modalFieldsHtml = modalFields
+    .map(
+      (f, i) => `
+    <div class="ticket-modal-field-row" style="display:grid;grid-template-columns:1fr 6rem auto;gap:0.35rem;margin-bottom:0.35rem;">
+      <input type="text" class="input-sm ticket-modal-label" placeholder="Label champ" maxlength="45" value="${escapeAttr(f.label || "")}" />
+      <select class="input-sm ticket-modal-style">
+        <option value="short"${f.style === "short" ? " selected" : ""}>Court</option>
+        <option value="paragraph"${f.style !== "short" ? " selected" : ""}>Long</option>
+      </select>
+      <button type="button" class="btn ghost tiny ticket-modal-del">✕</button>
+    </div>`
+    )
+    .join("");
+
+  row.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 4rem 1fr auto;gap:0.5rem;align-items:center;">
+      <input type="text" class="input-sm ticket-cat-label" placeholder="Nom (ex. Support)" maxlength="80" value="${escapeAttr(data.label || "")}" />
+      <input type="text" class="input-sm ticket-cat-emoji" placeholder="🎫" maxlength="32" value="${escapeAttr(data.emoji || "🎫")}" />
+      <input type="text" class="input-sm ticket-cat-desc" placeholder="Description menu" maxlength="100" value="${escapeAttr(data.description || "")}" />
+      <button type="button" class="btn ghost tiny ticket-cat-del" title="Retirer">✕</button>
+    </div>
+    <details class="custom-guide" style="margin-top:0.5rem">
+      <summary class="tiny">Options avancées de ce type</summary>
+      <div class="custom-guide-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+          <label class="field-row">
+            <span class="tiny">Style bouton</span>
+            <select class="input-sm ticket-cat-style">
+              <option value="primary"${data.button_style === "primary" || !data.button_style ? " selected" : ""}>Bleu</option>
+              <option value="secondary"${data.button_style === "secondary" ? " selected" : ""}>Gris</option>
+              <option value="success"${data.button_style === "success" ? " selected" : ""}>Vert</option>
+              <option value="danger"${data.button_style === "danger" ? " selected" : ""}>Rouge</option>
+            </select>
+          </label>
+          <label class="field-row checkbox-row">
+            <input type="checkbox" class="ticket-cat-emoji-only"${data.emoji_only ? " checked" : ""} />
+            <span class="tiny">Emoji seul (sans texte)</span>
+          </label>
+        </div>
+        <label class="field-row">
+          <span class="tiny">Catégorie Discord (surcharge)</span>
+          <select class="input-sm ticket-cat-discord-cat"></select>
+        </label>
+        <label class="field-row">
+          <span class="tiny">Rôles accès (surcharge)</span>
+          <select class="input-sm ticket-cat-roles" multiple size="3">${ticketCategoryRolesOptionsHtml(data.support_role_ids || [])}</select>
+        </label>
+        <label class="field-row">
+          <span class="tiny">Template nom salon (surcharge)</span>
+          <input type="text" class="input-sm ticket-cat-name-template" placeholder="ticket-{number}-{user}" maxlength="100" value="${escapeAttr(data.channel_name_template || "")}" />
+        </label>
+        <label class="field-row">
+          <span class="tiny">Qui peut fermer</span>
+          <select class="input-sm ticket-cat-close">
+            <option value="">— Hériter du panneau —</option>
+            <option value="both"${data.close_allowed === "both" ? " selected" : ""}>Auteur + staff</option>
+            <option value="staff"${data.close_allowed === "staff" ? " selected" : ""}>Staff</option>
+            <option value="opener"${data.close_allowed === "opener" ? " selected" : ""}>Auteur</option>
+          </select>
+        </label>
+        <label class="field-row checkbox-row">
+          <input type="checkbox" class="ticket-cat-modal"${data.modal_enabled ? " checked" : ""} />
+          <span class="tiny">Formulaire modal avant ouverture</span>
+        </label>
+        <div class="ticket-modal-fields-wrap"${data.modal_enabled ? "" : " hidden"}>
+          <p class="muted tiny">Champs modal (max 5) — affichés en embed dans le ticket</p>
+          <div class="ticket-modal-fields">${modalFieldsHtml}</div>
+          <button type="button" class="btn ghost tiny ticket-modal-add">+ Champ</button>
+        </div>
+        <label class="field-row checkbox-row">
+          <input type="checkbox" class="ticket-cat-transcript"${data.transcript_enabled ? " checked" : ""} />
+          <span class="tiny">Transcript à la fermeture (surcharge)</span>
+        </label>
+        <label class="field-row checkbox-row">
+          <input type="checkbox" class="ticket-cat-delete"${data.delete_channel_on_close === false ? "" : data.delete_channel_on_close === true ? " checked" : ""} />
+          <span class="tiny">Supprimer salon à la fermeture (surcharge)</span>
+        </label>
+      </div>
+    </details>
+  `;
+
+  const catSel = row.querySelector(".ticket-cat-discord-cat");
   if (catSel) {
-    const prev = catSel.value;
     catSel.innerHTML = "";
     const empty = document.createElement("option");
     empty.value = "";
-    empty.textContent = "— Catégorie Discord —";
+    empty.textContent = "— Par défaut —";
     catSel.appendChild(empty);
     for (const c of lastGuildCategoriesList) {
       const opt = document.createElement("option");
       opt.value = c.id;
       opt.textContent = c.name;
+      if (data.ticket_category_id === c.id) opt.selected = true;
       catSel.appendChild(opt);
     }
-    if (prev && [...catSel.options].some((o) => o.value === prev)) {
-      catSel.value = prev;
-    }
   }
+
+  row.querySelector(".ticket-cat-del")?.addEventListener("click", () => {
+    if (root.querySelectorAll(".ticket-cat-row").length <= 1) return;
+    row.remove();
+  });
+
+  row.querySelector(".ticket-cat-modal")?.addEventListener("change", (e) => {
+    const wrap = row.querySelector(".ticket-modal-fields-wrap");
+    if (wrap) wrap.hidden = !e.target.checked;
+  });
+
+  row.querySelector(".ticket-modal-add")?.addEventListener("click", () => {
+    const fields = row.querySelector(".ticket-modal-fields");
+    if (!fields || fields.querySelectorAll(".ticket-modal-field-row").length >= 5) return;
+    const div = document.createElement("div");
+    div.className = "ticket-modal-field-row";
+    div.style.cssText =
+      "display:grid;grid-template-columns:1fr 6rem auto;gap:0.35rem;margin-bottom:0.35rem;";
+    div.innerHTML = `
+      <input type="text" class="input-sm ticket-modal-label" placeholder="Label champ" maxlength="45" />
+      <select class="input-sm ticket-modal-style"><option value="short">Court</option><option value="paragraph" selected>Long</option></select>
+      <button type="button" class="btn ghost tiny ticket-modal-del">✕</button>
+    `;
+    div.querySelector(".ticket-modal-del")?.addEventListener("click", () => div.remove());
+    fields.appendChild(div);
+  });
+
+  row.querySelectorAll(".ticket-modal-del").forEach((btn) => {
+    btn.addEventListener("click", () => btn.closest(".ticket-modal-field-row")?.remove());
+  });
+
+  root.appendChild(row);
+}
+
+function collectTicketPanelSettings() {
+  return {
+    modal_enabled: !!$("ticket-modal-enabled")?.checked,
+    claim_enabled: $("ticket-claim-enabled")?.checked !== false,
+    delete_channel_on_close: $("ticket-delete-channel")?.checked !== false,
+    delete_delay_seconds: Number($("ticket-delete-delay")?.value) || 5,
+    transcript_enabled: !!$("ticket-transcript-enabled")?.checked,
+    transcript_channel_id: $("ticket-transcript-channel")?.value || null,
+    close_allowed: $("ticket-close-allowed")?.value || "both",
+    channel_name_template:
+      $("ticket-channel-template")?.value?.trim() || "ticket-{number}-{user}",
+    use_default_channel_name: $("ticket-use-default-name")?.checked !== false,
+    claim_button_label: $("ticket-claim-label")?.value?.trim() || "Prendre en charge",
+    close_button_label: $("ticket-close-label")?.value?.trim() || "Fermer",
+    show_claim_button: true,
+    show_close_button: true,
+  };
+}
+
+function collectTicketCategoriesFromForm() {
+  const out = [];
+  document.querySelectorAll(".ticket-cat-row").forEach((row, index) => {
+    const label = row.querySelector(".ticket-cat-label")?.value?.trim();
+    const emoji = row.querySelector(".ticket-cat-emoji")?.value?.trim() || "🎫";
+    const description = row.querySelector(".ticket-cat-desc")?.value?.trim() || "";
+    if (!label) return;
+
+    const cat = {
+      label,
+      emoji,
+      description,
+      button_style: row.querySelector(".ticket-cat-style")?.value || "primary",
+      emoji_only: !!row.querySelector(".ticket-cat-emoji-only")?.checked,
+    };
+
+    const discordCat = row.querySelector(".ticket-cat-discord-cat")?.value;
+    if (discordCat) cat.ticket_category_id = discordCat;
+
+    const rolesSel = row.querySelector(".ticket-cat-roles");
+    if (rolesSel) {
+      const ids = [...rolesSel.selectedOptions].map((o) => o.value).filter(Boolean);
+      if (ids.length) cat.support_role_ids = ids;
+    }
+
+    const nameTpl = row.querySelector(".ticket-cat-name-template")?.value?.trim();
+    if (nameTpl) cat.channel_name_template = nameTpl;
+
+    const closeAllowed = row.querySelector(".ticket-cat-close")?.value;
+    if (closeAllowed) cat.close_allowed = closeAllowed;
+
+    if (row.querySelector(".ticket-cat-modal")?.checked) {
+      cat.modal_enabled = true;
+      const modalFields = [];
+      row.querySelectorAll(".ticket-modal-field-row").forEach((fr, fi) => {
+        const fl = fr.querySelector(".ticket-modal-label")?.value?.trim();
+        if (!fl) return;
+        modalFields.push({
+          id: `field_${fi}`,
+          label: fl,
+          style: fr.querySelector(".ticket-modal-style")?.value || "paragraph",
+          required: true,
+        });
+      });
+      if (modalFields.length) cat.modal_fields = modalFields;
+    } else if (row.querySelector(".ticket-cat-modal")) {
+      cat.modal_enabled = false;
+    }
+
+    if (row.querySelector(".ticket-cat-transcript")?.checked) {
+      cat.transcript_enabled = true;
+    }
+    const delCb = row.querySelector(".ticket-cat-delete");
+    if (delCb?.checked) cat.delete_channel_on_close = true;
+
+    out.push(cat);
+  });
+  return out;
 }
 
 function fillTicketSupportRolesSelect() {
@@ -1809,45 +2066,10 @@ function fillTicketSupportRolesSelect() {
     const o = [...sel.options].find((x) => x.value === id);
     if (o) o.selected = true;
   }
-}
-
-function resetTicketCategoryRows() {
-  const root = $("ticket-categories-root");
-  if (!root) return;
-  root.innerHTML = "";
-  addTicketCategoryRow({ label: "Support", emoji: "🎫", description: "Aide générale" });
-}
-
-function addTicketCategoryRow(data = {}) {
-  const root = $("ticket-categories-root");
-  if (!root) return;
-  const row = document.createElement("div");
-  row.className = "rr-entry-row ticket-cat-row";
-  row.style.cssText =
-    "display:grid;grid-template-columns:1fr 4rem 1fr auto;gap:0.5rem;align-items:center;margin-bottom:0.45rem;";
-  row.innerHTML = `
-    <input type="text" class="input-sm ticket-cat-label" placeholder="Nom (ex. Support)" maxlength="80" value="${escapeAttr(data.label || "")}" />
-    <input type="text" class="input-sm ticket-cat-emoji" placeholder="🎫" maxlength="32" value="${escapeAttr(data.emoji || "🎫")}" />
-    <input type="text" class="input-sm ticket-cat-desc" placeholder="Description courte" maxlength="100" value="${escapeAttr(data.description || "")}" />
-    <button type="button" class="btn ghost tiny ticket-cat-del" title="Retirer">✕</button>
-  `;
-  row.querySelector(".ticket-cat-del")?.addEventListener("click", () => {
-    if (root.querySelectorAll(".ticket-cat-row").length <= 1) return;
-    row.remove();
+  document.querySelectorAll(".ticket-cat-roles").forEach((roleSel) => {
+    const selected = [...roleSel.selectedOptions].map((o) => o.value);
+    roleSel.innerHTML = ticketCategoryRolesOptionsHtml(selected);
   });
-  root.appendChild(row);
-}
-
-function collectTicketCategoriesFromForm() {
-  const out = [];
-  document.querySelectorAll(".ticket-cat-row").forEach((row) => {
-    const label = row.querySelector(".ticket-cat-label")?.value?.trim();
-    const emoji = row.querySelector(".ticket-cat-emoji")?.value?.trim() || "🎫";
-    const description = row.querySelector(".ticket-cat-desc")?.value?.trim() || "";
-    if (!label) return;
-    out.push({ label, emoji, description });
-  });
-  return out;
 }
 
 async function loadTicketingView() {
@@ -1905,7 +2127,7 @@ function renderTicketPanelsList(panels) {
     div.innerHTML = `
       <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;align-items:center">
         <strong>${escapeHtml(p.label || `Panneau #${p.id}`)}</strong>
-        <span class="muted tiny">${p.enabled ? "Actif" : "Pause"} · ${p.categories.length} catégorie(s) · max ${p.max_open_per_user}/user</span>
+        <span class="muted tiny">${p.enabled ? "Actif" : "Pause"} · ${p.categories.length} type(s) · ${p.settings?.transcript_enabled ? "transcript" : "sans transcript"} · max ${p.max_open_per_user}/user</span>
       </div>
       <div class="muted tiny" style="margin-top:0.35rem">Panel ${escapeHtml(chName)} · Tickets → ${escapeHtml(catName)}${link ? ` · <a href="${escapeAttr(link)}" target="_blank" rel="noopener noreferrer">Voir le message</a>` : ""}</div>
       <div style="margin-top:0.45rem;display:flex;gap:0.35rem;flex-wrap:wrap">
@@ -2037,7 +2259,8 @@ async function publishTicketPanel() {
     content: $("ticket-content")?.value || "",
     embed,
     categories,
-    ui_mode: categories.length > 5 ? "select" : "buttons",
+    settings: collectTicketPanelSettings(),
+    ui_mode: $("ticket-ui-mode")?.value || "buttons",
   };
   const btn = $("btn-ticket-publish");
   if (btn) {
