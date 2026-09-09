@@ -3173,11 +3173,17 @@ async function saveSocialFeed() {
 
 async function loadWarningsList() {
   const panel = $("warn-list-panel");
+  const countEl = $("warn-list-count");
+  const clearBtn = $("btn-clear-user-warns");
   if (!panel || !selectedGuildId || !currentGuildHasBot()) return;
 
   panel.textContent = "Chargement…";
+  if (countEl) countEl.textContent = "";
   const filterRaw = String($("warn-filter-user")?.value || "").replace(/\D/g, "");
-  const q = filterRaw ? `?user_id=${encodeURIComponent(filterRaw)}&limit=80` : "?limit=80";
+  if (clearBtn) clearBtn.hidden = !filterRaw;
+  const q = filterRaw
+    ? `?user_id=${encodeURIComponent(filterRaw)}&limit=100`
+    : "?limit=100";
 
   try {
     const res = await fetch(
@@ -3190,28 +3196,54 @@ async function loadWarningsList() {
     }
     const data = await res.json();
     const rows = data.warnings || [];
+    if (countEl) {
+      countEl.textContent = rows.length
+        ? `(${rows.length}${rows.length >= 100 ? "+" : ""})`
+        : "";
+    }
     if (!rows.length) {
-      panel.textContent = "Aucun avertissement actif.";
+      panel.textContent = filterRaw
+        ? "Aucun avertissement pour cet ID."
+        : "Aucun avertissement actif sur ce serveur.";
       return;
     }
 
     panel.innerHTML = "";
+    panel.classList.remove("muted", "tiny");
     for (const w of rows) {
       const row = document.createElement("div");
-      row.className = "warn-row";
-      row.style.cssText =
-        "border:1px solid var(--border, #333);border-radius:8px;padding:0.6rem 0.75rem;margin-bottom:0.5rem;";
-      const src = w.source === "antispam" ? "antispam" : "manuel";
-      const when = w.created_at ? String(w.created_at).slice(0, 16) : "?";
+      row.className = "warn-row warn-row--card";
+      const src = w.source === "antispam" ? "Antispam" : "Manuel";
+      const when = w.created_at
+        ? new Date(
+            String(w.created_at).endsWith("Z")
+              ? w.created_at
+              : w.created_at + "Z"
+          ).toLocaleString("fr-FR", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "?";
       row.innerHTML = `
-        <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;align-items:center">
-          <strong>#${w.id}</strong>
-          <span class="mono muted tiny">${when} · ${src}</span>
-          <button type="button" class="btn link tiny btn-del-warn" data-warn-id="${w.id}">Retirer</button>
+        <div class="warn-row-top">
+          <div class="warn-row-id">
+            <strong>#${escapeHtml(String(w.id))}</strong>
+            <span class="warn-src-badge">${escapeHtml(src)}</span>
+          </div>
+          <span class="muted tiny">${escapeHtml(when)}</span>
+          <button type="button" class="btn link tiny btn-del-warn" data-warn-id="${escapeAttr(
+            String(w.id)
+          )}">Retirer</button>
         </div>
-        <div style="margin-top:0.35rem"><span class="mono">${w.user_tag || w.user_id}</span> <span class="muted tiny">(${w.user_id})</span></div>
-        <div style="margin-top:0.25rem">${escapeHtml(w.reason || "")}</div>
-        <div class="muted tiny" style="margin-top:0.25rem">par ${escapeHtml(w.moderator_tag || "?")}</div>
+        <div class="warn-row-user">
+          <span class="mono">${escapeHtml(w.user_tag || w.user_id)}</span>
+          <span class="muted tiny mono">(${escapeHtml(w.user_id)})</span>
+        </div>
+        <div class="warn-row-reason">${escapeHtml(w.reason || "—")}</div>
+        <div class="muted tiny">par ${escapeHtml(w.moderator_tag || "?")}</div>
       `;
       panel.appendChild(row);
     }
@@ -3220,18 +3252,123 @@ async function loadWarningsList() {
       btn.addEventListener("click", async () => {
         const wid = btn.getAttribute("data-warn-id");
         if (!wid || !confirm(`Retirer le warn #${wid} ?`)) return;
+        btn.disabled = true;
         const del = await fetch(
           apiUrl(
-            `/api/guilds/${encodeURIComponent(selectedGuildId)}/warnings/${encodeURIComponent(wid)}`
+            `/api/guilds/${encodeURIComponent(
+              selectedGuildId
+            )}/warnings/${encodeURIComponent(wid)}`
           ),
-          { method: "DELETE", credentials: "include" }
+          { method: "DELETE", credentials: "include", headers: authHeaders() }
         );
         if (del.ok) loadWarningsList();
-        else alert("Échec de la suppression.");
+        else {
+          btn.disabled = false;
+          alert("Échec de la suppression.");
+        }
       });
     });
   } catch {
     panel.textContent = "Erreur réseau.";
+  }
+}
+
+async function testWarnDm() {
+  const status = $("warn-test-dm-status");
+  const btn = $("btn-test-warn-dm");
+  if (!selectedGuildId || !currentGuildHasBot()) {
+    alert("Sélectionne un serveur où le bot est présent.");
+    return;
+  }
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = "Envoi…";
+  try {
+    const guildName =
+      currentGuildRow()?.name || currentGuildRow()?.guild_name || "ce serveur";
+    const res = await fetch(
+      apiUrl(
+        `/api/guilds/${encodeURIComponent(selectedGuildId)}/warnings/test-dm`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: authHeaders(),
+        body: JSON.stringify({ guild_name: guildName }),
+      }
+    );
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (status) status.textContent = "";
+      alert(j.message || j.error || "Échec de l’envoi du DM test.");
+      return;
+    }
+    if (status) status.textContent = "Envoyé — regarde tes MP Discord.";
+  } catch {
+    if (status) status.textContent = "";
+    alert("Erreur réseau.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function clearFilteredUserWarns() {
+  const filterRaw = String($("warn-filter-user")?.value || "").replace(/\D/g, "");
+  if (!filterRaw || !selectedGuildId) return;
+  if (
+    !confirm(
+      `Retirer TOUS les warns de l’utilisateur ${filterRaw} sur ce serveur ?`
+    )
+  ) {
+    return;
+  }
+  const res = await fetch(
+    apiUrl(
+      `/api/guilds/${encodeURIComponent(
+        selectedGuildId
+      )}/warnings/user/${encodeURIComponent(filterRaw)}`
+    ),
+    { method: "DELETE", credentials: "include", headers: authHeaders() }
+  );
+  if (res.ok) loadWarningsList();
+  else alert("Échec de la suppression.");
+}
+
+async function syncFondaDmThread() {
+  const userId = fondaState.selectedUserId;
+  if (!userId) return;
+  const btn = $("btn-sync-dm-thread");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Import…";
+  }
+  try {
+    const res = await fetch(
+      apiUrl(`/api/dm/threads/${encodeURIComponent(userId)}/sync`),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: authHeaders(),
+      }
+    );
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(j.error || "Import impossible.");
+      return;
+    }
+    await refreshFondaThreads();
+    await loadFondaThreadMessages();
+    alert(
+      j.imported
+        ? `${j.imported} message(s) importé(s) depuis Discord.`
+        : "Rien de nouveau à importer (déjà synchronisé)."
+    );
+  } catch {
+    alert("Erreur réseau.");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Importer Discord";
+    }
   }
 }
 
@@ -4935,6 +5072,9 @@ $("btn-social-preview")?.addEventListener("click", () => previewSocialSource());
 $("social-alert-type")?.addEventListener("change", () => updateSocialTypeUI());
 
 $("btn-refresh-warns")?.addEventListener("click", () => loadWarningsList());
+$("btn-test-warn-dm")?.addEventListener("click", () => testWarnDm());
+$("btn-clear-user-warns")?.addEventListener("click", () => clearFilteredUserWarns());
+$("btn-sync-dm-thread")?.addEventListener("click", () => syncFondaDmThread());
 $("warn-filter-user")?.addEventListener("change", () => loadWarningsList());
 $("warn-filter-user")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") loadWarningsList();

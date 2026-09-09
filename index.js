@@ -342,6 +342,7 @@ client.on(Events.MessageCreate, async (message) => {
           embeds,
           user_tag: otherUser?.tag || otherUser?.username || null,
           user_avatar: otherUser?.displayAvatarURL?.({ size: 128 }) || null,
+          created_at: message.createdAt?.toISOString?.() || null,
         });
       }
     } catch (e) {

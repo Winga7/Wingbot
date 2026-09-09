@@ -48,6 +48,7 @@ const {
   deleteGuildWarning,
   clearGuildWarningsForUser,
   getGuildWarningById,
+  getWarnConfig,
   listScheduledMessages,
   getScheduledMessage,
   insertScheduledMessage,
@@ -911,6 +912,133 @@ app.post(
   }
 );
 
+function normalizeDiscordApiEmbeds(embeds) {
+  if (!Array.isArray(embeds) || !embeds.length) return [];
+  return embeds.map((e) => ({
+    title: e.title || undefined,
+    description: e.description || undefined,
+    url: e.url || undefined,
+    color: typeof e.color === "number" ? e.color : undefined,
+    fields: Array.isArray(e.fields)
+      ? e.fields.map((f) => ({
+          name: f.name,
+          value: f.value,
+          inline: !!f.inline,
+        }))
+      : undefined,
+    footer: e.footer
+      ? { text: e.footer.text, icon_url: e.footer.icon_url || undefined }
+      : undefined,
+    timestamp: e.timestamp || undefined,
+    author: e.author
+      ? {
+          name: e.author.name,
+          icon_url: e.author.icon_url || undefined,
+          url: e.author.url || undefined,
+        }
+      : undefined,
+    thumbnail: e.thumbnail?.url ? { url: e.thumbnail.url } : undefined,
+    image: e.image?.url ? { url: e.image.url } : undefined,
+  }));
+}
+
+/** Importe l'historique DM Discord (ex. anciens rappels gestionimpact). */
+app.post(
+  "/api/dm/threads/:userId/sync",
+  requireDiscordSession,
+  requireFounder,
+  async (req, res) => {
+    const id = normalizeSnowflakeId(req.params.userId);
+    if (!id) return res.status(400).json({ error: "user_id invalide" });
+    try {
+      const dmChannel = await discordBotJson("POST", "/users/@me/channels", {
+        recipient_id: id,
+      });
+      if (!dmChannel?.id) {
+        return res.status(502).json({ error: "dm_channel_invalide" });
+      }
+
+      let userInfo = null;
+      try {
+        userInfo = await discordFetchJson(`/users/${encodeURIComponent(id)}`);
+      } catch {
+        /* ignore */
+      }
+      const bot = await fetchBotUser().catch(() => null);
+      const botId = bot?.id || null;
+
+      let imported = 0;
+      let before = null;
+      let pages = 0;
+      const maxPages = 5;
+
+      while (pages < maxPages) {
+        pages += 1;
+        const qs = new URLSearchParams({ limit: "100" });
+        if (before) qs.set("before", before);
+        const batch = await discordBotJson(
+          "GET",
+          `/channels/${encodeURIComponent(dmChannel.id)}/messages?${qs}`
+        );
+        if (!Array.isArray(batch) || !batch.length) break;
+
+        for (const msg of batch) {
+          const authorId = msg.author?.id || null;
+          const isOut = botId && authorId === botId;
+          const rowId = recordDmMessage({
+            user_id: id,
+            channel_id: dmChannel.id,
+            message_id: msg.id,
+            direction: isOut ? "out" : "in",
+            author_id: authorId,
+            author_tag: msg.author
+              ? msg.author.global_name || msg.author.username || null
+              : null,
+            content: msg.content || "",
+            attachments: Array.isArray(msg.attachments)
+              ? msg.attachments.map((a) => ({
+                  name: a.filename || a.name || "fichier",
+                  url: a.url,
+                }))
+              : [],
+            embeds: normalizeDiscordApiEmbeds(msg.embeds),
+            user_tag: userInfo
+              ? userInfo.global_name || userInfo.username || null
+              : null,
+            user_avatar: userInfo ? userAvatarUrlFromApi(userInfo) : null,
+            created_at: msg.timestamp || null,
+          });
+          if (rowId) imported += 1;
+        }
+
+        before = batch[batch.length - 1]?.id;
+        if (batch.length < 100) break;
+      }
+
+      updateDmThreadProfile(id, {
+        user_tag: userInfo
+          ? userInfo.global_name || userInfo.username || null
+          : null,
+        user_avatar: userInfo ? userAvatarUrlFromApi(userInfo) : null,
+        channel_id: dmChannel.id,
+      });
+
+      res.json({
+        ok: true,
+        channel_id: dmChannel.id,
+        imported,
+        pages,
+      });
+    } catch (e) {
+      console.error("[DM sync]", e);
+      if (e.code === "NO_BOT_TOKEN") {
+        return res.status(503).json({ error: "bot_token_manquant" });
+      }
+      res.status(502).json({ error: String(e.message || e) });
+    }
+  }
+);
+
 app.put("/api/bot/avatar", requireDiscordSession, async (req, res) => {
   try {
     // bot_avatar est une feature globale (impacte tous les serveurs) : on
@@ -1323,10 +1451,119 @@ app.get(
         userId: userId || null,
         limit,
       });
-      res.json({ warnings: rows });
+      res.json({ warnings: rows, count: rows.length });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.delete(
+  "/api/guilds/:guildId/warnings/user/:userId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const userId = normalizeSnowflakeId(req.params.userId);
+      if (!userId) {
+        return res.status(400).json({ error: "user_id invalide" });
+      }
+      const n = clearGuildWarningsForUser(guildId, userId);
+      res.json({ ok: true, cleared: n, user_id: userId });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+/** Envoie un DM d'avertissement de démo (sans créer de warn en base). */
+app.post(
+  "/api/guilds/:guildId/warnings/test-dm",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const sessionUserId = normalizeSnowflakeId(req.discordSession.userId);
+      if (!sessionUserId) {
+        return res.status(400).json({ error: "session_invalide" });
+      }
+      const cfg = getWarnConfig(guildId);
+      const guildName =
+        String(req.body?.guild_name || "").trim() || "ce serveur";
+      const reason =
+        String(req.body?.reason || "").trim() ||
+        "Test depuis le dashboard — aucun warn réel n'a été enregistré.";
+
+      const embed = {
+        title: "⚠️ Avertissement",
+        description:
+          "Un avertissement a été enregistré sur ton compte pour ce serveur.",
+        color: 0xf59e0b,
+        fields: [
+          { name: "Serveur", value: guildName.slice(0, 256), inline: true },
+          {
+            name: "Total",
+            value: `1/${cfg.warns_before_timeout || 3}`,
+            inline: true,
+          },
+          { name: "Raison", value: reason.slice(0, 1024), inline: false },
+          {
+            name: "Prochaine étape",
+            value: `À **${cfg.warns_before_timeout || 3}** avertissements actifs → sourdine automatique.`,
+            inline: false,
+          },
+          {
+            name: "Mode test",
+            value: "Ceci est une **démo** — aucun warn n'a été ajouté en base.",
+            inline: false,
+          },
+        ],
+        footer: { text: "Wingbot · Modération (test)" },
+        timestamp: new Date().toISOString(),
+      };
+
+      const dmChannel = await discordBotJson("POST", "/users/@me/channels", {
+        recipient_id: sessionUserId,
+      });
+      if (!dmChannel?.id) {
+        return res.status(502).json({ error: "dm_channel_invalide" });
+      }
+      const sent = await discordBotJson(
+        "POST",
+        `/channels/${encodeURIComponent(dmChannel.id)}/messages`,
+        { embeds: [embed] }
+      );
+
+      const bot = await fetchBotUser().catch(() => null);
+      recordDmMessage({
+        user_id: sessionUserId,
+        channel_id: dmChannel.id,
+        message_id: sent?.id || null,
+        direction: "out",
+        author_id: bot?.id || null,
+        author_tag: bot?.username || null,
+        content: "",
+        attachments: [],
+        embeds: [embed],
+        user_tag: req.discordSession.username || null,
+        user_avatar: null,
+      });
+
+      res.json({ ok: true, message_id: sent?.id || null });
+    } catch (e) {
+      console.error("[warn test-dm]", e);
+      const status = e?.status === 403 ? 403 : 500;
+      res.status(status).json({
+        error: "test_dm_failed",
+        message:
+          e?.status === 403
+            ? "Discord refuse le DM (ouvre tes MP au bot ou partage un serveur)."
+            : String(e.message || e),
+      });
     }
   }
 );
@@ -1348,26 +1585,6 @@ app.delete(
       }
       deleteGuildWarning(guildId, id);
       res.json({ ok: true, removed_id: id, user_id: row.user_id });
-    } catch (e) {
-      console.error(e);
-      res.status(500).json({ error: String(e.message) });
-    }
-  }
-);
-
-app.delete(
-  "/api/guilds/:guildId/warnings/user/:userId",
-  requireDiscordSession,
-  requireGuildManageAccess,
-  (req, res) => {
-    try {
-      const guildId = req.guildId;
-      const userId = normalizeSnowflakeId(req.params.userId);
-      if (!userId) {
-        return res.status(400).json({ error: "user_id invalide" });
-      }
-      const n = clearGuildWarningsForUser(guildId, userId);
-      res.json({ ok: true, cleared: n, user_id: userId });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: String(e.message) });

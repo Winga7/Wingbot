@@ -1271,6 +1271,62 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   background: rgba(0, 0, 0, 0.15);
 }
 
+.dm-main-head-text {
+  flex: 1;
+  min-width: 0;
+}
+
+#btn-sync-dm-thread {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.warn-list-panel {
+  margin-top: 0.55rem;
+}
+
+.warn-row--card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 0.5rem;
+  background: rgba(24, 28, 48, 0.65);
+  color: var(--text, #e8ecff);
+}
+
+.warn-row-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.warn-row-id {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.warn-src-badge {
+  font-size: 0.68rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.warn-row-user {
+  margin-top: 0.35rem;
+}
+
+.warn-row-reason {
+  margin-top: 0.3rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .dm-avatar {
   width: 36px;
   height: 36px;

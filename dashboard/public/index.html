@@ -438,6 +438,9 @@
                         <strong id="dm-current-name">—</strong>
                         <span class="muted tiny mono" id="dm-current-id">—</span>
                       </div>
+                      <button type="button" class="btn ghost tiny" id="btn-sync-dm-thread" title="Importer l’historique Discord (rappels deadline, etc.)">
+                        Importer Discord
+                      </button>
                     </header>
                     <div class="dm-messages" id="dm-messages">
                       <p class="muted tiny dm-placeholder">
@@ -1273,12 +1276,24 @@
               <h3>Configuration</h3>
               <p class="muted tiny">Sanctions automatiques quand le seuil est atteint. Les warns antispam comptent aussi.</p>
               <div id="warn-config-panel"></div>
+              <div class="fonda-actions" style="margin-top:0.75rem">
+                <button type="button" class="btn secondary" id="btn-test-warn-dm">
+                  Tester le DM d’avertissement
+                </button>
+                <span class="muted tiny" id="warn-test-dm-status"></span>
+              </div>
+              <p class="muted tiny" style="margin-top:0.35rem">
+                Envoie un embed de démo en message privé sur <strong>ton</strong> compte Discord (aucun warn réel créé).
+              </p>
             </div>
 
             <div class="panel-block" id="warn-list-root">
               <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
-                <h3 style="margin:0">Warns actifs</h3>
-                <button type="button" class="btn ghost tiny" id="btn-refresh-warns">Rafraîchir</button>
+                <h3 style="margin:0">Warns actifs <span class="muted tiny" id="warn-list-count"></span></h3>
+                <div style="display:flex;gap:0.35rem;flex-wrap:wrap">
+                  <button type="button" class="btn ghost tiny" id="btn-clear-user-warns" hidden>Tout retirer (filtre)</button>
+                  <button type="button" class="btn ghost tiny" id="btn-refresh-warns">Rafraîchir</button>
+                </div>
               </div>
               <label class="field-row">
                 <span>Filtrer par ID membre</span>
@@ -1288,14 +1303,14 @@
             </div>
 
             <div class="panel-block">
-              <h3>Commandes</h3>
+              <h3>Commandes Discord</h3>
               <ul class="mod-doc-list muted">
-                <li><strong class="mono">warn</strong> — Enregistre un warn (+ log mod si activé)</li>
-                <li><strong class="mono">warns</strong> — Liste les warns d’un membre</li>
-                <li><strong class="mono">unwarn</strong> — Retire un warn par ID ou tous (<code>unwarn all @membre</code>)</li>
+                <li><strong class="mono">/warn</strong> ou <code>warn @membre raison</code> — Enregistre un warn (+ DM embed + log)</li>
+                <li><strong class="mono">/warns</strong> — Liste les warns d’un membre</li>
+                <li><strong class="mono">/unwarn</strong> — Retire un warn par ID ou tous (<code>unwarn all @membre</code>)</li>
               </ul>
               <p class="muted tiny">
-                Active le log <strong>Avertissements</strong> dans l’onglet Logs.
+                Active le log <strong>Avertissements</strong> dans l’onglet Logs. Tu peux aussi retirer un warn ici avec le bouton <strong>Retirer</strong>.
               </p>
             </div>
           </section>

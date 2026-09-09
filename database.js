@@ -1344,6 +1344,7 @@ function recordDmMessage({
   embeds,
   user_tag,
   user_avatar,
+  created_at,
 }) {
   if (!user_id || !direction) return null;
   const attJson = attachments
@@ -1360,39 +1361,83 @@ function recordDmMessage({
     Array.isArray(embParsed) && embParsed.length
       ? JSON.stringify(embParsed)
       : null;
-  const info = db
-    .prepare(
-      `INSERT OR IGNORE INTO dm_messages
-        (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments, embeds)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
+  const createdAtSql = created_at
+    ? String(created_at).replace("T", " ").replace(/\.\d+Z$/, "").replace(/Z$/, "")
+    : null;
+  const info = createdAtSql
+    ? db
+        .prepare(
+          `INSERT OR IGNORE INTO dm_messages
+            (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments, embeds, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          String(user_id),
+          channel_id ? String(channel_id) : null,
+          message_id ? String(message_id) : null,
+          direction,
+          author_id ? String(author_id) : null,
+          author_tag || null,
+          content || "",
+          attJson,
+          embJson,
+          createdAtSql
+        )
+    : db
+        .prepare(
+          `INSERT OR IGNORE INTO dm_messages
+            (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments, embeds)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          String(user_id),
+          channel_id ? String(channel_id) : null,
+          message_id ? String(message_id) : null,
+          direction,
+          author_id ? String(author_id) : null,
+          author_tag || null,
+          content || "",
+          attJson,
+          embJson
+        );
+  // upsert thread — conserve le max last_message_at si on importe de l'historique
+  if (createdAtSql) {
+    db.prepare(
+      `INSERT INTO dm_threads (user_id, user_tag, user_avatar, channel_id, last_message_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         user_tag        = COALESCE(excluded.user_tag, dm_threads.user_tag),
+         user_avatar     = COALESCE(excluded.user_avatar, dm_threads.user_avatar),
+         channel_id      = COALESCE(excluded.channel_id, dm_threads.channel_id),
+         last_message_at = CASE
+           WHEN dm_threads.last_message_at IS NULL OR excluded.last_message_at > dm_threads.last_message_at
+           THEN excluded.last_message_at
+           ELSE dm_threads.last_message_at
+         END`
+    ).run(
       String(user_id),
+      user_tag || null,
+      user_avatar || null,
       channel_id ? String(channel_id) : null,
-      message_id ? String(message_id) : null,
-      direction,
-      author_id ? String(author_id) : null,
-      author_tag || null,
-      content || "",
-      attJson,
-      embJson
+      createdAtSql
     );
-  // upsert thread
-  db.prepare(
-    `INSERT INTO dm_threads (user_id, user_tag, user_avatar, channel_id, last_message_at)
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-     ON CONFLICT(user_id) DO UPDATE SET
-       user_tag        = COALESCE(excluded.user_tag, dm_threads.user_tag),
-       user_avatar     = COALESCE(excluded.user_avatar, dm_threads.user_avatar),
-       channel_id      = COALESCE(excluded.channel_id, dm_threads.channel_id),
-       last_message_at = CURRENT_TIMESTAMP`
-  ).run(
-    String(user_id),
-    user_tag || null,
-    user_avatar || null,
-    channel_id ? String(channel_id) : null
-  );
-  return info.lastInsertRowid || null;
+  } else {
+    db.prepare(
+      `INSERT INTO dm_threads (user_id, user_tag, user_avatar, channel_id, last_message_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id) DO UPDATE SET
+         user_tag        = COALESCE(excluded.user_tag, dm_threads.user_tag),
+         user_avatar     = COALESCE(excluded.user_avatar, dm_threads.user_avatar),
+         channel_id      = COALESCE(excluded.channel_id, dm_threads.channel_id),
+         last_message_at = CURRENT_TIMESTAMP`
+    ).run(
+      String(user_id),
+      user_tag || null,
+      user_avatar || null,
+      channel_id ? String(channel_id) : null
+    );
+  }
+  return info.changes > 0 ? info.lastInsertRowid || true : null;
 }
 
 function listDmThreads(limit = 100) {
@@ -1401,11 +1446,11 @@ function listDmThreads(limit = 100) {
       `SELECT t.user_id, t.user_tag, t.user_avatar, t.channel_id,
               t.last_read_at, t.last_message_at,
               (SELECT content FROM dm_messages
-                 WHERE user_id = t.user_id ORDER BY id DESC LIMIT 1) AS last_content,
+                 WHERE user_id = t.user_id ORDER BY datetime(created_at) DESC, id DESC LIMIT 1) AS last_content,
               (SELECT embeds FROM dm_messages
-                 WHERE user_id = t.user_id ORDER BY id DESC LIMIT 1) AS last_embeds,
+                 WHERE user_id = t.user_id ORDER BY datetime(created_at) DESC, id DESC LIMIT 1) AS last_embeds,
               (SELECT direction FROM dm_messages
-                 WHERE user_id = t.user_id ORDER BY id DESC LIMIT 1) AS last_direction,
+                 WHERE user_id = t.user_id ORDER BY datetime(created_at) DESC, id DESC LIMIT 1) AS last_direction,
               (SELECT COUNT(*) FROM dm_messages
                  WHERE user_id = t.user_id
                    AND direction = 'in'
@@ -1439,7 +1484,7 @@ function getDmThread(userId, limit = 200) {
   const messages = db
     .prepare(
       `SELECT id, message_id, direction, author_id, author_tag, content, attachments, embeds, created_at
-       FROM dm_messages WHERE user_id = ? ORDER BY id ASC LIMIT ?`
+       FROM dm_messages WHERE user_id = ? ORDER BY datetime(created_at) ASC, id ASC LIMIT ?`
     )
     .all(String(userId), limit)
     .map((r) => ({
