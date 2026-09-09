@@ -18,7 +18,7 @@ const DISCORD_INVITE =
 const HTTP_URL = /https?:\/\/[^\s<>)]+/gi;
 
 /**
- * @typedef {{ t: number, channelId: string, kind: string, urlKey?: string }} SpamEvent
+ * @typedef {{ t: number, channelId: string, messageId: string, kind: string, urlKey?: string, strong?: boolean }} SpamEvent
  */
 
 function trackerKey(guildId, userId) {
@@ -79,6 +79,17 @@ function messageHasUploadedImage(message) {
   return false;
 }
 
+/**
+ * Tout salon de guilde où on peut chatter en texte :
+ * salons textuels, annonces, threads, et chat intégré des vocaux / scènes.
+ */
+function isAntispamEligibleChannel(channel) {
+  if (!channel?.guild) return false;
+  if (!channel.isTextBased?.()) return false;
+  if (channel.isDMBased?.()) return false;
+  return true;
+}
+
 function pruneActivity(key, windowMs) {
   const entry = activity.get(key);
   if (!entry) return [];
@@ -88,7 +99,7 @@ function pruneActivity(key, windowMs) {
   return entry.events;
 }
 
-function pushActivity(guildId, userId, channelId, kind, extra = {}) {
+function pushActivity(guildId, userId, channelId, messageId, kind, extra = {}) {
   const key = trackerKey(guildId, userId);
   const now = Date.now();
   let entry = activity.get(key);
@@ -96,7 +107,7 @@ function pushActivity(guildId, userId, channelId, kind, extra = {}) {
     entry = { events: [] };
     activity.set(key, entry);
   }
-  entry.events.push({ t: now, channelId, kind, ...extra });
+  entry.events.push({ t: now, channelId, messageId, kind, ...extra });
   if (activity.size > 8000) {
     const cutoff = now - 180000;
     for (const [k, v] of activity) {
@@ -213,7 +224,65 @@ async function sendModLog(guild, embed) {
   await ch.send({ embeds: [embed] }).catch(() => null);
 }
 
-async function applySanction(message, cfg, kind, evalResult) {
+/**
+ * Supprime tous les messages spam trackés (textuels + chat des vocaux),
+ * pas seulement le message qui a déclenché la détection.
+ */
+async function deleteSpamMessages(guild, events, kind, triggerMessage) {
+  /** @type {Map<string, Set<string>>} */
+  const byChannel = new Map();
+
+  const add = (channelId, messageId) => {
+    if (!channelId || !messageId) return;
+    if (!byChannel.has(channelId)) byChannel.set(channelId, new Set());
+    byChannel.get(channelId).add(messageId);
+  };
+
+  for (const e of events) {
+    if (e.kind !== kind) continue;
+    add(e.channelId, e.messageId);
+  }
+  if (triggerMessage?.id) {
+    add(triggerMessage.channel?.id || triggerMessage.channelId, triggerMessage.id);
+  }
+
+  let deleted = 0;
+  for (const [channelId, idSet] of byChannel) {
+    const ids = [...idSet];
+    const ch =
+      guild.channels.cache.get(channelId) ||
+      (await guild.channels.fetch(channelId).catch(() => null));
+    if (!ch?.isTextBased?.() || !ch.messages) continue;
+
+    // bulkDelete si possible (≥2 msgs, <14j) — marche aussi sur le chat d’un vocal
+    if (ids.length >= 2 && typeof ch.bulkDelete === "function") {
+      try {
+        const res = await ch.bulkDelete(ids, true);
+        deleted += res?.size || ids.length;
+        continue;
+      } catch {
+        /* fallback unitaire */
+      }
+    }
+
+    for (const id of ids) {
+      try {
+        if (triggerMessage?.id === id && triggerMessage.deletable !== false) {
+          await triggerMessage.delete().catch(() => null);
+          deleted += 1;
+        } else {
+          await ch.messages.delete(id).catch(() => null);
+          deleted += 1;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return deleted;
+}
+
+async function applySanction(message, cfg, kind, evalResult, events) {
   const { guild, member, author, channel } = message;
   if (!guild || !member) return false;
 
@@ -230,6 +299,8 @@ async function applySanction(message, cfg, kind, evalResult) {
         : warnCfg.timeout_minutes;
   }
 
+  const trackedCount = events.filter((e) => e.kind === kind).length;
+
   if (cfg.test_mode) {
     const embed = new EmbedBuilder()
       .setColor(0x3b82f6)
@@ -241,7 +312,7 @@ async function applySanction(message, cfg, kind, evalResult) {
           `**Type :** ${kind}`,
           `**Détection :** ${reasonLabel}`,
           evalResult.detail ? `**Détail :** ${evalResult.detail}` : null,
-          `**Serait appliqué :** suppression + warn enregistré`,
+          `**Serait appliqué :** suppression de ~${Math.max(trackedCount, 1)} msg(s) + warn`,
           `**Warn simulé :** ${nextTotal}/${warnCfg.warns_before_timeout}`,
           simulatedTimeout > 0
             ? `**Sourdine simulée :** ${simulatedTimeout} min`
@@ -256,7 +327,7 @@ async function applySanction(message, cfg, kind, evalResult) {
     return true;
   }
 
-  await message.delete().catch(() => null);
+  const deleted = await deleteSpamMessages(guild, events, kind, message);
 
   const fullReason = `Antispam : ${reasonLabel}${
     evalResult.detail ? ` (${evalResult.detail})` : ""
@@ -281,6 +352,7 @@ async function applySanction(message, cfg, kind, evalResult) {
         `**Type :** ${kind}`,
         `**Warn #${result.warning.id}** · total ${result.total}/${warnCfg.warns_before_timeout}`,
         evalResult.detail ? `**Détail :** ${evalResult.detail}` : null,
+        deleted > 0 ? `**Messages supprimés :** ${deleted}` : null,
         result.timeoutMin > 0
           ? `**Sourdine auto :** ${result.timeoutMin} min`
           : null,
@@ -295,8 +367,10 @@ async function applySanction(message, cfg, kind, evalResult) {
 }
 
 async function handleAntispamMessage(message) {
-  if (!message.guild || message.author.bot) return false;
-  if (message.system) return false;
+  if (!message.guild || message.system) return false;
+  // Ignore uniquement notre propre bot — les bots de raid / comptes bot spammeurs passent
+  if (message.author.id === message.client.user?.id) return false;
+  if (!isAntispamEligibleChannel(message.channel)) return false;
 
   const cfg = getAntispamConfig(message.guild.id);
   if (!cfg.enabled) return false;
@@ -323,12 +397,25 @@ async function handleAntispamMessage(message) {
     const rule = effectiveRule(baseRule, member, cfg);
 
     if (kind === "url" && urlInfo) {
-      pushActivity(message.guild.id, message.author.id, message.channel.id, "url", {
-        urlKey: urlInfo.primaryKey,
-        strong: urlInfo.strong,
-      });
+      pushActivity(
+        message.guild.id,
+        message.author.id,
+        message.channel.id,
+        message.id,
+        "url",
+        {
+          urlKey: urlInfo.primaryKey,
+          strong: urlInfo.strong,
+        }
+      );
     } else {
-      pushActivity(message.guild.id, message.author.id, message.channel.id, kind);
+      pushActivity(
+        message.guild.id,
+        message.author.id,
+        message.channel.id,
+        message.id,
+        kind
+      );
     }
 
     const events = pruneActivity(key, rule.window_sec * 1000);
@@ -342,7 +429,7 @@ async function handleAntispamMessage(message) {
 
     if (!evalResult) continue;
 
-    const acted = await applySanction(message, cfg, kind, evalResult);
+    const acted = await applySanction(message, cfg, kind, evalResult, events);
     if (acted) {
       const remaining = events.filter((e) => e.kind !== kind);
       if (remaining.length) activity.set(key, { events: remaining });
@@ -371,3 +458,5 @@ module.exports.handleAntispamMessage = handleAntispamMessage;
 module.exports.analyzeUrlMessage = analyzeUrlMessage;
 module.exports.messageHasUploadedImage = messageHasUploadedImage;
 module.exports.evaluateSpam = evaluateSpam;
+module.exports.isAntispamEligibleChannel = isAntispamEligibleChannel;
+module.exports.deleteSpamMessages = deleteSpamMessages;

@@ -449,7 +449,14 @@ async function imageUrlToDataUri(imageUrl) {
   return `data:${contentType};base64,${b64}`;
 }
 
-const LOGGABLE_CHANNEL_TYPES = new Set([0, 5, 15]);
+/** Salons où on peut poster du texte (inclut le chat des vocaux / scène). */
+const LOGGABLE_CHANNEL_TYPES = new Set([
+  0, // GuildText
+  2, // GuildVoice (chat textuel du vocal)
+  5, // GuildAnnouncement
+  13, // GuildStageVoice (chat scène)
+  15, // GuildForum
+]);
 
 function formatChannelsForUi(channels) {
   const list = channels.filter((c) => LOGGABLE_CHANNEL_TYPES.has(c.type));
@@ -460,6 +467,12 @@ function formatChannelsForUi(channels) {
   const out = [];
   const seen = new Set();
 
+  const labelFor = (c) => {
+    if (c.type === 2) return `🔊 ${c.name}`;
+    if (c.type === 13) return `🎙️ ${c.name}`;
+    return c.name;
+  };
+
   for (const cat of categories) {
     const kids = list
       .filter((c) => c.parent_id === cat.id)
@@ -467,8 +480,9 @@ function formatChannelsForUi(channels) {
     for (const k of kids) {
       out.push({
         id: k.id,
-        name: k.name,
+        name: labelFor(k),
         category: cat.name,
+        type: k.type,
       });
       seen.add(k.id);
     }
@@ -478,7 +492,7 @@ function formatChannelsForUi(channels) {
     .filter((c) => !c.parent_id && !seen.has(c.id))
     .sort((a, b) => a.position - b.position);
   for (const o of orphans) {
-    out.push({ id: o.id, name: o.name, category: null });
+    out.push({ id: o.id, name: labelFor(o), category: null, type: o.type });
   }
 
   return out;
