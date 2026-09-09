@@ -4555,6 +4555,88 @@ async function loadFondaThreadMessages() {
   }
 }
 
+/** Markdown Discord léger (**bold**, *italic*, `code`, liens) après escapeHtml. */
+function formatDmInlineMarkdown(escaped) {
+  let s = String(escaped || "");
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, url) => {
+    return `<a class="dm-md-link" href="${escapeAttr(
+      url
+    )}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+  s = s.replace(/`([^`]+)`/g, '<code class="dm-md-code">$1</code>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  return s;
+}
+
+function renderDmEmbedsHtml(embeds) {
+  if (!Array.isArray(embeds) || !embeds.length) return "";
+  return embeds
+    .map((e) => {
+      if (!e || typeof e !== "object") return "";
+      const color =
+        typeof e.color === "number" && e.color >= 0
+          ? `#${e.color.toString(16).padStart(6, "0")}`
+          : "#5865f2";
+      const author = e.author?.name
+        ? `<div class="dm-embed-author">${
+            e.author.icon_url
+              ? `<img src="${escapeAttr(e.author.icon_url)}" alt="" />`
+              : ""
+          }<span>${escapeHtml(e.author.name)}</span></div>`
+        : "";
+      const title = e.title
+        ? e.url
+          ? `<a class="dm-embed-title" href="${escapeAttr(
+              e.url
+            )}" target="_blank" rel="noopener noreferrer">${escapeHtml(
+              e.title
+            )}</a>`
+          : `<div class="dm-embed-title">${escapeHtml(e.title)}</div>`
+        : "";
+      const desc = e.description
+        ? `<div class="dm-embed-desc">${formatDmInlineMarkdown(
+            escapeHtml(e.description)
+          )}</div>`
+        : "";
+      let fields = "";
+      if (Array.isArray(e.fields) && e.fields.length) {
+        fields = `<div class="dm-embed-fields">${e.fields
+          .map((f) => {
+            const inline = f.inline ? " inline" : "";
+            return `<div class="dm-embed-field${inline}"><div class="dm-embed-field-name">${escapeHtml(
+              f.name || ""
+            )}</div><div class="dm-embed-field-value">${formatDmInlineMarkdown(
+              escapeHtml(f.value || "")
+            )}</div></div>`;
+          })
+          .join("")}</div>`;
+      }
+      const thumb = e.thumbnail?.url
+        ? `<img class="dm-embed-thumb" src="${escapeAttr(
+            e.thumbnail.url
+          )}" alt="" />`
+        : "";
+      const image = e.image?.url
+        ? `<img class="dm-embed-image" src="${escapeAttr(e.image.url)}" alt="" />`
+        : "";
+      const footer = e.footer?.text
+        ? `<div class="dm-embed-footer">${
+            e.footer.icon_url
+              ? `<img src="${escapeAttr(e.footer.icon_url)}" alt="" />`
+              : ""
+          }<span>${escapeHtml(e.footer.text)}</span></div>`
+        : "";
+      return `<div class="dm-embed" style="--dm-embed-accent:${color}">
+        <div class="dm-embed-body">
+          ${author}${title}${desc}${fields}${image}${footer}
+        </div>
+        ${thumb}
+      </div>`;
+    })
+    .join("");
+}
+
 function renderFondaMessages(thread) {
   const root = $("dm-messages");
   if (!root) return;
@@ -4652,6 +4734,15 @@ function renderFondaMessages(thread) {
       }
     }
 
+    const embedsHtml = renderDmEmbedsHtml(it.m.embeds);
+    const hasEmbeds = embedsHtml.length > 0;
+    const rawContent = String(it.m.content || "").trim();
+    const contentHtml = rawContent
+      ? `<div class="dm-msg-content">${formatDmInlineMarkdown(
+          escapeHtml(rawContent)
+        )}</div>`
+      : "";
+
     // Avatar uniquement sur le dernier message du groupe (côté `in`).
     // Pour `out`, on ne met pas d'avatar (le bot s'en passe), ça allège l'UI.
     const avatarSlot =
@@ -4663,10 +4754,13 @@ function renderFondaMessages(thread) {
           }</div>`
         : "";
 
+    const bubbleClass = hasEmbeds && !rawContent ? "dm-bubble dm-bubble--embed-only" : "dm-bubble";
+
     row.innerHTML = `
       ${avatarSlot}
-      <div class="dm-bubble" title="${escapeAttr(fullTs)}">
-        <div class="dm-msg-content">${escapeHtml(it.m.content || "")}</div>
+      <div class="${bubbleClass}" title="${escapeAttr(fullTs)}">
+        ${contentHtml}
+        ${embedsHtml}
         ${attachmentsHtml}
       </div>
       ${it.lastOfGroup ? `<span class="dm-row-time">${escapeHtml(time)}</span>` : ""}

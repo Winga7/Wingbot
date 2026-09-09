@@ -282,13 +282,51 @@ client.on(Events.MessageCreate, async (message) => {
     try {
       const me = client.user;
       const isFromBot = message.author.id === me?.id;
-      const otherUser = isFromBot
-        ? await message.channel.recipient?.fetch?.().catch(() => null) ||
-          message.channel.recipient ||
-          null
-        : message.author;
-      const otherId = otherUser?.id || (isFromBot ? null : message.author.id);
+      let otherUser = isFromBot ? null : message.author;
+      let otherId = isFromBot ? null : message.author.id;
+
+      if (isFromBot) {
+        // DMs envoyés via discord.js OU via REST (ex. gestionimpact deadlines)
+        const ch = message.channel;
+        otherId =
+          ch?.recipientId ||
+          ch?.recipient?.id ||
+          [...(ch?.recipients?.values?.() || [])][0]?.id ||
+          null;
+        otherUser =
+          ch?.recipient ||
+          (otherId ? await client.users.fetch(otherId).catch(() => null) : null);
+        if (!otherId && otherUser?.id) otherId = otherUser.id;
+      }
+
       if (otherId) {
+        const embeds = [...(message.embeds || [])].map((e) => ({
+          title: e.title || undefined,
+          description: e.description || undefined,
+          url: e.url || undefined,
+          color: e.color ?? undefined,
+          fields: (e.fields || []).map((f) => ({
+            name: f.name,
+            value: f.value,
+            inline: !!f.inline,
+          })),
+          footer: e.footer
+            ? { text: e.footer.text, icon_url: e.footer.iconURL || undefined }
+            : undefined,
+          timestamp: e.timestamp || undefined,
+          author: e.author
+            ? {
+                name: e.author.name,
+                icon_url: e.author.iconURL || undefined,
+                url: e.author.url || undefined,
+              }
+            : undefined,
+          thumbnail: e.thumbnail?.url
+            ? { url: e.thumbnail.url }
+            : undefined,
+          image: e.image?.url ? { url: e.image.url } : undefined,
+        }));
+
         recordDmMessage({
           user_id: otherId,
           channel_id: message.channel?.id || null,
@@ -301,7 +339,8 @@ client.on(Events.MessageCreate, async (message) => {
             name: a.name,
             url: a.url,
           })),
-          user_tag: otherUser?.tag || null,
+          embeds,
+          user_tag: otherUser?.tag || otherUser?.username || null,
           user_avatar: otherUser?.displayAvatarURL?.({ size: 128 }) || null,
         });
       }

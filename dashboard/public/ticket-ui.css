@@ -60,10 +60,13 @@
 }
 
 .ticket-subnav-btn {
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
-  color: var(--text-dim, #b8bdd8);
+  color: var(--text-dim, #b8bdd8) !important;
+  -webkit-text-fill-color: var(--text-dim, #b8bdd8);
   font-size: 0.78rem;
   padding: 0.4rem 0.7rem;
   border-radius: 8px;
@@ -72,13 +75,15 @@
 }
 
 .ticket-subnav-btn:hover {
-  color: var(--text, #fff);
+  color: var(--text, #fff) !important;
+  -webkit-text-fill-color: #fff;
   background: rgba(88, 101, 242, 0.15);
   border-color: rgba(88, 101, 242, 0.35);
 }
 
 .ticket-subnav-btn.active {
-  color: #fff;
+  color: #fff !important;
+  -webkit-text-fill-color: #fff;
   background: rgba(88, 101, 242, 0.45);
   border-color: rgba(120, 130, 255, 0.65);
 }
@@ -89,33 +94,41 @@
   gap: 0.55rem;
 }
 
-.ticket-hub-card {
+/* Boutons natifs Windows/Firefox : couleur système noire par défaut — forcer le texte clair */
+#view-ticketing button.ticket-hub-card {
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   text-align: left;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
   padding: 0.85rem 0.95rem;
   background: rgba(32, 38, 62, 0.96);
-  color: var(--text, #e8ecff);
+  color: #e8ecff !important;
+  -webkit-text-fill-color: #e8ecff;
+  font: inherit;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, transform 0.12s;
 }
 
-.ticket-hub-card:hover {
+#view-ticketing button.ticket-hub-card:hover {
   border-color: rgba(88, 101, 242, 0.55);
   background: rgba(44, 52, 88, 0.98);
   transform: translateY(-1px);
 }
 
-.ticket-hub-card strong {
+#view-ticketing button.ticket-hub-card strong {
   display: block;
   font-size: 0.9rem;
   margin-bottom: 0.3rem;
-  color: #fff;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
 }
 
-.ticket-hub-card .muted {
-  color: var(--text-dim, #aab0cf) !important;
+#view-ticketing button.ticket-hub-card .muted,
+#view-ticketing button.ticket-hub-card span.muted {
+  color: #aab0cf !important;
+  -webkit-text-fill-color: #aab0cf;
 }
 
 #view-ticketing #ticket-hub-summary {

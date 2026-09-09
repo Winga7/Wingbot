@@ -1283,10 +1283,20 @@ function migrateDmMessagesTable() {
       author_tag   TEXT,
       content      TEXT,
       attachments  TEXT,
+      embeds       TEXT,
       created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
     )
     `
   ).run();
+  // Colonnes ajoutées après coup (SQLite)
+  try {
+    const cols = db.prepare(`PRAGMA table_info(dm_messages)`).all();
+    if (!cols.some((c) => c.name === "embeds")) {
+      db.prepare(`ALTER TABLE dm_messages ADD COLUMN embeds TEXT`).run();
+    }
+  } catch {
+    /* ignore */
+  }
   db.prepare(
     `CREATE INDEX IF NOT EXISTS idx_dm_messages_user ON dm_messages(user_id, created_at)`
   ).run();
@@ -1305,6 +1315,23 @@ function migrateDmMessagesTable() {
   ).run();
 }
 
+/** Aperçu texte d’un embed Discord (pour liste threads / fallback content). */
+function dmEmbedPreview(embeds) {
+  if (!Array.isArray(embeds) || !embeds.length) return "";
+  const e = embeds[0] || {};
+  const title = String(e.title || "").trim();
+  const desc = String(e.description || "").trim();
+  if (title && desc) return `${title} — ${desc}`.slice(0, 180);
+  if (title) return title.slice(0, 180);
+  if (desc) return desc.slice(0, 180);
+  const field = Array.isArray(e.fields) && e.fields[0];
+  if (field?.name) {
+    const v = String(field.value || "").replace(/\n/g, " ").trim();
+    return (v ? `${field.name} : ${v}` : String(field.name)).slice(0, 180);
+  }
+  return "Embed";
+}
+
 function recordDmMessage({
   user_id,
   channel_id,
@@ -1314,6 +1341,7 @@ function recordDmMessage({
   author_tag,
   content,
   attachments,
+  embeds,
   user_tag,
   user_avatar,
 }) {
@@ -1323,11 +1351,20 @@ function recordDmMessage({
       ? attachments
       : JSON.stringify(attachments)
     : null;
+  const embParsed = embeds
+    ? typeof embeds === "string"
+      ? safeJsonParse(embeds, [])
+      : embeds
+    : [];
+  const embJson =
+    Array.isArray(embParsed) && embParsed.length
+      ? JSON.stringify(embParsed)
+      : null;
   const info = db
     .prepare(
       `INSERT OR IGNORE INTO dm_messages
-        (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments, embeds)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       String(user_id),
@@ -1337,7 +1374,8 @@ function recordDmMessage({
       author_id ? String(author_id) : null,
       author_tag || null,
       content || "",
-      attJson
+      attJson,
+      embJson
     );
   // upsert thread
   db.prepare(
@@ -1364,6 +1402,8 @@ function listDmThreads(limit = 100) {
               t.last_read_at, t.last_message_at,
               (SELECT content FROM dm_messages
                  WHERE user_id = t.user_id ORDER BY id DESC LIMIT 1) AS last_content,
+              (SELECT embeds FROM dm_messages
+                 WHERE user_id = t.user_id ORDER BY id DESC LIMIT 1) AS last_embeds,
               (SELECT direction FROM dm_messages
                  WHERE user_id = t.user_id ORDER BY id DESC LIMIT 1) AS last_direction,
               (SELECT COUNT(*) FROM dm_messages
@@ -1374,7 +1414,17 @@ function listDmThreads(limit = 100) {
        ORDER BY t.last_message_at DESC
        LIMIT ?`
     )
-    .all(limit);
+    .all(limit)
+    .map((t) => {
+      const embeds = t.last_embeds ? safeJsonParse(t.last_embeds, []) : [];
+      const preview =
+        String(t.last_content || "").trim() || dmEmbedPreview(embeds) || "";
+      return {
+        ...t,
+        last_content: preview,
+        last_embeds: undefined,
+      };
+    });
   return threads;
 }
 
@@ -1388,13 +1438,14 @@ function getDmThread(userId, limit = 200) {
     .get(String(userId));
   const messages = db
     .prepare(
-      `SELECT id, message_id, direction, author_id, author_tag, content, attachments, created_at
+      `SELECT id, message_id, direction, author_id, author_tag, content, attachments, embeds, created_at
        FROM dm_messages WHERE user_id = ? ORDER BY id ASC LIMIT ?`
     )
     .all(String(userId), limit)
     .map((r) => ({
       ...r,
       attachments: r.attachments ? safeJsonParse(r.attachments, []) : [],
+      embeds: r.embeds ? safeJsonParse(r.embeds, []) : [],
     }));
   return { thread: thread || null, messages };
 }

@@ -1363,7 +1363,138 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   box-shadow: 0 1px 0 rgba(99, 102, 241, 0.25);
 }
 
-/* Coins "groupÃ©s" : un message qui n'est pas isolÃ© voit son angle interne
+.dm-row .dm-bubble--embed-only {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0;
+  max-width: min(26rem, 85%);
+}
+
+.dm-md-link {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+.dm-row.out .dm-bubble:not(.dm-bubble--embed-only) .dm-md-link {
+  color: #e0e7ff;
+}
+.dm-md-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  padding: 0.05em 0.3em;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.dm-embed {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+  border-radius: 6px;
+  background: #2b2d31;
+  border-left: 4px solid var(--dm-embed-accent, #5865f2);
+  overflow: hidden;
+  color: #dbdee1;
+  text-align: left;
+  white-space: normal;
+}
+.dm-bubble:not(.dm-bubble--embed-only) .dm-embed {
+  margin-top: 0.45rem;
+}
+.dm-row.out .dm-bubble:not(.dm-bubble--embed-only) .dm-embed {
+  background: rgba(15, 16, 28, 0.55);
+}
+.dm-embed-body {
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.7rem 0.6rem;
+}
+.dm-embed-author {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #f2f3f5;
+}
+.dm-embed-author img {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+.dm-embed-title {
+  display: block;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #f2f3f5;
+  margin-bottom: 0.2rem;
+  text-decoration: none;
+}
+a.dm-embed-title:hover {
+  text-decoration: underline;
+}
+.dm-embed-desc {
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: #dbdee1;
+  white-space: pre-wrap;
+  margin-bottom: 0.35rem;
+}
+.dm-embed-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.15rem;
+}
+.dm-embed-field {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.dm-embed-field.inline {
+  grid-column: span 1;
+}
+.dm-embed-field-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #f2f3f5;
+  margin-bottom: 0.1rem;
+}
+.dm-embed-field-value {
+  font-size: 0.82rem;
+  color: #dbdee1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dm-embed-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 4px;
+  margin: 0.55rem 0.55rem 0.55rem 0;
+  flex-shrink: 0;
+}
+.dm-embed-image {
+  display: block;
+  max-width: 100%;
+  border-radius: 4px;
+  margin-top: 0.45rem;
+}
+.dm-embed-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  font-size: 0.7rem;
+  color: #949ba4;
+}
+.dm-embed-footer img {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+/* Coins "groupés" : un message qui n'est pas isolé voit son angle interne
    se rapprocher du voisin (style Messenger / iMessage). */
 .dm-row.in:not(.group-first) .dm-bubble  { border-top-left-radius: 6px; }
 .dm-row.in:not(.group-last)  .dm-bubble  { border-bottom-left-radius: 6px; }
