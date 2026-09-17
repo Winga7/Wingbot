@@ -286,13 +286,28 @@ client.on(Events.MessageCreate, async (message) => {
       let otherId = isFromBot ? null : message.author.id;
 
       if (isFromBot) {
-        // DMs envoyés via discord.js OU via REST (ex. gestionimpact deadlines)
-        const ch = message.channel;
+        // DMs envoyés via discord.js OU via REST (ex. gestionimpact)
+        let ch = message.channel;
         otherId =
           ch?.recipientId ||
           ch?.recipient?.id ||
-          [...(ch?.recipients?.values?.() || [])][0]?.id ||
           null;
+        if (!otherId && ch?.recipients?.cache?.size) {
+          otherId = [...ch.recipients.cache.keys()].find((id) => id !== me?.id) || null;
+        }
+        // Salon partiel / ouvert hors process → refetch pour avoir recipientId
+        if (!otherId && message.channelId) {
+          ch =
+            (await client.channels.fetch(message.channelId).catch(() => null)) ||
+            ch;
+          otherId =
+            ch?.recipientId ||
+            ch?.recipient?.id ||
+            [...(ch?.recipients?.cache?.keys?.() || [])].find(
+              (id) => id !== me?.id
+            ) ||
+            null;
+        }
         otherUser =
           ch?.recipient ||
           (otherId ? await client.users.fetch(otherId).catch(() => null) : null);
@@ -329,7 +344,7 @@ client.on(Events.MessageCreate, async (message) => {
 
         recordDmMessage({
           user_id: otherId,
-          channel_id: message.channel?.id || null,
+          channel_id: message.channel?.id || message.channelId || null,
           message_id: message.id,
           direction: isFromBot ? "out" : "in",
           author_id: message.author.id,
@@ -344,6 +359,12 @@ client.on(Events.MessageCreate, async (message) => {
           user_avatar: otherUser?.displayAvatarURL?.({ size: 128 }) || null,
           created_at: message.createdAt?.toISOString?.() || null,
         });
+      } else if (isFromBot) {
+        console.warn(
+          "[DM] message bot sans destinataire résolu",
+          message.id,
+          message.channelId
+        );
       }
     } catch (e) {
       console.error("[DM] enregistrement échoué:", e?.message || e);

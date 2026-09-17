@@ -3359,7 +3359,7 @@ async function syncFondaDmThread() {
     await loadFondaThreadMessages();
     alert(
       j.imported
-        ? `${j.imported} message(s) importé(s) depuis Discord.`
+        ? `${j.imported} message(s) synchronisé(s) depuis Discord.`
         : "Rien de nouveau à importer (déjà synchronisé)."
     );
   } catch {
@@ -3370,6 +3370,71 @@ async function syncFondaDmThread() {
       btn.textContent = "Importer Discord";
     }
   }
+}
+
+async function syncAllFondaDms() {
+  const btn = $("btn-sync-all-dms");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Sync…";
+  }
+  try {
+    const res = await fetch(apiUrl("/api/dm/sync-all"), {
+      method: "POST",
+      credentials: "include",
+      headers: authHeaders(),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(j.error || "Sync globale impossible.");
+      return;
+    }
+    await refreshFondaThreads();
+    if (fondaState.selectedUserId) {
+      await loadFondaThreadMessages();
+    }
+    const errHint = j.errors?.length
+      ? `\n(${j.errors.length} erreur(s) partielles)`
+      : "";
+    alert(
+      `${j.threads || 0} conversation(s) / ${j.messages || 0} message(s) synchronisé(s) (${j.discovered || 0} MP Discord).${errHint}`
+    );
+  } catch {
+    alert("Erreur réseau.");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Sync tous les MP";
+    }
+  }
+}
+
+async function openFondaDmByUserId(rawId) {
+  const userId = String(rawId || "").replace(/\D/g, "");
+  if (!/^\d{17,20}$/.test(userId)) {
+    alert("ID Discord invalide.");
+    return;
+  }
+  const res = await fetch(
+    apiUrl(`/api/dm/threads/${encodeURIComponent(userId)}/sync`),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: authHeaders(),
+    }
+  );
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    alert(j.error || "Impossible d’ouvrir / importer cette conversation.");
+    return;
+  }
+  await refreshFondaThreads();
+  await selectFondaThread(userId);
+  alert(
+    j.imported
+      ? `Conversation ouverte — ${j.imported} message(s) importé(s).`
+      : "Conversation ouverte."
+  );
 }
 
 function renderCustomCommands() {
@@ -5075,6 +5140,11 @@ $("btn-refresh-warns")?.addEventListener("click", () => loadWarningsList());
 $("btn-test-warn-dm")?.addEventListener("click", () => testWarnDm());
 $("btn-clear-user-warns")?.addEventListener("click", () => clearFilteredUserWarns());
 $("btn-sync-dm-thread")?.addEventListener("click", () => syncFondaDmThread());
+$("btn-sync-all-dms")?.addEventListener("click", () => syncAllFondaDms());
+$("dm-open-by-id")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  openFondaDmByUserId($("dm-open-user-id")?.value);
+});
 $("warn-filter-user")?.addEventListener("change", () => loadWarningsList());
 $("warn-filter-user")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") loadWarningsList();

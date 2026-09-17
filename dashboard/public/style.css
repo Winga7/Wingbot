@@ -1163,6 +1163,25 @@ body:has(#dirty-hint:not([hidden])) .save-dock,
   color: var(--text-dim);
 }
 
+.dm-sync-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.dm-open-by-id {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.dm-open-by-id .input-sm {
+  flex: 1;
+  min-width: 0;
+}
+
 .dm-thread-list {
   flex: 1;
   overflow-y: auto;

@@ -1362,44 +1362,80 @@ function recordDmMessage({
       ? JSON.stringify(embParsed)
       : null;
   const createdAtSql = created_at
-    ? String(created_at).replace("T", " ").replace(/\.\d+Z$/, "").replace(/Z$/, "")
+    ? String(created_at)
+        .replace("T", " ")
+        .replace(/\.\d+Z$/, "")
+        .replace(/Z$/, "")
     : null;
-  const info = createdAtSql
-    ? db
-        .prepare(
-          `INSERT OR IGNORE INTO dm_messages
-            (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments, embeds, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          String(user_id),
-          channel_id ? String(channel_id) : null,
-          message_id ? String(message_id) : null,
-          direction,
-          author_id ? String(author_id) : null,
-          author_tag || null,
-          content || "",
-          attJson,
-          embJson,
-          createdAtSql
-        )
-    : db
-        .prepare(
-          `INSERT OR IGNORE INTO dm_messages
-            (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments, embeds)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          String(user_id),
-          channel_id ? String(channel_id) : null,
-          message_id ? String(message_id) : null,
-          direction,
-          author_id ? String(author_id) : null,
-          author_tag || null,
-          content || "",
-          attJson,
-          embJson
-        );
+  const contentStr = content || "";
+
+  let info;
+  if (message_id) {
+    // Upsert : si le msg existait déjà sans embeds (ancien bug), on enrichit
+    info = db
+      .prepare(
+        `INSERT INTO dm_messages
+          (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments, embeds, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+         ON CONFLICT(message_id) DO UPDATE SET
+           user_id = excluded.user_id,
+           channel_id = COALESCE(excluded.channel_id, dm_messages.channel_id),
+           direction = excluded.direction,
+           author_id = COALESCE(excluded.author_id, dm_messages.author_id),
+           author_tag = COALESCE(excluded.author_tag, dm_messages.author_tag),
+           content = CASE
+             WHEN length(excluded.content) > length(COALESCE(dm_messages.content, ''))
+             THEN excluded.content
+             WHEN COALESCE(dm_messages.content, '') = '' THEN excluded.content
+             ELSE dm_messages.content
+           END,
+           attachments = CASE
+             WHEN excluded.attachments IS NOT NULL AND (dm_messages.attachments IS NULL OR dm_messages.attachments = '' OR dm_messages.attachments = '[]')
+             THEN excluded.attachments
+             ELSE COALESCE(dm_messages.attachments, excluded.attachments)
+           END,
+           embeds = CASE
+             WHEN excluded.embeds IS NOT NULL AND length(excluded.embeds) > 2
+             THEN excluded.embeds
+             ELSE dm_messages.embeds
+           END,
+           created_at = CASE
+             WHEN excluded.created_at IS NOT NULL THEN excluded.created_at
+             ELSE dm_messages.created_at
+           END`
+      )
+      .run(
+        String(user_id),
+        channel_id ? String(channel_id) : null,
+        String(message_id),
+        direction,
+        author_id ? String(author_id) : null,
+        author_tag || null,
+        contentStr,
+        attJson,
+        embJson,
+        createdAtSql
+      );
+  } else {
+    info = db
+      .prepare(
+        `INSERT INTO dm_messages
+          (user_id, channel_id, message_id, direction, author_id, author_tag, content, attachments, embeds, created_at)
+         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`
+      )
+      .run(
+        String(user_id),
+        channel_id ? String(channel_id) : null,
+        direction,
+        author_id ? String(author_id) : null,
+        author_tag || null,
+        contentStr,
+        attJson,
+        embJson,
+        createdAtSql
+      );
+  }
+
   // upsert thread — conserve le max last_message_at si on importe de l'historique
   if (createdAtSql) {
     db.prepare(

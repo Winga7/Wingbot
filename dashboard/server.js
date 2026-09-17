@@ -314,7 +314,11 @@ async function discordFetchJson(pathStr) {
 }
 
 async function discordBotJson(method, pathStr, bodyObj) {
-  const botToken = (process.env.TOKEN || "").trim();
+  const botToken = (
+    process.env.TOKEN ||
+    process.env.DISCORD_BOT_TOKEN ||
+    ""
+  ).trim();
   if (!botToken) {
     const err = new Error("TOKEN du bot manquant dans .env");
     err.code = "NO_BOT_TOKEN";
@@ -956,7 +960,103 @@ function normalizeDiscordApiEmbeds(embeds) {
   }));
 }
 
-/** Importe l'historique DM Discord (ex. anciens rappels gestionimpact). */
+/**
+ * Importe l'historique d'un salon DM Discord vers la base locale.
+ * @returns {{ imported: number, updated: number, channel_id: string, pages: number }}
+ */
+async function syncDmChannelFromDiscord(userId, options = {}) {
+  const maxPages = Math.min(Math.max(Number(options.maxPages) || 5, 1), 10);
+  const dmChannel = await discordBotJson("POST", "/users/@me/channels", {
+    recipient_id: userId,
+  });
+  if (!dmChannel?.id) {
+    const err = new Error("dm_channel_invalide");
+    err.code = "DM_CHANNEL";
+    throw err;
+  }
+
+  let userInfo = null;
+  try {
+    userInfo = await discordFetchJson(`/users/${encodeURIComponent(userId)}`);
+  } catch {
+    /* ignore */
+  }
+  const bot = await fetchBotUser().catch(() => null);
+  const botId = bot?.id || null;
+
+  let imported = 0;
+  let touched = 0;
+  let before = null;
+  let pages = 0;
+
+  while (pages < maxPages) {
+    pages += 1;
+    const qs = new URLSearchParams({ limit: "100" });
+    if (before) qs.set("before", before);
+    const batch = await discordBotJson(
+      "GET",
+      `/channels/${encodeURIComponent(dmChannel.id)}/messages?${qs}`
+    );
+    if (!Array.isArray(batch) || !batch.length) break;
+
+    for (const msg of batch) {
+      const authorId = msg.author?.id || null;
+      const isOut = botId && authorId === botId;
+      const embeds = normalizeDiscordApiEmbeds(msg.embeds);
+      const rowId = recordDmMessage({
+        user_id: userId,
+        channel_id: dmChannel.id,
+        message_id: msg.id,
+        direction: isOut ? "out" : "in",
+        author_id: authorId,
+        author_tag: msg.author
+          ? msg.author.global_name || msg.author.username || null
+          : null,
+        content: msg.content || "",
+        attachments: Array.isArray(msg.attachments)
+          ? msg.attachments.map((a) => ({
+              name: a.filename || a.name || "fichier",
+              url: a.url,
+            }))
+          : [],
+        embeds,
+        user_tag: userInfo
+          ? userInfo.global_name || userInfo.username || null
+          : null,
+        user_avatar: userInfo ? userAvatarUrlFromApi(userInfo) : null,
+        created_at: msg.timestamp || null,
+      });
+      if (rowId) {
+        touched += 1;
+        // lastInsertRowid only on insert; changes>0 also on update → count both
+        imported += 1;
+      }
+    }
+
+    before = batch[batch.length - 1]?.id;
+    if (batch.length < 100) break;
+  }
+
+  updateDmThreadProfile(userId, {
+    user_tag: userInfo
+      ? userInfo.global_name || userInfo.username || null
+      : null,
+    user_avatar: userInfo ? userAvatarUrlFromApi(userInfo) : null,
+    channel_id: dmChannel.id,
+  });
+
+  return {
+    imported,
+    updated: touched,
+    channel_id: dmChannel.id,
+    pages,
+    user_tag: userInfo
+      ? userInfo.global_name || userInfo.username || null
+      : null,
+  };
+}
+
+/** Importe l'historique DM Discord (ex. rappels / assignations gestionimpact). */
 app.post(
   "/api/dm/threads/:userId/sync",
   requireDiscordSession,
@@ -965,84 +1065,8 @@ app.post(
     const id = normalizeSnowflakeId(req.params.userId);
     if (!id) return res.status(400).json({ error: "user_id invalide" });
     try {
-      const dmChannel = await discordBotJson("POST", "/users/@me/channels", {
-        recipient_id: id,
-      });
-      if (!dmChannel?.id) {
-        return res.status(502).json({ error: "dm_channel_invalide" });
-      }
-
-      let userInfo = null;
-      try {
-        userInfo = await discordFetchJson(`/users/${encodeURIComponent(id)}`);
-      } catch {
-        /* ignore */
-      }
-      const bot = await fetchBotUser().catch(() => null);
-      const botId = bot?.id || null;
-
-      let imported = 0;
-      let before = null;
-      let pages = 0;
-      const maxPages = 5;
-
-      while (pages < maxPages) {
-        pages += 1;
-        const qs = new URLSearchParams({ limit: "100" });
-        if (before) qs.set("before", before);
-        const batch = await discordBotJson(
-          "GET",
-          `/channels/${encodeURIComponent(dmChannel.id)}/messages?${qs}`
-        );
-        if (!Array.isArray(batch) || !batch.length) break;
-
-        for (const msg of batch) {
-          const authorId = msg.author?.id || null;
-          const isOut = botId && authorId === botId;
-          const rowId = recordDmMessage({
-            user_id: id,
-            channel_id: dmChannel.id,
-            message_id: msg.id,
-            direction: isOut ? "out" : "in",
-            author_id: authorId,
-            author_tag: msg.author
-              ? msg.author.global_name || msg.author.username || null
-              : null,
-            content: msg.content || "",
-            attachments: Array.isArray(msg.attachments)
-              ? msg.attachments.map((a) => ({
-                  name: a.filename || a.name || "fichier",
-                  url: a.url,
-                }))
-              : [],
-            embeds: normalizeDiscordApiEmbeds(msg.embeds),
-            user_tag: userInfo
-              ? userInfo.global_name || userInfo.username || null
-              : null,
-            user_avatar: userInfo ? userAvatarUrlFromApi(userInfo) : null,
-            created_at: msg.timestamp || null,
-          });
-          if (rowId) imported += 1;
-        }
-
-        before = batch[batch.length - 1]?.id;
-        if (batch.length < 100) break;
-      }
-
-      updateDmThreadProfile(id, {
-        user_tag: userInfo
-          ? userInfo.global_name || userInfo.username || null
-          : null,
-        user_avatar: userInfo ? userAvatarUrlFromApi(userInfo) : null,
-        channel_id: dmChannel.id,
-      });
-
-      res.json({
-        ok: true,
-        channel_id: dmChannel.id,
-        imported,
-        pages,
-      });
+      const result = await syncDmChannelFromDiscord(id);
+      res.json({ ok: true, ...result });
     } catch (e) {
       console.error("[DM sync]", e);
       if (e.code === "NO_BOT_TOKEN") {
@@ -1052,6 +1076,147 @@ app.post(
     }
   }
 );
+
+/**
+ * Découvre tous les salons MP du bot via Discord et importe l'historique
+ * (récupère les DMs gestionimpact même s'ils n'étaient pas encore en base).
+ */
+app.post(
+  "/api/dm/sync-all",
+  requireDiscordSession,
+  requireFounder,
+  async (req, res) => {
+    try {
+      const channels = await discordBotJson("GET", "/users/@me/channels");
+      if (!Array.isArray(channels)) {
+        return res.status(502).json({ error: "channels_invalides" });
+      }
+
+      const bot = await fetchBotUser().catch(() => null);
+      const botId = bot?.id || null;
+      let threads = 0;
+      let messages = 0;
+      const errors = [];
+
+      for (const ch of channels) {
+        // type 1 = DM, type 3 = group DM (on ignore les groupes)
+        if (ch.type !== 1) continue;
+        const recipients = Array.isArray(ch.recipients) ? ch.recipients : [];
+        const other =
+          recipients.find((u) => u?.id && u.id !== botId) || recipients[0];
+        const userId = normalizeSnowflakeId(other?.id);
+        if (!userId) continue;
+
+        try {
+          const result = await syncDmChannelFromDiscord(userId, {
+            maxPages: 3,
+          });
+          threads += 1;
+          messages += result.imported || 0;
+        } catch (e) {
+          errors.push({
+            user_id: userId,
+            error: String(e.message || e).slice(0, 200),
+          });
+        }
+      }
+
+      res.json({
+        ok: true,
+        threads,
+        messages,
+        discovered: channels.filter((c) => c.type === 1).length,
+        errors: errors.slice(0, 10),
+      });
+    } catch (e) {
+      console.error("[DM sync-all]", e);
+      if (e.code === "NO_BOT_TOKEN") {
+        return res.status(503).json({ error: "bot_token_manquant" });
+      }
+      res.status(502).json({ error: String(e.message || e) });
+    }
+  }
+);
+
+/**
+ * Ingest DM envoyé par une app externe (gestionimpact) avec le même bot.
+ * Auth : header X-Wingbot-Ingest-Secret = DM_INGEST_SECRET (.env)
+ */
+function requireDmIngestSecret(req, res, next) {
+  const expected = String(process.env.DM_INGEST_SECRET || "").trim();
+  if (!expected) {
+    return res.status(503).json({
+      error: "ingest_disabled",
+      message: "DM_INGEST_SECRET non configuré sur Wingbot.",
+    });
+  }
+  const got = String(
+    req.headers["x-wingbot-ingest-secret"] ||
+      req.headers["authorization"]?.replace(/^Bearer\s+/i, "") ||
+      ""
+  ).trim();
+  if (!got || got !== expected) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  next();
+}
+
+app.post("/api/internal/dm/ingest", requireDmIngestSecret, async (req, res) => {
+  try {
+    const userId = normalizeSnowflakeId(req.body?.user_id || "");
+    if (!userId) {
+      return res.status(400).json({ error: "user_id invalide" });
+    }
+
+    const messageId = normalizeSnowflakeId(req.body?.message_id || "") || null;
+    const channelId = normalizeSnowflakeId(req.body?.channel_id || "") || null;
+    const direction =
+      req.body?.direction === "in" || req.body?.direction === "out"
+        ? req.body.direction
+        : "out";
+    const content = String(req.body?.content || "");
+    const embeds = normalizeDiscordApiEmbeds(req.body?.embeds);
+    const attachments = Array.isArray(req.body?.attachments)
+      ? req.body.attachments
+      : [];
+
+    let userInfo = null;
+    try {
+      userInfo = await discordFetchJson(`/users/${encodeURIComponent(userId)}`);
+    } catch {
+      /* ignore */
+    }
+    const bot = await fetchBotUser().catch(() => null);
+
+    const rowId = recordDmMessage({
+      user_id: userId,
+      channel_id: channelId,
+      message_id: messageId,
+      direction,
+      author_id:
+        normalizeSnowflakeId(req.body?.author_id || "") || bot?.id || null,
+      author_tag:
+        req.body?.author_tag ||
+        bot?.username ||
+        null,
+      content,
+      attachments,
+      embeds,
+      user_tag: userInfo
+        ? userInfo.global_name || userInfo.username || null
+        : req.body?.user_tag || null,
+      user_avatar: userInfo
+        ? userAvatarUrlFromApi(userInfo)
+        : req.body?.user_avatar || null,
+      created_at: req.body?.created_at || null,
+    });
+
+    res.json({ ok: true, recorded: !!rowId, message_id: messageId });
+  } catch (e) {
+    console.error("[DM ingest]", e);
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
 
 app.put("/api/bot/avatar", requireDiscordSession, async (req, res) => {
   try {
