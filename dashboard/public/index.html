@@ -8,15 +8,19 @@
       (function () {
         try {
           var root = document.documentElement;
-          var ua = navigator.userAgent;
-          var firefox =
-            /Firefox\//.test(ua) &&
-            !/Seamonkey|Waterfox|Edg\//.test(ua);
-          if (firefox) root.classList.add("is-firefox");
-          var lite =
-            firefox ||
+          var ua = navigator.userAgent || "";
+          /* Gecko (Firefox / forks) — blur + calques fixed très coûteux */
+          var gecko =
+            typeof InstallTrigger !== "undefined" ||
+            /Firefox\//.test(ua) ||
+            /FxiOS\//.test(ua);
+          if (gecko) root.classList.add("is-firefox");
+          var reduce =
             window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          if (lite) root.classList.add("fx-lite");
+          var lowPower =
+            (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
+            (navigator.deviceMemory && navigator.deviceMemory <= 4);
+          if (gecko || reduce || lowPower) root.classList.add("fx-lite");
         } catch (e) {
           /* ignore */
         }
@@ -25,6 +29,7 @@
     <link rel="preconnect" href="https://cdn.discordapp.com" crossorigin />
     <link id="site-favicon" rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/landing.css" />
     <link rel="stylesheet" href="/compat.css" />
     <link rel="stylesheet" href="/ticket-ui.css?v=2" />
   </head>
@@ -1271,7 +1276,8 @@
               </ul>
               <p class="muted tiny">
                 Active le log <strong>Antispam</strong> dans l’onglet Logs. Les warns sont dans l’onglet <strong>Warns</strong>.
-                Couvre aussi le <strong>chat textuel des salons vocaux / scènes</strong> : en cas de spam, tous les messages trackés du spammeur sont supprimés (pas seulement le dernier).
+                Couvre aussi le chat des vocaux / scènes. En cas de détection, <strong>tous</strong> les messages
+                de la personne dans la fenêtre sont purgés sur les salons touchés (historique récent inclus).
               </p>
             </div>
           </section>

@@ -1,16 +1,48 @@
-/* Compatibilité cross-navigateur — effets GPU coûteux (Firefox surtout) */
+/* =============================================================================
+   Compatibilité / perf cross-navigateur
+   - Chromium (Chrome, Edge, Brave) : effets complets
+   - Firefox / Gecko + reduced-motion + machines modestes : html.fx-lite
+   Les calques galaxie fixed + blur + backdrop-filter restent le vrai coût
+   sous Firefox (y compris une fois connecté au dashboard).
+   ============================================================================= */
+
+/* ---------- Fond galaxie (style.css) — toujours actif, même hors landing ---------- */
+
+html.fx-lite body {
+  /* `fixed` force Firefox à recomposer tout le viewport au scroll */
+  background-attachment: scroll !important;
+  background:
+    linear-gradient(165deg, #03050f 0%, #0a0e24 45%, #02030a 100%);
+}
+
+/* Nébuleuses + étoiles : trop de gradients fixed = jank scroll Firefox */
+html.fx-lite body::before {
+  background:
+    radial-gradient(ellipse 50% 40% at 80% 10%, rgba(167, 139, 250, 0.22), transparent 70%),
+    radial-gradient(ellipse 45% 35% at 10% 90%, rgba(34, 211, 238, 0.14), transparent 70%) !important;
+  opacity: 0.85;
+}
+
+html.fx-lite body::after {
+  display: none !important;
+}
+
+/* ---------- Landing : effets GPU ---------- */
+
+html.fx-lite .landing-aurora {
+  display: none !important;
+}
 
 html.fx-lite .landing-aurora-blob {
   filter: none !important;
-  opacity: 0.32;
   animation: none !important;
-  will-change: auto;
+  will-change: auto !important;
 }
 
 html.fx-lite .landing-nav {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  background: rgba(6, 8, 22, 0.94);
+  background: rgba(6, 8, 22, 0.96);
 }
 
 html.fx-lite .landing-spotlight {
@@ -19,15 +51,17 @@ html.fx-lite .landing-spotlight {
 
 html.fx-lite .landing-page::before {
   mask-image: none;
-  opacity: 0.45;
+  -webkit-mask-image: none;
+  opacity: 0.4;
 }
 
+html.fx-lite .landing-showcase,
 html.fx-lite .landing-showcase:hover {
   transform: none !important;
-  transition: none !important;
+  transition: border-color 0.2s !important;
 }
 
-/* Marquee + carte flottante : légers, on les garde même en mode perf */
+/* Animations infinies : on coupe les plus coûteuses, on garde le marquee léger */
 html.fx-lite .landing-headline-line--accent {
   animation: none !important;
   background-position: 50% center;
@@ -37,8 +71,15 @@ html.fx-lite .landing-headline-bridge,
 html.fx-lite .landing-kicker-dot,
 html.fx-lite .landing-float-card,
 html.fx-lite .landing-bento-in,
-html.fx-lite .bento {
+html.fx-lite .bento,
+html.fx-lite .ldm-text::after {
   animation: none !important;
+}
+
+html.fx-lite .landing-inner--reveal > * {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
 }
 
 html.fx-lite .landing-dash-card {
@@ -47,12 +88,56 @@ html.fx-lite .landing-dash-card {
   background: rgba(13, 16, 38, 0.98);
 }
 
+/* Marquee : animation transform OK, mais on ralentit un peu sous Gecko */
+html.is-firefox .landing-marquee-track {
+  animation-duration: 55s !important;
+}
+
+/* ---------- Modales / overlays dashboard ---------- */
+
 html.fx-lite .fonda-backdrop {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  background: rgba(6, 8, 22, 0.9);
+  background: rgba(6, 8, 22, 0.92);
 }
 
+html.fx-lite .fonda-window {
+  animation: none !important;
+}
+
+/* color-mix(oklab) : fallback opaque simple sous Gecko */
+html.fx-lite .access-chip[data-checked="1"] {
+  background: rgba(167, 139, 250, 0.14);
+  border-color: rgba(167, 139, 250, 0.55);
+}
+
+html.fx-lite .access-chip:focus-visible {
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.35);
+}
+
+html.fx-lite .fonda-btn-dot,
+html.fx-lite .emb-preview-top h4::before {
+  animation: none !important;
+}
+
+/* ---------- Scrollbars Firefox ---------- */
+
 html.is-firefox {
+  scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 255, 0.35) rgba(6, 8, 22, 0.55);
+}
+
+html.is-firefox .sidebar,
+html.is-firefox .workspace,
+html.is-firefox .fonda-window {
+  scrollbar-width: thin;
+}
+
+/* Contenir les paints lourds des vues hors écran */
+html.fx-lite .view[hidden] {
+  content-visibility: hidden;
+}
+
+html.fx-lite .workspace {
+  contain: layout style;
 }

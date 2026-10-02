@@ -486,9 +486,18 @@ function initLandingEffects() {
     "(prefers-reduced-motion: reduce)"
   ).matches;
 
-  if (reduceMotion) {
+  /* Firefox / lite : pas de typewriter ni de tracking souris (main thread + paint) */
+  if (lite || reduceMotion) {
     const el = $("landing-typewriter");
-    if (el) el.textContent = landingFx.phrases[0];
+    if (el) {
+      el.textContent = landingFx.phrases[0];
+      el.classList.add("done");
+    }
+    const aurora = document.querySelector(".landing-aurora");
+    if (aurora) aurora.setAttribute("hidden", "");
+    const spot = $("landing-spotlight");
+    if (spot) spot.setAttribute("hidden", "");
+    landingFx.active = true;
     return;
   }
 
@@ -496,8 +505,6 @@ function initLandingEffects() {
   landingFx.typeIdx = 0;
   landingFx.charIdx = 0;
   landingTypewriterTick();
-
-  if (lite) return;
 
   const spotlight = $("landing-spotlight");
   const showcase = $("landing-showcase");
@@ -1192,21 +1199,21 @@ function defaultAntispamState() {
     url_spam: {
       enabled: true,
       max_messages: 3,
-      window_sec: 45,
-      min_channels: 3,
+      window_sec: 60,
+      min_channels: 2,
       duplicate_link_trigger: true,
     },
     image_spam: {
       enabled: true,
-      max_messages: 4,
+      max_messages: 3,
       window_sec: 90,
-      min_channels: 3,
+      min_channels: 2,
     },
     immune_role_ids: [],
     immune_channel_ids: [],
     timeout_min_repeat: 60,
     timeout_min_escalated: 240,
-    strikes_before_timeout: 3,
+    strikes_before_timeout: 2,
     strike_decay_hours: 72,
   };
 }
@@ -1244,7 +1251,7 @@ function renderAntispamPanel() {
     <label class="field-row">
       <span>Membre fidèle (jours sur le serveur)</span>
       <input type="number" id="as-trusted-days" class="input-sm" min="0" max="365" value="${cfg.trusted_member_days ?? 14}" />
-      <span class="muted tiny">seuils +1 si membre plus ancien</span>
+      <span class="muted tiny">seuils +1 pour rafales classiques seulement — pas si même lien / texte (hack)</span>
     </label>
     <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Spam de liens</h4>
     <label class="field-row switch-row">
@@ -1262,7 +1269,7 @@ function renderAntispamPanel() {
       <input type="number" id="as-url-ch" class="input-sm" min="2" max="20" value="${cfg.url_spam.min_channels}" />
     </label>
     <label class="field-row switch-row">
-      <span>Même lien sur 2+ salons = alerte immédiate</span>
+      <span>Même lien / même texte sur 2+ salons = alerte immédiate (comptes hackés)</span>
       <input type="checkbox" id="as-url-dup" ${cfg.url_spam.duplicate_link_trigger !== false ? "checked" : ""} />
     </label>
     <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Spam d’images (fichiers uploadés)</h4>
@@ -1298,8 +1305,10 @@ function renderAntispamPanel() {
       <input type="number" id="as-decay" class="input-sm" min="1" max="720" value="${cfg.strike_decay_hours}" />
     </label>
     <p class="muted tiny" style="margin-top:0.75rem">
-      Un lien YouTube dans un salon ≠ spam. Les aperçus de lien ne comptent pas comme images.
-      Admins, staff et salons ignorés (Permissions) sont exclus.
+      Un lien YouTube dans <em>un</em> salon ≠ spam. En cas de détection, <strong>tous</strong> les messages
+      de la personne dans la fenêtre sont purgés sur les salons touchés (pas seulement le dernier).
+      Détecte aussi www./domaines sans https, invites Discord et textes recopiés (comptes hackés).
+      Les aperçus de lien ne comptent pas comme images. Staff et salons ignorés sont exclus.
     </p>
   `;
 
