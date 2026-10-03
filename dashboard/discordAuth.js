@@ -21,6 +21,32 @@ const OAUTH_TOKEN = "https://discord.com/api/oauth2/token";
 
 const SESSION_COOKIE = "wingbot_discord";
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Évite les hang infinis Discord → « délai dépassé » navigateur */
+const DISCORD_FETCH_TIMEOUT_MS = 12_000;
+
+function fetchDiscord(url, options = {}, timeoutMs = DISCORD_FETCH_TIMEOUT_MS) {
+  const signal =
+    typeof AbortSignal !== "undefined" && AbortSignal.timeout
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined;
+  return fetch(url, { ...options, signal }).catch((err) => {
+    if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+      throw new Error(
+        `Discord API timeout (${timeoutMs}ms) — ${url.includes("oauth2/token") ? "échange OAuth" : "appel Discord"}`
+      );
+    }
+    throw err;
+  });
+}
+
+function cookieSecureFlag() {
+  const u = (
+    process.env.DASHBOARD_PUBLIC_URL ||
+    process.env.DASHBOARD_ALLOWED_ORIGINS ||
+    ""
+  ).toLowerCase();
+  return u.includes("https://") ? "; Secure" : "";
+}
 
 // Garbage collect des sessions expirées à intervalles réguliers (1× / heure).
 // Pas critique (getDashboardSession() purge aussi à la lecture), mais évite
@@ -81,14 +107,14 @@ function createSession(res, { accessToken, expiresInSec, userId, username }) {
   const maxAgeSec = Math.floor((expiresAt - Date.now()) / 1000);
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}`
+    `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${cookieSecureFlag()}`
   );
 }
 
 function clearSessionCookie(res) {
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${cookieSecureFlag()}`
   );
 }
 
@@ -137,7 +163,7 @@ function userGuildIconUrl(guildId, iconHash) {
  */
 async function fetchUserGuilds(accessToken) {
   for (let attempt = 0; attempt < 4; attempt++) {
-    const r = await fetch(`${DISCORD_API}/users/@me/guilds`, {
+    const r = await fetchDiscord(`${DISCORD_API}/users/@me/guilds`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (r.ok) return r.json();
@@ -151,7 +177,7 @@ async function fetchUserGuilds(accessToken) {
           r.headers.get("retry-after") ?? j?.retry_after ?? 1
         );
         if (Number.isFinite(retrySec) && retrySec > 0) {
-          waitMs = Math.ceil(retrySec * 1000) + 150;
+          waitMs = Math.min(Math.ceil(retrySec * 1000) + 150, 8000);
         }
       } catch {
         // fallback waitMs
@@ -174,7 +200,7 @@ async function fetchOAuthToken(code, redirectUri, clientId, clientSecret) {
     code,
     redirect_uri: redirectUri,
   });
-  const r = await fetch(OAUTH_TOKEN, {
+  const r = await fetchDiscord(OAUTH_TOKEN, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -187,7 +213,7 @@ async function fetchOAuthToken(code, redirectUri, clientId, clientSecret) {
 }
 
 async function fetchDiscordMe(accessToken) {
-  const r = await fetch(`${DISCORD_API}/users/@me`, {
+  const r = await fetchDiscord(`${DISCORD_API}/users/@me`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!r.ok) throw new Error("Impossible de lire le profil Discord");

@@ -184,16 +184,50 @@ const _allowedOriginsCache = (() => {
  * Retourne l'URL de base correspondant à la requête entrante si elle fait
  * partie des origines autorisées ; sinon retombe sur DASHBOARD_PUBLIC_URL.
  * Empêche un attaquant d'imposer un `redirect_uri` via un header Host bidouillé.
+ *
+ * Si le host matche une origine autorisée mais avec un autre protocole
+ * (http vs https derrière Caddy), on utilise l'origine enregistrée.
  */
 function publicBaseUrlFor(req) {
   if (!req) return publicBaseUrl();
-  const hostHeader = req.headers["x-forwarded-host"] || req.headers.host;
+  const hostHeader = String(
+    req.headers["x-forwarded-host"] || req.headers.host || ""
+  )
+    .split(",")[0]
+    .trim();
   if (!hostHeader) return publicBaseUrl();
-  const proto =
-    (req.headers["x-forwarded-proto"] || req.protocol || "http").split(",")[0].trim();
+  const proto = (
+    req.headers["x-forwarded-proto"] ||
+    req.protocol ||
+    "http"
+  )
+    .split(",")[0]
+    .trim();
   const candidate = `${proto}://${hostHeader}`.replace(/\/$/, "");
   if (_allowedOriginsCache.includes(candidate)) return candidate;
-  return publicBaseUrl();
+
+  // Même host, autre proto (ex. accès HTTPS public alors que .env a http)
+  try {
+    const candHost = new URL(candidate).host.toLowerCase();
+    for (const origin of _allowedOriginsCache) {
+      try {
+        if (new URL(origin).host.toLowerCase() === candHost) return origin;
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const fallback = publicBaseUrl();
+  if (candidate !== fallback) {
+    console.warn(
+      `[oauth] Origine non autorisée: ${candidate} → fallback ${fallback}. ` +
+        `Ajoute-la à DASHBOARD_ALLOWED_ORIGINS (et Redirect Discord = ${candidate}/api/auth/discord/callback).`
+    );
+  }
+  return fallback;
 }
 
 function oauthRedirectUri(req) {
@@ -1387,9 +1421,42 @@ app.get("/api/auth/discord/login", (req, res) => {
   if (!secret) {
     return res.status(503).send("DISCORD_CLIENT_SECRET manquant — ajoute-le depuis le portail Discord (OAuth2).");
   }
+  const redirectUri = oauthRedirectUri(req);
+  console.log(
+    `[oauth] login depuis ${req.headers["x-forwarded-host"] || req.headers.host} → redirect_uri=${redirectUri}`
+  );
+  // Si on renvoie vers 127.0.0.1 alors que l'utilisateur n'est pas en local → timeout garanti
+  const hostHeader = String(
+    req.headers["x-forwarded-host"] || req.headers.host || ""
+  ).toLowerCase();
+  if (
+    /127\.0\.0\.1|localhost/.test(redirectUri) &&
+    hostHeader &&
+    !/127\.0\.0\.1|localhost/.test(hostHeader)
+  ) {
+    return res
+      .status(503)
+      .type("html")
+      .send(
+        `<!doctype html><meta charset="utf-8"><title>OAuth mal configuré</title>
+<body style="font-family:system-ui;max-width:36rem;margin:3rem auto;line-height:1.5">
+<h1>Connexion Discord impossible</h1>
+<p>Le dashboard renvoie Discord vers <code>${redirectUri}</code> (localhost),
+alors que tu es sur <strong>${hostHeader}</strong>. Ton navigateur attend une page
+inaccessible → « délai dépassé ».</p>
+<p><strong>À faire sur le serveur (.env) :</strong></p>
+<pre style="background:#111;color:#eee;padding:1rem;border-radius:8px;white-space:pre-wrap">DASHBOARD_PUBLIC_URL=https://${hostHeader.split(":")[0]}
+DASHBOARD_ALLOWED_ORIGINS=https://${hostHeader.split(":")[0]}</pre>
+<p>Puis dans le <a href="https://discord.com/developers/applications">portail Discord</a>
+→ OAuth2 → Redirects, ajoute exactement :</p>
+<pre style="background:#111;color:#eee;padding:1rem;border-radius:8px;white-space:pre-wrap">https://${hostHeader.split(":")[0]}/api/auth/discord/callback</pre>
+<p>Redémarre le dashboard (<code>docker compose up -d dashboard</code>) et réessaie.</p>
+</body>`
+      );
+  }
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: oauthRedirectUri(req),
+    redirect_uri: redirectUri,
     response_type: "code",
     scope: "identify guilds",
   });
@@ -1399,6 +1466,7 @@ app.get("/api/auth/discord/login", (req, res) => {
 /** Discord renvoie ici après autorisation */
 app.get("/api/auth/discord/callback", async (req, res) => {
   const base = publicBaseUrlFor(req);
+  const redirectUri = oauthRedirectUri(req);
   try {
     const code = req.query.code;
     const err = req.query.error;
@@ -1413,9 +1481,10 @@ app.get("/api/auth/discord/callback", async (req, res) => {
     if (!clientId || !clientSecret) {
       return res.status(503).send("OAuth non configuré (.env)");
     }
+    console.log(`[oauth] callback → échange token (redirect_uri=${redirectUri})`);
     const tokenData = await fetchOAuthToken(
       code,
-      oauthRedirectUri(req),
+      redirectUri,
       clientId,
       clientSecret
     );
@@ -1428,7 +1497,7 @@ app.get("/api/auth/discord/callback", async (req, res) => {
     });
     res.redirect(`${base}/?discord=connected`);
   } catch (e) {
-    console.error(e);
+    console.error("[oauth] callback failed:", e?.message || e);
     res.redirect(
       `${base}/?discord=error&reason=${encodeURIComponent(String(e.message))}`
     );

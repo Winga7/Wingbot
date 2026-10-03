@@ -3994,6 +3994,21 @@ async function loadData() {
   setDiscordOAuthHref();
 
   try {
+  const oauthParams = new URLSearchParams(location.search);
+  if (oauthParams.get("discord") === "error") {
+    const reason = oauthParams.get("reason") || "connexion refusée";
+    $("error").hidden = false;
+    $("error").textContent = `Connexion Discord échouée : ${reason}`;
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete("discord");
+      u.searchParams.delete("reason");
+      history.replaceState(null, "", u.pathname + u.search + u.hash);
+    } catch {
+      /* ignore */
+    }
+  }
+
   const st = await fetch(apiUrl("/api/auth/discord/status"), fetchOptsGet());
   if (gen !== loadDataGen) return;
   if (!st.ok) {
