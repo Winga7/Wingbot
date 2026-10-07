@@ -211,6 +211,47 @@ client.once("ready", () => {
   setInterval(() => {
     cleanOldMessages();
   }, 24 * 60 * 60 * 1000); // 24 heures
+
+  publishSlashCommands().catch((e) => {
+    console.error("[slash] publication au démarrage :", e?.message || e);
+  });
+});
+
+const DM_OK_COMMANDS = new Set(["ping", "help", "avatar", "botinfo"]);
+
+function slashCommandPayload() {
+  return [...client.commands.values()].map((command) => {
+    const json = command.data.toJSON();
+    if (!DM_OK_COMMANDS.has(json.name)) json.dm_permission = false;
+    return json;
+  });
+}
+
+async function publishSlashCommands(guild = null) {
+  const body = slashCommandPayload();
+  if (!guild && client.application) {
+    await client.application.commands.set([]).catch((e) => {
+      console.error("[slash] nettoyage des commandes globales :", e?.message || e);
+    });
+  }
+  const guilds = guild ? [guild] : [...client.guilds.cache.values()];
+  for (const g of guilds) {
+    try {
+      await g.commands.set(body);
+      console.log(`[slash] ${body.length} commande(s) sur ${g.name} (${g.id})`);
+    } catch (e) {
+      console.error(
+        `[slash] échec sur ${g.id} — l’invitation du bot doit inclure le scope applications.commands :`,
+        e?.message || e
+      );
+    }
+  }
+}
+
+client.on(Events.GuildCreate, (guild) => {
+  publishSlashCommands(guild).catch((e) => {
+    console.error("[slash] publication à l’arrivée :", e?.message || e);
+  });
 });
 
 // Événement pour les interactions (slash commands)
@@ -248,11 +289,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   }
 
+  if (!interaction.guild && !DM_OK_COMMANDS.has(interaction.commandName)) {
+    return interaction.reply({
+      content: "Cette commande s’utilise dans un serveur.",
+      ephemeral: true,
+    });
+  }
+
   if (!command) {
     console.error(
       `Aucune commande correspondant à ${interaction.commandName} n'a été trouvée.`
     );
-    return;
+    return interaction.reply({
+      content:
+        "Cette commande slash n’est pas chargée. Redémarre le bot pour la republier.",
+      ephemeral: true,
+    });
   }
 
   try {
@@ -405,9 +457,9 @@ client.on(Events.MessageCreate, async (message) => {
     }
     try {
       if (command.executeMessage) {
-        command.executeMessage(message, args);
+        await command.executeMessage(message, args);
       } else {
-        message.reply("Cette commande n'est pas configurée pour les messages.");
+        await message.reply("Cette commande n'est pas configurée pour les messages.");
       }
     } catch (error) {
       console.error(error);

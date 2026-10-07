@@ -758,20 +758,22 @@
                 </select>
               </label>
               <div id="rr-new-message-fields">
+              <div id="rr-vars" class="emb-tokens" aria-label="Variables du message"></div>
+              <p class="muted tiny">Clique une variable pour l’insérer dans le message ou la description, au curseur.</p>
               <label class="field-row">
                 <span>Message</span>
-                <textarea id="rr-content" class="input-sm input-wide" rows="3" placeholder="Choisis tes rôles en réagissant ci-dessous !"></textarea>
+                <textarea id="rr-content" class="input-sm input-wide var-target" rows="3" placeholder="Choisis tes rôles en réagissant ci-dessous !"></textarea>
               </label>
               <details class="custom-guide">
                 <summary>Embed (optionnel)</summary>
                 <div class="custom-guide-body">
                   <label class="field-row">
                     <span>Titre</span>
-                    <input type="text" id="rr-embed-title" class="input-sm input-wide" maxlength="256" />
+                    <input type="text" id="rr-embed-title" class="input-sm input-wide var-target" maxlength="256" />
                   </label>
                   <label class="field-row">
                     <span>Description</span>
-                    <textarea id="rr-embed-desc" class="input-sm input-wide" rows="2" maxlength="4096"></textarea>
+                    <textarea id="rr-embed-desc" class="input-sm input-wide var-target" rows="2" maxlength="4096"></textarea>
                   </label>
                   <label class="field-row">
                     <span>Couleur</span>
@@ -975,9 +977,10 @@
                 </label>
                 <label class="field-row">
                   <span>Template nom salon</span>
-                  <input type="text" id="ticket-channel-template" class="input-sm input-wide mono" value="ticket-{number}-{user}" maxlength="100" />
+                  <input type="text" id="ticket-channel-template" class="input-sm input-wide mono var-target" value="ticket-{number}-{user}" maxlength="100" />
                 </label>
-                <p class="muted tiny"><code>{number}</code> <code>{user}</code> <code>{category}</code> <code>{label}</code></p>
+                <div id="ticket-vars" class="emb-tokens" aria-label="Variables du nom de salon"></div>
+                <p class="muted tiny">Clique une variable pour l’insérer dans le template, au curseur.</p>
                 <label class="field-row checkbox-row">
                   <input type="checkbox" id="ticket-delete-channel" checked />
                   <span>Supprimer le salon à la fermeture</span>
@@ -1084,20 +1087,23 @@
                   <ul>
                     <li><code>{user}</code> — mention de l’auteur</li>
                     <li><code>{username}</code> — pseudo (sans mention)</li>
-                    <li><code>{user.tag}</code> / <code>{user.id}</code></li>
-                    <li><code>{channel}</code> — mention du salon — <code>{channel.name}</code> / <code>{channel.id}</code></li>
-                    <li><code>{guild}</code> ou <code>{server}</code> — nom du serveur</li>
-                    <li><code>{guild.id}</code>, <code>{guild.name}</code>, <code>{members}</code></li>
-                    <li><code>{date}</code>, <code>{time}</code>, <code>{now}</code> (timestamp Unix)</li>
-                    <li><code>{reply}</code> / <code>{reply.content}</code> — texte du message cité</li>
+                    <li><code>{user.tag}</code> <code>{user.id}</code></li>
+                    <li><code>{channel}</code> — mention du salon — <code>{channel.name}</code> <code>{channel.id}</code></li>
+                    <li><code>{guild}</code> <code>{server}</code> — nom du serveur</li>
+                    <li><code>{guild.id}</code> <code>{guild.name}</code> <code>{members}</code></li>
+                    <li><code>{date}</code> <code>{time}</code> <code>{now}</code> (timestamp Unix)</li>
+                    <li><code>{reply}</code> <code>{reply.content}</code> — texte du message cité</li>
                     <li><code>{reply.user}</code> — mention de l’auteur du message cité</li>
                     <li><code>{{delete}}</code> — supprime le <strong>message de commande</strong> après envoi (le bot doit avoir « Gérer les messages »)</li>
+                    <li class="hint-box">Clique une variable pour l’insérer dans la réponse, à l’endroit du curseur.</li>
                   </ul>
                   <p class="hint-box">
-                    Exemple : <code>Bienvenue {user} sur {guild} ! {{delete}}</code>
+                    Exemple : <code class="tok tok-inline" data-insert="Bienvenue {user} sur {guild} ! {{delete}}" title="Insérer l’exemple">Bienvenue {user} sur {guild} ! {{delete}}</code>
                   </p>
                 </div>
               </details>
+              <div id="custom-vars" class="emb-tokens" aria-label="Variables des commandes perso"></div>
+              <p class="muted tiny">Clique une variable pour l’insérer dans la réponse, au curseur.</p>
               <div id="custom-commands-root" class="custom-commands-list"></div>
               <button type="button" class="btn secondary" id="btn-add-custom">+ Ajouter une commande</button>
             </div>
@@ -1130,20 +1136,22 @@
                   <option value="weekly">Toutes les semaines</option>
                 </select>
               </label>
+              <div id="sched-vars" class="emb-tokens" aria-label="Variables du message"></div>
+              <p class="muted tiny">Clique une variable pour l’insérer dans le champ où tu écris.</p>
               <label class="field-row">
                 <span>Message</span>
-                <textarea id="sched-content" class="input-sm input-wide" rows="3" placeholder="Texte du message — variables {guild}, {date}, {time}, {channel}…"></textarea>
+                <textarea id="sched-content" class="input-sm input-wide var-target" rows="3" placeholder="Texte du message"></textarea>
               </label>
               <details class="custom-guide">
                 <summary>Embed (optionnel)</summary>
                 <div class="custom-guide-body">
                   <label class="field-row">
                     <span>Titre</span>
-                    <input type="text" id="sched-embed-title" class="input-sm input-wide" maxlength="256" />
+                    <input type="text" id="sched-embed-title" class="input-sm input-wide var-target" maxlength="256" />
                   </label>
                   <label class="field-row">
                     <span>Description</span>
-                    <textarea id="sched-embed-desc" class="input-sm input-wide" rows="3" maxlength="4096"></textarea>
+                    <textarea id="sched-embed-desc" class="input-sm input-wide var-target" rows="3" maxlength="4096"></textarea>
                   </label>
                   <label class="field-row">
                     <span>Couleur</span>
@@ -1192,25 +1200,30 @@
                 <button type="button" class="btn ghost tiny" id="btn-social-preview">Vérifier</button>
                 <span id="social-preview-hint" class="muted tiny" style="margin-left:0.5rem"></span>
               </div>
-              <p id="social-vars-hint" class="muted tiny">Variables YouTube : <code>{youtube.title}</code>, <code>{youtube.url}</code>, <code>{youtube.channel}</code>, <code>{youtube.thumbnail}</code>…</p>
               <label class="field-row">
                 <span>Salon Discord</span>
                 <select id="social-channel" class="input-sm input-wide"></select>
               </label>
+              <div id="social-vars-hint" class="emb-tokens" aria-label="Variables du message"></div>
+              <p class="muted tiny">Clique une variable pour l’insérer dans le message ou l’embed, à l’endroit du curseur.</p>
               <label class="field-row">
                 <span>Message</span>
-                <textarea id="social-content" class="input-sm input-wide" rows="3" placeholder="🎬 **{youtube.title}**&#10;{youtube.url}"></textarea>
+                <textarea id="social-content" class="input-sm input-wide var-target" rows="3" placeholder="🎬 **{youtube.title}**&#10;{youtube.url}"></textarea>
               </label>
               <details class="custom-guide">
                 <summary>Embed (optionnel)</summary>
                 <div class="custom-guide-body">
                   <label class="field-row">
                     <span>Titre</span>
-                    <input type="text" id="social-embed-title" class="input-sm input-wide" maxlength="256" />
+                    <input type="text" id="social-embed-title" class="input-sm input-wide var-target" maxlength="256" />
                   </label>
                   <label class="field-row">
                     <span>Description</span>
-                    <textarea id="social-embed-desc" class="input-sm input-wide" rows="2" maxlength="4096"></textarea>
+                    <textarea id="social-embed-desc" class="input-sm input-wide var-target" rows="2" maxlength="4096"></textarea>
+                  </label>
+                  <label class="field-row">
+                    <span>Lien du titre</span>
+                    <input type="text" id="social-embed-url" class="input-sm input-wide var-target" maxlength="2048" placeholder="{youtube.url}" />
                   </label>
                   <label class="field-row">
                     <span>Couleur</span>
@@ -1218,7 +1231,7 @@
                   </label>
                   <label class="field-row">
                     <span>Miniature</span>
-                    <input type="text" id="social-embed-thumb" class="input-sm input-wide" placeholder="{youtube.thumbnail}" />
+                    <input type="text" id="social-embed-thumb" class="input-sm input-wide var-target" placeholder="{youtube.thumbnail}" />
                   </label>
                 </div>
               </details>
@@ -1313,7 +1326,7 @@
               </div>
               <label class="field-row">
                 <span>Filtrer par ID membre</span>
-                <input type="text" id="warn-filter-user" class="input-sm mono input-wide" placeholder="Optionnel — 123456789012345678" />
+                <input type="text" id="warn-filter-user" class="input-sm mono input-wide" placeholder="ID, @mention, pseudo ou raison" />
               </label>
               <div id="warn-list-panel" class="warn-list-panel muted tiny">Charge un serveur pour afficher les warns.</div>
             </div>

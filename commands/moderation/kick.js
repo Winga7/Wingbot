@@ -1,5 +1,9 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
 const { memberHasPermOrAdmin } = require("../../memberPerms");
+const {
+  resolveSlashMember,
+  resolveMessageMember,
+} = require("../../lib/resolveTargets");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -14,7 +18,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const member = interaction.options.getMember("membre");
+    const member = await resolveSlashMember(interaction, "membre");
     const reason =
       interaction.options.getString("raison")?.slice(0, 512) || "Aucune raison";
 
@@ -62,14 +66,11 @@ module.exports = {
     }
   },
 
-  executeMessage(message, args) {
+  async executeMessage(message, args) {
     if (!memberHasPermOrAdmin(message.member, PermissionFlagsBits.KickMembers)) {
       return message.reply("❌ Tu n’as pas la permission d’expulser des membres.");
     }
-    const target =
-      message.mentions.members?.first() ||
-      (args[0] &&
-        message.guild.members.cache.get(String(args[0]).replace(/\D/g, "")));
+    const target = await resolveMessageMember(message, args[0]);
     if (!target) {
       return message.reply(
         "Usage : `kick @membre [raison]` — mentionne un membre ou donne son ID."

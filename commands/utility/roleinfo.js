@@ -11,7 +11,19 @@ module.exports = {
         .setRequired(true)
     ),
   async execute(interaction) {
+    if (!interaction.guild) {
+      return interaction.reply({
+        content: "Cette commande s’utilise dans un serveur.",
+        ephemeral: true,
+      });
+    }
     const role = interaction.options.getRole("role");
+    if (!role) {
+      return interaction.reply({
+        content: "❌ Rôle introuvable.",
+        ephemeral: true,
+      });
+    }
 
     // Date de création du rôle
     const createdDate = role.createdAt;

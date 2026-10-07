@@ -1,5 +1,184 @@
 const $ = (id) => document.getElementById(id);
 
+/** Dernier champ de texte où l’utilisateur écrivait — un clic sur une variable y insère le token. */
+const varInsert = { field: null, start: 0, end: 0 };
+const VAR_TOKEN_RE = /^\{\{?[a-zA-Z][\w.]*\}\}?$/;
+
+function isVarTarget(el) {
+  if (!el || el.disabled || el.readOnly) return false;
+  if (el.id === "dm-composer-input" || el.id === "dm-open-user-id") return false;
+  if (el.classList?.contains("var-target") || el.classList?.contains("custom-cmd-ta")) return true;
+  if (el.classList?.contains("ticket-cat-name-template")) return true;
+  if (el.closest?.("#embed-builder-root")) {
+    if (["emb-name", "emb-color-hex-input", "emb-m-users", "emb-m-roles"].includes(el.id)) return false;
+    if (el.tagName === "TEXTAREA") return true;
+    if (el.tagName === "INPUT" && (!el.type || el.type === "text" || el.type === "url")) return true;
+  }
+  return false;
+}
+
+function rememberVarCaret(el) {
+  if (!isVarTarget(el) || typeof el.selectionStart !== "number") return;
+  varInsert.field = el;
+  varInsert.start = el.selectionStart;
+  varInsert.end = el.selectionEnd;
+}
+
+function decorateVarCodes(root) {
+  (root || document).querySelectorAll("code").forEach((code) => {
+    const token = code.textContent.trim();
+    if (!VAR_TOKEN_RE.test(token) || code.dataset.insert) return;
+    code.classList.add("tok", "tok-inline");
+    code.dataset.insert = token;
+    code.title = "Insérer dans le texte";
+    code.tabIndex = 0;
+    code.setAttribute("role", "button");
+  });
+}
+
+const VARS_COMMON = [
+  "{guild}",
+  "{guild.name}",
+  "{guild.id}",
+  "{server}",
+  "{server.id}",
+  "{members}",
+  "{guild.members}",
+  "{channel}",
+  "{channel.name}",
+  "{channel.id}",
+  "{date}",
+  "{time}",
+  "{now}",
+  "<t:{now}:F>",
+  "<t:{now}:R>",
+];
+
+const VARS_CUSTOM = [
+  "{user}",
+  "{username}",
+  "{user.tag}",
+  "{user.id}",
+  "{reply}",
+  "{reply.content}",
+  "{reply.user}",
+  "{{delete}}",
+  ...VARS_COMMON,
+];
+
+const VARS_TICKET = ["{number}", "{user}", "{category}", "{label}"];
+
+const VARS_YOUTUBE = [
+  "{youtube.title}",
+  "{youtube.url}",
+  "{youtube.channel}",
+  "{youtube.channel_url}",
+  "{youtube.thumbnail}",
+  "{youtube.id}",
+  "{youtube.published}",
+  ...VARS_COMMON,
+];
+
+const VARS_TWITCH_LIVE = [
+  "{twitch.display_name}",
+  "{twitch.login}",
+  "{twitch.title}",
+  "{twitch.url}",
+  "{twitch.game}",
+  "{twitch.viewers}",
+  "{twitch.thumbnail}",
+  "{twitch.started_at}",
+  ...VARS_COMMON,
+];
+
+const VARS_TWITCH_CLIP = [
+  "{twitch.clip.title}",
+  "{twitch.clip.url}",
+  "{twitch.clip.creator}",
+  "{twitch.clip.thumbnail}",
+  "{twitch.clip.views}",
+  "{twitch.clip.id}",
+  "{twitch.display_name}",
+  "{twitch.login}",
+  ...VARS_COMMON,
+];
+
+function fillVarBar(el, tokens, { label = "Variables" } = {}) {
+  if (!el) return;
+  el.replaceChildren();
+  if (label) {
+    const lab = document.createElement("span");
+    lab.className = "emb-tokens-label";
+    lab.textContent = label;
+    el.appendChild(lab);
+  }
+  for (const token of tokens) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "tok";
+    btn.dataset.insert = token;
+    btn.title = "Insérer au curseur";
+    btn.textContent = token;
+    el.appendChild(btn);
+  }
+}
+
+function insertVarToken(token, chip) {
+  if (!token) return;
+  const zone = chip.closest(".view, .emb-form-wrap") || document.body;
+  const scope =
+    chip.closest(".panel-block, .emb-form-wrap, .ticket-cat-row") || zone;
+  const active = document.activeElement;
+  const remembered =
+    varInsert.field && zone.contains(varInsert.field) ? varInsert.field : null;
+  let field = null;
+  if (isVarTarget(active) && zone.contains(active)) field = active;
+  else if (remembered && isVarTarget(remembered)) field = remembered;
+  else {
+    field =
+      [...scope.querySelectorAll("textarea, input")].find((el) => isVarTarget(el)) ||
+      null;
+  }
+  if (!field || !isVarTarget(field)) return;
+
+  const useCaret = field === varInsert.field;
+  const start = useCaret ? varInsert.start : field.value.length;
+  const end = useCaret ? varInsert.end : field.value.length;
+  field.value = field.value.slice(0, start) + token + field.value.slice(end);
+  const pos = start + token.length;
+  field.focus();
+  try {
+    field.setSelectionRange(pos, pos);
+  } catch {
+    /* certains champs URL n’exposent pas la sélection */
+  }
+  varInsert.field = field;
+  varInsert.start = pos;
+  varInsert.end = pos;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+document.addEventListener("focusin", (e) => rememberVarCaret(e.target));
+document.addEventListener("keyup", (e) => rememberVarCaret(e.target));
+document.addEventListener("mouseup", (e) => rememberVarCaret(e.target));
+document.addEventListener("input", (e) => rememberVarCaret(e.target));
+document.addEventListener("mousedown", (e) => {
+  if (e.target.closest?.("[data-insert], .tok[data-token]")) e.preventDefault();
+});
+document.addEventListener("click", (e) => {
+  const chip = e.target.closest?.("[data-insert], .tok[data-token]");
+  if (!chip) return;
+  e.preventDefault();
+  insertVarToken(chip.dataset.insert || chip.dataset.token || "", chip);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const chip = e.target.closest?.("[data-insert]");
+  if (!chip || chip.tagName === "BUTTON" || chip.tagName === "INPUT") return;
+  e.preventDefault();
+  insertVarToken(chip.dataset.insert || "", chip);
+});
+
 /** Vues routables (#hash) */
 const VIEWS = new Set([
   "overview",
@@ -2296,8 +2475,9 @@ function addTicketCategoryRow(data = {}) {
         </label>
         <label class="field-row">
           <span class="tiny">Template nom salon (surcharge)</span>
-          <input type="text" class="input-sm ticket-cat-name-template" placeholder="ticket-{number}-{user}" maxlength="100" value="${escapeAttr(data.channel_name_template || "")}" />
+          <input type="text" class="input-sm ticket-cat-name-template var-target" placeholder="ticket-{number}-{user}" maxlength="100" value="${escapeAttr(data.channel_name_template || "")}" />
         </label>
+        <div class="emb-tokens ticket-cat-vars" aria-label="Variables du nom de salon"></div>
         <label class="field-row">
           <span class="tiny">Qui peut fermer</span>
           <select class="input-sm ticket-cat-close">
@@ -2394,6 +2574,7 @@ function addTicketCategoryRow(data = {}) {
     btn.addEventListener("click", () => btn.closest(".ticket-modal-field-row")?.remove());
   });
 
+  fillVarBar(row.querySelector(".ticket-cat-vars"), VARS_TICKET, { label: "" });
   root.appendChild(row);
 }
 
@@ -2816,40 +2997,37 @@ function updateSocialTypeUI() {
   if (alertType === "twitch-live") {
     if (sourceLabel) sourceLabel.textContent = "Chaîne Twitch";
     if (sourceInput) sourceInput.placeholder = "https://twitch.tv/pseudo ou @pseudo";
-    if (varsHint) {
-      varsHint.innerHTML =
-        'Variables Twitch live : <code>{twitch.display_name}</code>, <code>{twitch.title}</code>, <code>{twitch.url}</code>, <code>{twitch.game}</code>, <code>{twitch.viewers}</code>, <code>{twitch.thumbnail}</code>…';
-    }
+    if (varsHint) fillVarBar(varsHint, VARS_TWITCH_LIVE);
     if (content && !content.value.trim() && !editing) {
       content.placeholder = "🔴 **{twitch.display_name}** est en live !\n{twitch.url}";
     }
     if (color && !editing) color.value = "#9146ff";
     if (thumb && !thumb.value.trim()) thumb.placeholder = "{twitch.thumbnail}";
+    const liveUrl = $("social-embed-url");
+    if (liveUrl && !liveUrl.value.trim()) liveUrl.placeholder = "{twitch.url}";
   } else if (alertType === "twitch-clip") {
     if (sourceLabel) sourceLabel.textContent = "Chaîne Twitch";
     if (sourceInput) sourceInput.placeholder = "https://twitch.tv/pseudo ou @pseudo";
-    if (varsHint) {
-      varsHint.innerHTML =
-        'Variables Twitch clip : <code>{twitch.clip.title}</code>, <code>{twitch.clip.url}</code>, <code>{twitch.clip.creator}</code>, <code>{twitch.display_name}</code>…';
-    }
+    if (varsHint) fillVarBar(varsHint, VARS_TWITCH_CLIP);
     if (content && !content.value.trim() && !editing) {
       content.placeholder =
         "🎬 Nouveau clip — **{twitch.clip.title}**\n{twitch.clip.url}";
     }
     if (color && !editing) color.value = "#9146ff";
     if (thumb && !thumb.value.trim()) thumb.placeholder = "{twitch.clip.thumbnail}";
+    const clipUrl = $("social-embed-url");
+    if (clipUrl && !clipUrl.value.trim()) clipUrl.placeholder = "{twitch.clip.url}";
   } else {
     if (sourceLabel) sourceLabel.textContent = "Chaîne YouTube";
     if (sourceInput) sourceInput.placeholder = "URL, @pseudo ou ID UC…";
-    if (varsHint) {
-      varsHint.innerHTML =
-        'Variables YouTube : <code>{youtube.title}</code>, <code>{youtube.url}</code>, <code>{youtube.channel}</code>, <code>{youtube.thumbnail}</code>, <code>{guild}</code>, <code>{channel}</code>…';
-    }
+    if (varsHint) fillVarBar(varsHint, VARS_YOUTUBE);
     if (content && !content.value.trim() && !editing) {
       content.placeholder = "🎬 **{youtube.title}**\n{youtube.url}";
     }
     if (color && !editing) color.value = "#ff0000";
     if (thumb && !thumb.value.trim()) thumb.placeholder = "{youtube.thumbnail}";
+    const ytUrl = $("social-embed-url");
+    if (ytUrl && !ytUrl.value.trim()) ytUrl.placeholder = "{youtube.url}";
   }
 }
 
@@ -2864,6 +3042,7 @@ function resetSocialForm() {
   $("social-embed-desc").value = "";
   $("social-embed-color").value = "#ff0000";
   $("social-embed-thumb").value = "";
+  if ($("social-embed-url")) $("social-embed-url").value = "";
   $("social-channel").value = "";
   const hint = $("social-preview-hint");
   if (hint) hint.textContent = "";
@@ -2901,11 +3080,13 @@ function collectSocialPayloadFromForm() {
   const description = String($("social-embed-desc").value || "").trim();
   const color = parseEmbedColorInput($("social-embed-color").value);
   const thumbnail_url = String($("social-embed-thumb").value || "").trim();
+  const url = String($("social-embed-url")?.value || "").trim();
   const embed =
-    title || description || thumbnail_url
+    title || description || thumbnail_url || url
       ? {
           title,
           description,
+          url,
           color,
           thumbnail_url,
           fields: [],
@@ -2932,6 +3113,7 @@ function fillSocialForm(row) {
         ? "#9146ff"
         : "#ff0000";
   $("social-embed-thumb").value = emb.thumbnail_url || "";
+  if ($("social-embed-url")) $("social-embed-url").value = emb.url || "";
   $("social-form-title").textContent = `Modifier l'alerte #${row.id} (${socialTypeLabel(alertType)})`;
   $("btn-social-save").textContent = "Enregistrer";
   $("btn-social-cancel").hidden = false;
@@ -3180,6 +3362,21 @@ async function saveSocialFeed() {
   }
 }
 
+function formatWarnDate(raw) {
+  if (!raw) return "?";
+  const text = String(raw).trim();
+  const iso = text.includes("T") ? text : text.replace(" ", "T") + "Z";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return text;
+  return d.toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 async function loadWarningsList() {
   const panel = $("warn-list-panel");
   const countEl = $("warn-list-count");
@@ -3188,11 +3385,10 @@ async function loadWarningsList() {
 
   panel.textContent = "Chargement…";
   if (countEl) countEl.textContent = "";
-  const filterRaw = String($("warn-filter-user")?.value || "").replace(/\D/g, "");
-  if (clearBtn) clearBtn.hidden = !filterRaw;
-  const q = filterRaw
-    ? `?user_id=${encodeURIComponent(filterRaw)}&limit=100`
-    : "?limit=100";
+  const filterRaw = String($("warn-filter-user")?.value || "").trim();
+  const filterId = filterRaw.replace(/\D/g, "");
+  if (clearBtn) clearBtn.hidden = !/^\d{17,20}$/.test(filterId);
+  const q = filterRaw ? `?q=${encodeURIComponent(filterRaw)}&limit=100` : "?limit=100";
 
   try {
     const res = await fetch(
@@ -3200,7 +3396,10 @@ async function loadWarningsList() {
       fetchOptsGet()
     );
     if (!res.ok) {
-      panel.textContent = "Impossible de charger les warns.";
+      const j = await res.json().catch(() => ({}));
+      panel.textContent = j.error
+        ? `Impossible de charger les warns (${j.error}).`
+        : "Impossible de charger les warns.";
       return;
     }
     const data = await res.json();
@@ -3212,7 +3411,7 @@ async function loadWarningsList() {
     }
     if (!rows.length) {
       panel.textContent = filterRaw
-        ? "Aucun avertissement pour cet ID."
+        ? "Aucun avertissement pour cette recherche."
         : "Aucun avertissement actif sur ce serveur.";
       return;
     }
@@ -3223,19 +3422,7 @@ async function loadWarningsList() {
       const row = document.createElement("div");
       row.className = "warn-row warn-row--card";
       const src = w.source === "antispam" ? "Antispam" : "Manuel";
-      const when = w.created_at
-        ? new Date(
-            String(w.created_at).endsWith("Z")
-              ? w.created_at
-              : w.created_at + "Z"
-          ).toLocaleString("fr-FR", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "?";
+      const when = formatWarnDate(w.created_at);
       row.innerHTML = `
         <div class="warn-row-top">
           <div class="warn-row-id">
@@ -3467,7 +3654,7 @@ function renderCustomCommands() {
     });
 
     const ta = document.createElement("textarea");
-    ta.className = "input-sm custom-cmd-ta";
+    ta.className = "input-sm custom-cmd-ta var-target";
     ta.rows = 2;
     ta.placeholder = "Réponse (max 2000 car.)";
     ta.value = row.response || "";
@@ -5223,6 +5410,12 @@ window.wingbotDashboard = {
   getLastChannels: () => lastGuildChannelsList,
 };
 
+decorateVarCodes(document);
+fillVarBar($("custom-vars"), VARS_CUSTOM);
+fillVarBar($("sched-vars"), VARS_COMMON);
+fillVarBar($("ticket-vars"), VARS_TICKET);
+fillVarBar($("rr-vars"), VARS_COMMON);
+updateSocialTypeUI();
 loadData();
 
 document.addEventListener("click", (ev) => {

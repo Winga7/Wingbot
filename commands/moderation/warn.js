@@ -6,6 +6,12 @@ const {
 const { memberHasPermOrAdmin } = require("../../memberPerms");
 const { issueWarning } = require("../../lib/warnService");
 const { getWarnConfig } = require("../../database");
+const { replyCommand } = require("../../lib/commandReply");
+const {
+  resolveSlashMember,
+  resolveMessageUser,
+  resolveMessageMember,
+} = require("../../lib/resolveTargets");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -47,35 +53,44 @@ module.exports = {
       });
     }
 
-    const result = await issueWarning({
-      guild: interaction.guild,
-      targetUser: user,
-      moderator: interaction.user,
-      reason,
-      source: "manual",
-      targetMember: interaction.options.getMember("membre"),
-    });
+    await interaction.deferReply();
+    try {
+      const targetMember = await resolveSlashMember(interaction, "membre");
+      const result = await issueWarning({
+        guild: interaction.guild,
+        targetUser: user,
+        moderator: interaction.user,
+        reason,
+        source: "manual",
+        targetMember,
+      });
 
-    const cfg = getWarnConfig(interaction.guild.id);
-    const embed = new EmbedBuilder()
-      .setColor(result.timeoutMin > 0 ? 0xef4444 : 0xeab308)
-      .setTitle("Avertissement enregistré")
-      .setDescription(
-        [
-          `${user} — **warn #${result.warning.id}**`,
-          `**Raison :** ${reason}`,
-          `**Total actif :** ${result.total}/${cfg.warns_before_timeout}`,
-          result.timeoutMin > 0
-            ? `**Sourdine auto :** ${result.timeoutMin} min`
-            : null,
-        ]
-          .filter(Boolean)
-          .join("\n")
-      )
-      .setFooter({ text: `Par ${interaction.user.tag}` })
-      .setTimestamp();
+      const cfg = getWarnConfig(interaction.guild.id);
+      const embed = new EmbedBuilder()
+        .setColor(result.timeoutMin > 0 ? 0xef4444 : 0xeab308)
+        .setTitle("Avertissement enregistré")
+        .setDescription(
+          [
+            `${user} — **warn #${result.warning.id}**`,
+            `**Raison :** ${reason}`,
+            `**Total actif :** ${result.total}/${cfg.warns_before_timeout}`,
+            result.timeoutMin > 0
+              ? `**Sourdine auto :** ${result.timeoutMin} min`
+              : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        )
+        .setFooter({ text: `Par ${interaction.user.tag}` })
+        .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+      await replyCommand(interaction, { embeds: [embed] });
+    } catch (e) {
+      console.error("[warn]", e);
+      await replyCommand(interaction, {
+        content: "❌ Impossible d’enregistrer cet avertissement.",
+      });
+    }
   },
 
   async executeMessage(message, args) {
@@ -89,10 +104,7 @@ module.exports = {
         "❌ Tu n’as pas la permission de modérer les membres."
       );
     }
-    const target =
-      message.mentions.users.first() ||
-      (args[0] &&
-        message.client.users.cache.get(String(args[0]).replace(/\D/g, "")));
+    const target = await resolveMessageUser(message, args[0]);
     if (!target) {
       return message.reply("Usage : `warn @membre <raison>`");
     }
@@ -107,9 +119,7 @@ module.exports = {
       return message.reply("❌ Impossible d’avertir un bot.");
     }
 
-    const targetMember =
-      message.mentions.members?.first() ||
-      message.guild.members.cache.get(target.id);
+    const targetMember = await resolveMessageMember(message, target.id);
 
     const result = await issueWarning({
       guild: message.guild,

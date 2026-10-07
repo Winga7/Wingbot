@@ -278,6 +278,7 @@ function substituteTokens(text, ctx = {}) {
       ["twitch.game", String(tw.game || "")],
       ["twitch.viewers", String(tw.viewers ?? "")],
       ["twitch.thumbnail", String(tw.thumbnail || "")],
+      ["twitch.started_at", String(tw.started_at || "")],
       ["twitch.clip.title", String(clip.title || "")],
       ["twitch.clip.url", String(clip.url || "")],
       ["twitch.clip.id", String(clip.id || "")],

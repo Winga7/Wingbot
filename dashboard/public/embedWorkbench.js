@@ -11,14 +11,20 @@
   let formPayload = null;
   let previewTimer = null;
   let savedSnapshot = null;
-  let lastFocusedField = null;
-
   const TOKENS = [
-    { t: "{guild}", l: "nom serveur", k: "info" },
-    { t: "{guild.members}", l: "nb membres", k: "info" },
-    { t: "{channel}", l: "#salon cible", k: "info" },
+    { t: "{guild}", l: "nom du serveur", k: "info" },
+    { t: "{guild.name}", l: "nom du serveur", k: "info" },
+    { t: "{guild.id}", l: "id du serveur", k: "info" },
+    { t: "{server}", l: "nom du serveur", k: "info" },
+    { t: "{server.id}", l: "id du serveur", k: "info" },
+    { t: "{members}", l: "nombre de membres", k: "info" },
+    { t: "{guild.members}", l: "nombre de membres", k: "info" },
+    { t: "{channel}", l: "mention du salon", k: "info" },
+    { t: "{channel.name}", l: "nom du salon", k: "info" },
+    { t: "{channel.id}", l: "id du salon", k: "info" },
     { t: "{date}", l: "date", k: "time" },
     { t: "{time}", l: "heure", k: "time" },
+    { t: "{now}", l: "timestamp Unix", k: "time" },
     { t: "<t:{now}:F>", l: "horodatage complet", k: "time" },
     { t: "<t:{now}:R>", l: "il y a…", k: "time" },
     { t: "<@USER_ID>", l: "mention @user", k: "mention" },
@@ -775,25 +781,6 @@
       el.addEventListener("change", schedulePreview);
     });
 
-    const formWrap = document.querySelector(".emb-form-wrap");
-    if (formWrap) {
-      formWrap.addEventListener("focusin", (ev) => {
-        const t = ev.target;
-        if (t && (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && t.type === "text")) && t.id !== "emb-name") {
-          lastFocusedField = t;
-        }
-      });
-    }
-
-    const tokBar = $("emb-tokens");
-    if (tokBar) {
-      tokBar.addEventListener("click", (ev) => {
-        const btn = ev.target.closest(".tok");
-        if (!btn) return;
-        insertTokenAtCursor(btn.dataset.token || "");
-      });
-    }
-
     $("emb-add-field").addEventListener("click", addFieldRow);
     $("emb-btn-new").addEventListener("click", newEmbed);
     $("emb-save").addEventListener("click", saveDraft);
@@ -817,26 +804,6 @@
     renderFieldRows([]);
     markClean();
     schedulePreview();
-  }
-
-  function insertTokenAtCursor(token) {
-    if (!token) return;
-    let target = lastFocusedField;
-    if (!target || !document.contains(target)) {
-      target = $("emb-content") || $("emb-desc");
-    }
-    if (!target) return;
-    target.focus();
-    const start = target.selectionStart ?? target.value.length;
-    const end = target.selectionEnd ?? target.value.length;
-    const v = target.value;
-    target.value = v.slice(0, start) + token + v.slice(end);
-    const pos = start + token.length;
-    try {
-      target.setSelectionRange(pos, pos);
-    } catch {}
-    target.dispatchEvent(new Event("input", { bubbles: true }));
-    lastFocusedField = target;
   }
 
   function currentSnapshot() {

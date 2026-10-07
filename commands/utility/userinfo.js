@@ -12,8 +12,16 @@ module.exports = {
     ),
   async execute(interaction) {
     // Si aucun utilisateur n'est spécifié, utiliser l'auteur de la commande
+    if (!interaction.guild) {
+      return interaction.reply({
+        content: "Cette commande s’utilise dans un serveur.",
+        ephemeral: true,
+      });
+    }
     const user = interaction.options.getUser("utilisateur") || interaction.user;
-    const member = interaction.guild.members.cache.get(user.id);
+    const member =
+      interaction.options.getMember("utilisateur") ||
+      (await interaction.guild.members.fetch(user.id).catch(() => null));
 
     // Date de création du compte
     const accountCreated = user.createdAt;
@@ -131,10 +139,10 @@ module.exports = {
 
     await interaction.reply({ embeds: [userEmbed] });
   },
-  executeMessage(message, args) {
-    // Si un utilisateur est mentionné, utiliser celui-ci, sinon utiliser l'auteur
-    const user = message.mentions.users.first() || message.author;
-    const member = message.guild.members.cache.get(user.id);
+  async executeMessage(message, args) {
+    const { resolveMessageUser, resolveMessageMember } = require("../../lib/resolveTargets");
+    const user = (await resolveMessageUser(message, args[0])) || message.author;
+    const member = await resolveMessageMember(message, user.id);
 
     // Date de création du compte
     const accountCreated = user.createdAt;

@@ -4,6 +4,7 @@ const {
   EmbedBuilder,
 } = require("discord.js");
 const { memberHasPermOrAdmin } = require("../../memberPerms");
+const { resolveMessageUser } = require("../../lib/resolveTargets");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -73,13 +74,11 @@ module.exports = {
     }
   },
 
-  executeMessage(message, args) {
+  async executeMessage(message, args) {
     if (!memberHasPermOrAdmin(message.member, PermissionFlagsBits.BanMembers)) {
       return message.reply("❌ Tu n’as pas la permission de bannir des membres.");
     }
-    const targetUser =
-      message.mentions.users.first() ||
-      (args[0] && message.client.users.cache.get(args[0].replace(/\D/g, "")));
+    const targetUser = await resolveMessageUser(message, args[0]);
     if (!targetUser) {
       return message.reply(
         "Usage : `ban @membre [0-7 jours] [raison]` — mentionne un membre."

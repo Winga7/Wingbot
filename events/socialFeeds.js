@@ -181,54 +181,66 @@ async function checkTwitchLiveFeed(client, row) {
   }
 }
 
+function parseFeedTime(value) {
+  if (!value) return NaN;
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    return Date.parse(`${s.replace(" ", "T")}Z`);
+  }
+  return Date.parse(s);
+}
+
 async function checkTwitchClipFeed(client, row) {
-  const now = new Date().toISOString();
+  const now = new Date();
+  const nowIso = now.toISOString();
   try {
     const user = await resolveTwitchUser(row.source_url || row.source_id);
-    const since = row.last_checked_at
-      ? new Date(new Date(row.last_checked_at).getTime() - 120_000).toISOString()
-      : row.created_at ||
-        new Date(Date.now() - 7 * 86400000).toISOString();
-    const rawClips = await fetchTwitchClipsSince(user.id, since);
-    const feedCreated = new Date(row.created_at || 0).getTime();
+    const feedCreated = parseFeedTime(row.created_at);
+    const publishAfter = (Number.isFinite(feedCreated) ? feedCreated : now.getTime()) - 30 * 60_000;
+    const watermark = parseFeedTime(row.last_state);
+    const sinceMs = Number.isFinite(watermark)
+      ? Math.max(watermark - 15 * 60_000, now.getTime() - 6 * 60 * 60_000, publishAfter)
+      : Math.max(publishAfter, now.getTime() - 6 * 60 * 60_000);
+    const rawClips = await fetchTwitchClipsSince(
+      user.id,
+      new Date(sinceMs).toISOString(),
+      nowIso
+    );
 
-    if (!row.last_video_id) {
-      const latest = rawClips[rawClips.length - 1];
-      updateSocialFeed(row.id, row.guild_id, {
-        last_video_id: latest?.id || null,
-        last_checked_at: now,
-        last_error: null,
-      });
-      return;
-    }
-
-    const newClips = rawClips.filter((c) => {
-      if (c.id === row.last_video_id) return false;
-      if (new Date(c.created_at).getTime() < feedCreated) return false;
+    const fresh = rawClips.filter((clip) => {
+      const created = Date.parse(clip.created_at);
+      if (!Number.isFinite(created) || created < publishAfter) return false;
+      if (Number.isFinite(watermark) && created <= watermark) return false;
       return true;
     });
 
+    let postedUntil = Number.isFinite(watermark) ? watermark : null;
     let lastPostedId = row.last_video_id;
-    for (const clip of newClips) {
+    let failReason = null;
+    for (const clip of fresh) {
       const payload = formatClipPayload(clip, user);
       const ok = await deliverSocialAlert(client, row, payload);
-      if (ok) {
-        lastPostedId = clip.id;
-        console.log(
-          `[social] Twitch clip #${row.id} → ${clip.id} (${row.guild_id})`
-        );
-        await new Promise((r) => setTimeout(r, 600));
+      if (!ok) {
+        failReason = "Impossible d'envoyer le clip dans le salon Discord";
+        break;
       }
+      postedUntil = Date.parse(clip.created_at);
+      lastPostedId = clip.id;
+      console.log(
+        `[social] Twitch clip #${row.id} → ${clip.id} (${row.guild_id})`
+      );
+      await new Promise((r) => setTimeout(r, 600));
     }
 
     updateSocialFeed(row.id, row.guild_id, {
       last_video_id: lastPostedId,
-      last_checked_at: now,
-      last_error: null,
+      last_state: postedUntil != null ? new Date(postedUntil).toISOString() : row.last_state,
+      last_checked_at: nowIso,
+      last_error: failReason,
     });
   } catch (e) {
     updateSocialFeed(row.id, row.guild_id, {
-      last_checked_at: now,
+      last_checked_at: nowIso,
       last_error: String(e?.message || e).slice(0, 500),
     });
     console.error(`[social] échec Twitch clip #${row.id}:`, e?.message || e);

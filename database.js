@@ -143,6 +143,22 @@ function migrateGuildWarningsTable() {
     )
   `
   ).run();
+
+  const cols = new Set(
+    db.prepare("PRAGMA table_info(guild_warnings)").all().map((c) => c.name)
+  );
+  const add = (name, ddl) => {
+    if (!cols.has(name)) {
+      db.prepare(`ALTER TABLE guild_warnings ADD COLUMN ${ddl}`).run();
+    }
+  };
+  add("user_tag", "user_tag TEXT");
+  add("moderator_id", "moderator_id TEXT");
+  add("moderator_tag", "moderator_tag TEXT");
+  add("reason", "reason TEXT");
+  add("source", "source TEXT NOT NULL DEFAULT 'manual'");
+  add("created_at", "created_at DATETIME");
+
   db.prepare(
     `CREATE INDEX IF NOT EXISTS idx_guild_warnings_guild_user
      ON guild_warnings(guild_id, user_id)`
@@ -2245,34 +2261,54 @@ function countGuildWarnings(guildId, userId) {
   return Number(row?.n || 0);
 }
 
-function listGuildWarnings(guildId, { userId = null, limit = 50, offset = 0 } = {}) {
-  const lim = Math.min(Math.max(1, limit), 200);
-  const off = Math.max(0, offset);
-  let rows;
-  if (userId) {
-    rows = db
-      .prepare(
-        `SELECT id, guild_id, user_id, user_tag, moderator_id, moderator_tag,
+function listGuildWarnings(
+  guildId,
+  { userId = null, search = null, limit = 50, offset = 0 } = {}
+) {
+  const lim = Math.min(Math.max(1, Number(limit) || 50), 200);
+  const off = Math.max(0, Number(offset) || 0);
+  const gid = String(guildId);
+  const select = `SELECT id, guild_id, user_id, user_tag, moderator_id, moderator_tag,
                 reason, source, created_at
-         FROM guild_warnings
+         FROM guild_warnings`;
+  if (userId) {
+    return db
+      .prepare(
+        `${select}
          WHERE guild_id = ? AND user_id = ?
          ORDER BY id DESC
          LIMIT ? OFFSET ?`
       )
-      .all(String(guildId), String(userId), lim, off);
-  } else {
-    rows = db
+      .all(gid, String(userId), lim, off);
+  }
+  const q = String(search || "").trim();
+  if (q) {
+    const like = `%${q.replace(/[%_]/g, "")}%`;
+    const digits = q.replace(/\D/g, "");
+    return db
       .prepare(
-        `SELECT id, guild_id, user_id, user_tag, moderator_id, moderator_tag,
-                reason, source, created_at
-         FROM guild_warnings
+        `${select}
          WHERE guild_id = ?
+           AND (
+             IFNULL(user_tag, '') LIKE ? COLLATE NOCASE
+             OR IFNULL(moderator_tag, '') LIKE ? COLLATE NOCASE
+             OR IFNULL(reason, '') LIKE ? COLLATE NOCASE
+             OR user_id = ?
+             OR CAST(id AS TEXT) = ?
+           )
          ORDER BY id DESC
          LIMIT ? OFFSET ?`
       )
-      .all(String(guildId), lim, off);
+      .all(gid, like, like, like, digits, digits, lim, off);
   }
-  return rows;
+  return db
+    .prepare(
+      `${select}
+       WHERE guild_id = ?
+       ORDER BY id DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(gid, lim, off);
 }
 
 function getGuildWarningById(guildId, warningId) {

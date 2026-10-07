@@ -1693,10 +1693,15 @@ app.get(
   (req, res) => {
     try {
       const guildId = req.guildId;
-      const userId = normalizeSnowflakeId(req.query.user_id || "");
+      const raw = String(req.query.q || req.query.user_id || "")
+        .trim()
+        .slice(0, 100);
+      const digits = raw.replace(/\D/g, "");
+      const isId = /^\d{17,20}$/.test(digits);
       const limit = Math.min(Number(req.query.limit) || 50, 200);
       const rows = listGuildWarnings(guildId, {
-        userId: userId || null,
+        userId: isId ? digits : null,
+        search: !isId && raw ? raw : null,
         limit,
       });
       res.json({ warnings: rows, count: rows.length });
@@ -1917,6 +1922,7 @@ function normalizeSocialPayloadInput(body, platform = "youtube", eventKind = "vi
   const hasEmbed = !!(
     e.title ||
     e.description ||
+    e.url ||
     e.image_url ||
     e.thumbnail_url ||
     (e.fields && e.fields.length)
@@ -2122,11 +2128,12 @@ function normalizeReactionEntriesInput(raw) {
   return out;
 }
 
-function buildReactionRoleMessageBody(body) {
-  const merged = mergeEmbedPayload(defaultEmbedPayload(), {
+function buildReactionRoleMessageBody(body, ctx = null) {
+  let merged = mergeEmbedPayload(defaultEmbedPayload(), {
     content: body?.content ?? "",
     embed: body?.embed && typeof body.embed === "object" ? body.embed : {},
   });
+  if (ctx) merged = substituteEmbedPayload(merged, ctx);
   const e = merged.embed || {};
   const hasText = String(merged.content || "").trim().length > 0;
   const hasEmbed = !!(
@@ -2148,8 +2155,18 @@ async function discordAddReaction(channelId, messageId, emojiKey) {
 }
 
 async function publishReactionRoleMessage(guildId, channelId, body, entries) {
-  await assertGuildTextChannel(guildId, channelId);
-  const apiBody = buildReactionRoleMessageBody(body);
+  const chMeta = await assertGuildTextChannel(guildId, channelId);
+  const guildMeta = await discordFetchJson(
+    `/guilds/${encodeURIComponent(guildId)}?with_counts=true`
+  ).catch(() => null);
+  const apiBody = buildReactionRoleMessageBody(body, {
+    guild: {
+      id: guildId,
+      name: guildMeta?.name || "",
+      member_count: guildMeta?.approximate_member_count,
+    },
+    channel: { id: chMeta.id, name: chMeta.name },
+  });
   const msg = await discordBotJson(
     "POST",
     `/channels/${encodeURIComponent(channelId)}/messages`,
@@ -2756,8 +2773,7 @@ app.post(
                 ? "online"
                 : "offline"
               : null,
-          last_video_id:
-            eventKind === "clip" ? preview.latest_clip?.id || null : null,
+          last_video_id: null,
         };
       } else {
         const preview = await resolveAndPreviewYoutubeChannel(source);

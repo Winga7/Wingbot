@@ -11,25 +11,35 @@ module.exports = {
         .setRequired(false)
     ),
   async execute(interaction) {
-    // Si aucun utilisateur n'est spécifié, utiliser l'auteur de la commande
+    if (!interaction.guild) {
+      return interaction.reply({
+        content: "Cette commande s’utilise dans un serveur.",
+        ephemeral: true,
+      });
+    }
     const user = interaction.options.getUser("utilisateur") || interaction.user;
-    const member = interaction.guild.members.cache.get(user.id);
+    const member =
+      interaction.options.getMember("utilisateur") ||
+      (await interaction.guild.members.fetch(user.id).catch(() => null));
+    const authorJoined = interaction.member?.joinedAt
+      ? interaction.member.joinedAt.toLocaleString("fr-FR")
+      : "date inconnue";
+    const targetJoined = member?.joinedAt
+      ? member.joinedAt.toLocaleString("fr-FR")
+      : "Non disponible";
 
     await interaction.reply(
-      `Cette commande a été exécutée par ${
-        interaction.user.username
-      }, qui a rejoint le serveur le ${interaction.member.joinedAt}.\n${
+      `Cette commande a été exécutée par ${interaction.user.username}, qui a rejoint le serveur le ${authorJoined}.\n${
         user.id !== interaction.user.id
-          ? `Informations sur ${user.username} : a rejoint le serveur le ${
-              member?.joinedAt || "Non disponible"
-            }.`
+          ? `Informations sur ${user.username} : a rejoint le serveur le ${targetJoined}.`
           : ""
       }`
     );
   },
-  executeMessage(message, args) {
-    const user = message.mentions.users.first() || message.author;
-    const member = message.guild.members.cache.get(user.id);
+  async executeMessage(message, args) {
+    const { resolveMessageUser, resolveMessageMember } = require("../../lib/resolveTargets");
+    const user = (await resolveMessageUser(message, args[0])) || message.author;
+    const member = await resolveMessageMember(message, user.id);
 
     message.reply(
       `Cette commande a été exécutée par ${

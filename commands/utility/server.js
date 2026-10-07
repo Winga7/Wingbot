@@ -12,6 +12,12 @@ module.exports = {
         .addChoices({ name: "Logo du serveur", value: "logo" })
     ),
   async execute(interaction) {
+    if (!interaction.guild) {
+      return interaction.reply({
+        content: "Cette commande s’utilise dans un serveur.",
+        ephemeral: true,
+      });
+    }
     const option = interaction.options.getString("option");
     const guild = interaction.guild;
 

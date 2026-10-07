@@ -1,5 +1,9 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
 const { memberHasPermOrAdmin } = require("../../memberPerms");
+const {
+  resolveSlashMember,
+  resolveMessageMember,
+} = require("../../lib/resolveTargets");
 
 const MAX_MIN = 40320; // 28 jours
 
@@ -24,7 +28,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const member = interaction.options.getMember("membre");
+    const member = await resolveSlashMember(interaction, "membre");
     const minutes = interaction.options.getInteger("minutes", true);
     const reason =
       interaction.options.getString("raison")?.slice(0, 512) || "Aucune raison";
@@ -74,16 +78,13 @@ module.exports = {
     }
   },
 
-  executeMessage(message, args) {
+  async executeMessage(message, args) {
     if (!memberHasPermOrAdmin(message.member, PermissionFlagsBits.ModerateMembers)) {
       return message.reply(
         "❌ Tu n’as pas la permission de modérer les membres."
       );
     }
-    const target =
-      message.mentions.members?.first() ||
-      (args[0] &&
-        message.guild.members.cache.get(String(args[0]).replace(/\D/g, "")));
+    const target = await resolveMessageMember(message, args[0]);
     const minutes = parseInt(args[1], 10);
     if (!target || isNaN(minutes) || minutes < 1 || minutes > MAX_MIN) {
       return message.reply(

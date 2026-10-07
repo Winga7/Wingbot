@@ -5,6 +5,8 @@ const {
 } = require("discord.js");
 const { memberHasPermOrAdmin } = require("../../memberPerms");
 const { listGuildWarnings, countGuildWarnings } = require("../../database");
+const { replyCommand } = require("../../lib/commandReply");
+const { resolveMessageUser } = require("../../lib/resolveTargets");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -28,10 +30,11 @@ module.exports = {
         ephemeral: true,
       });
     }
+    await interaction.deferReply({ ephemeral: true });
     return replyWarnList(interaction, user);
   },
 
-  executeMessage(message, args) {
+  async executeMessage(message, args) {
     if (
       !memberHasPermOrAdmin(
         message.member,
@@ -42,10 +45,7 @@ module.exports = {
         "❌ Tu n’as pas la permission de modérer les membres."
       );
     }
-    const target =
-      message.mentions.users.first() ||
-      (args[0] &&
-        message.client.users.cache.get(String(args[0]).replace(/\D/g, "")));
+    const target = await resolveMessageUser(message, args[0]);
     if (!target) {
       return message.reply("Usage : `warns @membre`");
     }
@@ -59,11 +59,10 @@ async function replyWarnList(ctx, user) {
   const total = countGuildWarnings(guild.id, user.id);
 
   if (rows.length === 0) {
-    const text = `${user.tag} n’a aucun avertissement actif.`;
-    if (ctx.reply) {
-      return ctx.reply({ content: text, ephemeral: !!ctx.user });
-    }
-    return ctx.reply(text);
+    return replyCommand(ctx, {
+      content: `${user.tag} n’a aucun avertissement actif.`,
+      ephemeral: true,
+    });
   }
 
   const lines = rows.map((w) => {
@@ -78,8 +77,5 @@ async function replyWarnList(ctx, user) {
     .setDescription(lines.join("\n\n").slice(0, 4000))
     .setFooter({ text: `Total actif : ${total} · unwarn <id> pour retirer` });
 
-  if (ctx.reply) {
-    return ctx.reply({ embeds: [embed], ephemeral: !!ctx.user });
-  }
-  return ctx.reply({ embeds: [embed] });
+  return replyCommand(ctx, { embeds: [embed], ephemeral: true });
 }

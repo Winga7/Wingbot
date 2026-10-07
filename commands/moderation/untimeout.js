@@ -1,5 +1,9 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
 const { memberHasPermOrAdmin } = require("../../memberPerms");
+const {
+  resolveSlashMember,
+  resolveMessageMember,
+} = require("../../lib/resolveTargets");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,7 +15,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const member = interaction.options.getMember("membre");
+    const member = await resolveSlashMember(interaction, "membre");
     if (!member) {
       return interaction.reply({
         content: "❌ Membre introuvable.",
@@ -48,16 +52,13 @@ module.exports = {
     }
   },
 
-  executeMessage(message, args) {
+  async executeMessage(message, args) {
     if (!memberHasPermOrAdmin(message.member, PermissionFlagsBits.ModerateMembers)) {
       return message.reply(
         "❌ Tu n’as pas la permission de modérer les membres."
       );
     }
-    const target =
-      message.mentions.members?.first() ||
-      (args[0] &&
-        message.guild.members.cache.get(String(args[0]).replace(/\D/g, "")));
+    const target = await resolveMessageMember(message, args[0]);
     if (!target) {
       return message.reply("Usage : `untimeout @membre`");
     }

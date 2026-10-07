@@ -10,6 +10,8 @@ const {
   countGuildWarnings,
   clearGuildWarningsForUser,
 } = require("../../database");
+const { replyCommand } = require("../../lib/commandReply");
+const { resolveMessageUser } = require("../../lib/resolveTargets");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -46,7 +48,7 @@ module.exports = {
     return runUnwarn(interaction, interaction.guild.id, warnId, user);
   },
 
-  executeMessage(message, args) {
+  async executeMessage(message, args) {
     if (
       !memberHasPermOrAdmin(
         message.member,
@@ -59,10 +61,7 @@ module.exports = {
     }
     const sub = (args[0] || "").toLowerCase();
     if (sub === "all" || sub === "clear") {
-      const target =
-        message.mentions.users.first() ||
-        (args[1] &&
-          message.client.users.cache.get(String(args[1]).replace(/\D/g, "")));
+      const target = await resolveMessageUser(message, args[1]);
       if (!target) {
         return message.reply("Usage : `unwarn all @membre`");
       }
@@ -79,16 +78,18 @@ module.exports = {
 async function runUnwarn(ctx, guildId, warnId, user) {
   if (user) {
     const n = clearGuildWarningsForUser(guildId, user.id);
-    const text = `✅ ${n} avertissement(s) retiré(s) pour **${user.tag}**.`;
-    if (ctx.reply) return ctx.reply({ content: text, ephemeral: !!ctx.user });
-    return ctx.reply(text);
+    return replyCommand(ctx, {
+      content: `✅ ${n} avertissement(s) retiré(s) pour **${user.tag}**.`,
+      ephemeral: true,
+    });
   }
 
   const row = getGuildWarningById(guildId, warnId);
   if (!row) {
-    const text = `❌ Warn #${warnId} introuvable sur ce serveur.`;
-    if (ctx.reply) return ctx.reply({ content: text, ephemeral: !!ctx.user });
-    return ctx.reply(text);
+    return replyCommand(ctx, {
+      content: `❌ Warn #${warnId} introuvable sur ce serveur.`,
+      ephemeral: true,
+    });
   }
 
   deleteGuildWarning(guildId, warnId);
@@ -105,6 +106,5 @@ async function runUnwarn(ctx, guildId, warnId, user) {
       ].join("\n")
     );
 
-  if (ctx.reply) return ctx.reply({ embeds: [embed], ephemeral: !!ctx.user });
-  return ctx.reply({ embeds: [embed] });
+  return replyCommand(ctx, { embeds: [embed], ephemeral: true });
 }

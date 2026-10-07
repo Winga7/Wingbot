@@ -3559,6 +3559,23 @@ code {
   transform: translateY(1px);
 }
 
+button.tok {
+  appearance: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.2;
+}
+
+code.tok {
+  cursor: pointer;
+}
+
+.var-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
 .tok[data-kind="time"] {
   border-color: rgba(34, 211, 238, 0.3);
   background: rgba(34, 211, 238, 0.1);

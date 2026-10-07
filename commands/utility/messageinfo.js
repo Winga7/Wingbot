@@ -25,6 +25,12 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    if (!interaction.guild) {
+      return interaction.reply({
+        content: "Cette commande s’utilise dans un serveur.",
+        ephemeral: true,
+      });
+    }
     const messageId = interaction.options.getString("id", true);
 
     const cached = getCachedMessage(messageId);

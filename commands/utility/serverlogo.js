@@ -6,6 +6,12 @@ module.exports = {
     .setDescription("Affiche le logo du serveur"),
   async execute(interaction) {
     const guild = interaction.guild;
+    if (!guild) {
+      return interaction.reply({
+        content: "Cette commande s’utilise dans un serveur.",
+        ephemeral: true,
+      });
+    }
     const logoUrl = guild.iconURL({ dynamic: true, size: 1024 });
 
     if (!logoUrl) {
