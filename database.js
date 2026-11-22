@@ -2177,6 +2177,12 @@ function migrateGuildConfigExtras() {
       "UPDATE guild_config SET warn_config = ? WHERE warn_config IS NULL"
     ).run("{}");
   }
+  if (!names.has("member_cards")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN member_cards TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET member_cards = ? WHERE member_cards IS NULL"
+    ).run("{}");
+  }
 }
 
 const COMMAND_GROUP_IDS = new Set(COMMAND_GROUPS.map((g) => g.id));
@@ -2209,12 +2215,30 @@ function getAntispamConfig(guildId) {
 }
 
 const { parseWarnConfig, mergeWarnPatch } = require("./lib/warnConfig");
+const { parseMemberCards } = require("./lib/memberCardConfig");
 
 function getWarnConfig(guildId) {
   const row = db
     .prepare("SELECT warn_config FROM guild_config WHERE guild_id = ?")
     .get(guildId);
   return parseWarnConfig(row?.warn_config);
+}
+
+function getMemberCards(guildId) {
+  ensureGuildLogRow(guildId);
+  const row = db
+    .prepare("SELECT member_cards FROM guild_config WHERE guild_id = ?")
+    .get(guildId);
+  return parseMemberCards(row?.member_cards);
+}
+
+function setMemberCards(guildId, input) {
+  ensureGuildLogRow(guildId);
+  const next = parseMemberCards(input);
+  db.prepare(
+    "UPDATE guild_config SET member_cards = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), guildId);
+  return next;
 }
 
 function insertGuildWarning({
@@ -2841,6 +2865,8 @@ module.exports = {
   getCommandAccessConfig,
   getAntispamConfig,
   getWarnConfig,
+  getMemberCards,
+  setMemberCards,
   insertGuildWarning,
   countGuildWarnings,
   listGuildWarnings,

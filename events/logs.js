@@ -76,8 +76,65 @@ module.exports = (client) => {
   ]);
   const vocalLogSendDedup = new Map();
 
-  // Helper: Envoyer un log
-  async function sendLog(guild, embed) {
+  /**
+   * URL d’avatar affichable dans un embed.
+   * Le WebP renvoyé par défaut par discord.js ne s’affiche souvent pas
+   * (thumbnail vide). PNG, ou GIF si l’avatar est animé.
+   */
+  function userAvatarUrl(user) {
+    if (!user) return null;
+    const opts = { extension: "png", size: 256 };
+    try {
+      if (typeof user.displayAvatarURL === "function") {
+        const url = user.displayAvatarURL(opts);
+        if (url) return url;
+      }
+    } catch (error) {
+      console.error(
+        "[logs] Impossible de lire l'avatar :",
+        error?.message || error
+      );
+    }
+    const id = user.id;
+    if (!id) return null;
+    const hash = user.avatar;
+    if (hash) {
+      const ext = String(hash).startsWith("a_") ? "gif" : "png";
+      return `https://cdn.discordapp.com/avatars/${id}/${hash}.${ext}?size=256`;
+    }
+    try {
+      const index = Number((BigInt(String(id)) >> 22n) % 6n);
+      return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+    } catch {
+      return "https://cdn.discordapp.com/embed/avatars/0.png";
+    }
+  }
+
+  function logAvatarName(user) {
+    return String(
+      user.username || user.globalName || user.tag || user.displayName || "Membre"
+    ).slice(0, 256);
+  }
+
+  /** Avatar à droite (thumbnail) et à côté du pseudo (auteur), comme MEE6. */
+  function setLogAvatar(embed, user) {
+    if (!(embed instanceof EmbedBuilder) || !user) return embed;
+    const url = userAvatarUrl(user);
+    if (!url) return embed;
+    embed.setThumbnail(url);
+    if (!embed.data.author?.icon_url) {
+      const author = {
+        name: embed.data.author?.name || logAvatarName(user),
+        iconURL: url,
+      };
+      if (embed.data.author?.url) author.url = embed.data.author.url;
+      embed.setAuthor(author);
+    }
+    return embed;
+  }
+
+  // Helper: Envoyer un log (avatarUser = personne concernée ou exécuteur audit)
+  async function sendLog(guild, embed, avatarUser = null) {
     const logChannelId = getLogChannel(guild.id);
     if (!logChannelId) return;
 
@@ -111,6 +168,7 @@ module.exports = (client) => {
           }
         }
       }
+      setLogAvatar(embed, avatarUser);
       await logChannel.send({ embeds: [embed] });
     } catch (error) {
       console.error("Erreur lors de l'envoi du log:", error);
@@ -300,6 +358,8 @@ module.exports = (client) => {
       .setFooter({ text: author.tag })
       .setTimestamp();
 
+    setLogAvatar(embed, message.author || author);
+
     await sendLog(message.guild, embed);
   });
 
@@ -347,6 +407,8 @@ module.exports = (client) => {
       .setFooter({ text: newMessage.author?.tag || "Message modifié" })
       .setTimestamp();
 
+    setLogAvatar(embed, newMessage.author);
+
     await sendLog(newMessage.guild, embed);
   });
 
@@ -363,7 +425,6 @@ module.exports = (client) => {
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
       .setTitle("👋 Membre Rejoint")
-      .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
       .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
       .addFields(
         logIdsField(idGuild(member.guild), idMember(member.user.id)),
@@ -381,6 +442,7 @@ module.exports = (client) => {
       .setFooter({ text: member.user.tag })
       .setTimestamp();
 
+    setLogAvatar(embed, member.user);
     await sendLog(member.guild, embed);
   });
 
@@ -417,7 +479,6 @@ module.exports = (client) => {
       const embedKick = new EmbedBuilder()
         .setColor(0xff6600)
         .setTitle("👢 Expulsé")
-        .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
         .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
         .addFields(
           logIdsField(
@@ -436,6 +497,7 @@ module.exports = (client) => {
         .setFooter({ text: member.user.tag })
         .setTimestamp();
 
+      setLogAvatar(embedKick, member.user);
       await sendLog(member.guild, embedKick);
       return;
     }
@@ -451,7 +513,6 @@ module.exports = (client) => {
     const embed = new EmbedBuilder()
       .setColor(0xff9900)
       .setTitle("👋 Membre Parti")
-      .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
       .setDescription(`${member.user.tag} (<@${member.user.id}>)`)
       .addFields(
         logIdsField(idGuild(member.guild), idMember(member.user.id)),
@@ -466,6 +527,7 @@ module.exports = (client) => {
       .setFooter({ text: member.user.tag })
       .setTimestamp();
 
+    setLogAvatar(embed, member.user);
     await sendLog(member.guild, embed);
   });
 
@@ -514,6 +576,7 @@ module.exports = (client) => {
           .setFooter({ text: member.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, member.user);
         await sendLog(newState.guild, embed);
       }
     }
@@ -538,6 +601,7 @@ module.exports = (client) => {
           .setFooter({ text: member.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, member.user);
         await sendLog(newState.guild, embed);
       }
     }
@@ -582,6 +646,7 @@ module.exports = (client) => {
           .setFooter({ text: member.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, member.user);
         await sendLog(newState.guild, embed);
       }
     }
@@ -623,6 +688,7 @@ module.exports = (client) => {
           .setFooter({ text: member.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, member.user);
         await sendLog(newState.guild, embed);
       }
     }
@@ -664,6 +730,7 @@ module.exports = (client) => {
           .setFooter({ text: member.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, member.user);
         await sendLog(newState.guild, embed);
       }
     }
@@ -691,6 +758,7 @@ module.exports = (client) => {
           .setFooter({ text: member.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, member.user);
         await sendLog(newState.guild, embed);
       }
     }
@@ -719,6 +787,7 @@ module.exports = (client) => {
           .setFooter({ text: member.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, member.user);
         await sendLog(newState.guild, embed);
       }
     }
@@ -747,6 +816,7 @@ module.exports = (client) => {
           .setFooter({ text: member.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, member.user);
         await sendLog(newState.guild, embed);
       }
     }
@@ -773,6 +843,7 @@ module.exports = (client) => {
           .setFooter({ text: member.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, member.user);
         await sendLog(newState.guild, embed);
       }
     }
@@ -821,6 +892,7 @@ module.exports = (client) => {
           .setFooter({ text: newMember.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, newMember.user);
         await sendLog(newMember.guild, embed);
       }
     }
@@ -856,6 +928,7 @@ module.exports = (client) => {
           .setFooter({ text: newMember.user.tag })
           .setTimestamp();
 
+        setLogAvatar(embed, newMember.user);
         await sendLog(newMember.guild, embed);
       }
     }
@@ -901,6 +974,7 @@ module.exports = (client) => {
         .setFooter({ text: newMember.user.tag })
         .setTimestamp();
 
+      setLogAvatar(embed, newMember.user);
       await sendLog(newMember.guild, embed);
     }
 
@@ -963,6 +1037,7 @@ module.exports = (client) => {
             }
           );
 
+        setLogAvatar(embed, newMember.user);
         await sendLog(newMember.guild, embed);
       }
     }
@@ -1001,7 +1076,7 @@ module.exports = (client) => {
       )
       .setTimestamp();
 
-    await sendLog(guild, embed);
+    await sendLog(guild, embed, executor);
   });
 
   client.on(Events.ChannelDelete, async (channel) => {
@@ -1035,7 +1110,7 @@ module.exports = (client) => {
       )
       .setTimestamp();
 
-    await sendLog(guild, embed);
+    await sendLog(guild, embed, executor);
   });
 
   client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
@@ -1158,7 +1233,7 @@ module.exports = (client) => {
       )
       .setTimestamp();
 
-    await sendLog(guild, embed);
+    await sendLog(guild, embed, executor);
   });
 
   // Threads
@@ -1193,7 +1268,7 @@ module.exports = (client) => {
       )
       .setTimestamp();
 
-    await sendLog(guild, embed);
+    await sendLog(guild, embed, executor);
   });
 
   client.on(Events.ThreadDelete, async (thread) => {
@@ -1222,7 +1297,7 @@ module.exports = (client) => {
       )
       .setTimestamp();
 
-    await sendLog(guild, embed);
+    await sendLog(guild, embed, executor);
   });
 
   client.on(Events.ThreadUpdate, async (oldThread, newThread) => {
@@ -1272,7 +1347,7 @@ module.exports = (client) => {
       )
       .setTimestamp();
 
-    await sendLog(guild, embed);
+    await sendLog(guild, embed, executor);
   });
 
   // Emojis du serveur
@@ -1302,7 +1377,7 @@ module.exports = (client) => {
       )
       .setTimestamp();
 
-    await sendLog(guild, embed);
+    await sendLog(guild, embed, executor);
   });
 
   client.on(Events.GuildEmojiDelete, async (emoji) => {
@@ -1331,7 +1406,7 @@ module.exports = (client) => {
       )
       .setTimestamp();
 
-    await sendLog(guild, embed);
+    await sendLog(guild, embed, executor);
   });
 
   client.on(Events.GuildEmojiUpdate, async (oldEmoji, newEmoji) => {
@@ -1381,7 +1456,7 @@ module.exports = (client) => {
       )
       .setTimestamp();
 
-    await sendLog(guild, embed);
+    await sendLog(guild, embed, executor);
   });
 
   // === LOGS REACTIONS ===
@@ -1442,6 +1517,7 @@ module.exports = (client) => {
         .setFooter({ text: user.tag || user.id })
         .setTimestamp();
 
+      setLogAvatar(embed, user);
       await sendLog(guild, embed);
     } catch (err) {
       console.error("Erreur logs reaction add:", err);
@@ -1505,6 +1581,7 @@ module.exports = (client) => {
         .setFooter({ text: user.tag || user.id })
         .setTimestamp();
 
+      setLogAvatar(embed, user);
       await sendLog(guild, embed);
     } catch (err) {
       console.error("Erreur logs reaction remove:", err);
@@ -1552,7 +1629,7 @@ module.exports = (client) => {
         .setFooter({ text: "Suppression en masse (Discord)" })
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, first?.author);
     } catch (err) {
       console.error("Erreur logs bulk delete:", err);
     }
@@ -1593,7 +1670,7 @@ module.exports = (client) => {
       .setFooter({ text: newGuild.name })
       .setTimestamp();
 
-    await sendLog(newGuild, embed);
+    await sendLog(newGuild, embed, executor);
   });
 
   // === LOGS INVITES ===
@@ -1625,7 +1702,7 @@ module.exports = (client) => {
         .setFooter({ text: `Invitation ${invite.code}` })
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, invite.inviter);
     } catch (err) {
       console.error("Erreur logs InviteCreate:", err);
     }
@@ -1653,7 +1730,7 @@ module.exports = (client) => {
         .setFooter({ text: `Invitation ${invite.code}` })
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, invite.inviter);
     } catch (err) {
       console.error("Erreur logs InviteDelete:", err);
     }
@@ -1687,6 +1764,7 @@ module.exports = (client) => {
         .setFooter({ text: ban.user.tag })
         .setTimestamp();
 
+      setLogAvatar(embed, ban.user);
       await sendLog(guild, embed);
     } catch (err) {
       console.error("Erreur logs GuildBanRemove:", err);
@@ -1710,7 +1788,6 @@ module.exports = (client) => {
         .setColor(0xff0000)
         .setTitle("🔨 Banni")
         .setDescription(`${ban.user.tag} (<@${ban.user.id}>)`)
-        .setThumbnail(ban.user.displayAvatarURL({ dynamic: true, size: 256 }))
         .addFields(
           logIdsField(
             idGuild(guild),
@@ -1723,6 +1800,7 @@ module.exports = (client) => {
         .setFooter({ text: ban.user.tag })
         .setTimestamp();
 
+      setLogAvatar(embed, ban.user);
       await sendLog(guild, embed);
     } catch (err) {
       console.error("Erreur logs GuildBanAdd:", err);
@@ -1738,6 +1816,7 @@ module.exports = (client) => {
 
       let title = "📌 Épingles mises à jour";
       let extra = "";
+      let pinExecutor = null;
       try {
         const pinLogs = await guild.fetchAuditLogs({
           limit: 1,
@@ -1757,12 +1836,12 @@ module.exports = (client) => {
           (!unpinOk || pinEntry.createdTimestamp > unpinEntry.createdTimestamp)
         ) {
           title = "📌 Message épinglé";
-          extra = pinEntry.executor ? `Par ${pinEntry.executor.tag}` : "";
+          pinExecutor = pinEntry.executor || null;
+          extra = pinExecutor ? `Par ${pinExecutor.tag}` : "";
         } else if (unpinOk) {
           title = "📌 Message désépinglé";
-          extra = unpinEntry.executor
-            ? `Par ${unpinEntry.executor.tag}`
-            : "";
+          pinExecutor = unpinEntry.executor || null;
+          extra = pinExecutor ? `Par ${pinExecutor.tag}` : "";
         }
       } catch {
         /* ignore */
@@ -1784,7 +1863,7 @@ module.exports = (client) => {
       }
       embed.setFooter({ text: channel.isTextBased?.() ? `#${channel.name}` : String(channel.id) }).setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, pinExecutor);
     } catch (err) {
       console.error("Erreur logs ChannelPinsUpdate:", err);
     }
@@ -1813,7 +1892,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs GuildRoleCreate:", err);
     }
@@ -1841,7 +1920,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs GuildRoleDelete:", err);
     }
@@ -1894,7 +1973,7 @@ module.exports = (client) => {
         .setFooter({ text: newRole.name })
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs GuildRoleUpdate:", err);
     }
@@ -1927,7 +2006,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs GuildScheduledEventCreate:", err);
     }
@@ -1974,7 +2053,7 @@ module.exports = (client) => {
         .setFooter({ text: newEvt.name || newEvt.id })
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs GuildScheduledEventUpdate:", err);
     }
@@ -2006,7 +2085,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs GuildScheduledEventDelete:", err);
     }
@@ -2032,7 +2111,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, user);
     } catch (err) {
       console.error("Erreur logs GuildScheduledEventUserAdd:", err);
     }
@@ -2058,7 +2137,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, user);
     } catch (err) {
       console.error("Erreur logs GuildScheduledEventUserRemove:", err);
     }
@@ -2091,7 +2170,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs GuildStickerCreate:", err);
     }
@@ -2123,7 +2202,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs GuildStickerDelete:", err);
     }
@@ -2170,7 +2249,7 @@ module.exports = (client) => {
         .setFooter({ text: newSticker.name })
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs GuildStickerUpdate:", err);
     }
@@ -2210,7 +2289,7 @@ module.exports = (client) => {
         .setFooter({ text: instance.topic || "Scène" })
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs StageInstanceCreate:", err);
     }
@@ -2248,7 +2327,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs StageInstanceDelete:", err);
     }
@@ -2294,7 +2373,7 @@ module.exports = (client) => {
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs StageInstanceUpdate:", err);
     }
@@ -2307,6 +2386,11 @@ module.exports = (client) => {
       if (!guild) return;
       if (!isLogEnabled(guild.id, "srv_webhook")) return;
 
+      const executor =
+        (await getAuditLogExecutor(guild, AuditLogEvent.WebhookUpdate, null)) ||
+        (await getAuditLogExecutor(guild, AuditLogEvent.WebhookCreate, null)) ||
+        (await getAuditLogExecutor(guild, AuditLogEvent.WebhookDelete, null));
+
       const hooks = await channel.fetchWebhooks().catch(() => null);
       const names = hooks
         ? hooks.map((w) => w.name).slice(0, 8).join(", ")
@@ -2317,13 +2401,14 @@ module.exports = (client) => {
         .setTitle("🔗 Webhooks du salon mis à jour")
         .setDescription(channel.isTextBased?.() ? `<#${channel.id}>` : String(channel.id))
         .addFields(
-          logIdsField(idGuild(guild), idChannel(channel.id, "Salon")),
+          logIdsField(idGuild(guild), idChannel(channel.id, "Salon"), idExecutor(executor)),
           { name: "Webhooks (extrait)", value: names.substring(0, 1024) || "—" },
-          { name: "Nombre", value: `${hooks ? hooks.size : 0}`, inline: true }
+          { name: "Nombre", value: `${hooks ? hooks.size : 0}`, inline: true },
+          { name: "Par", value: executor ? executor.tag : "Système", inline: false }
         )
         .setTimestamp();
 
-      await sendLog(guild, embed);
+      await sendLog(guild, embed, executor);
     } catch (err) {
       console.error("Erreur logs WebhooksUpdate:", err);
     }

@@ -146,6 +146,12 @@
                 </span>
                 <span class="nav-label">Réseaux sociaux</span>
               </a>
+              <a href="#membercards" class="nav-link" data-view="membercards">
+                <span class="nav-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/></svg>
+                </span>
+                <span class="nav-label">Arrivées</span>
+              </a>
               <a href="#templates" class="nav-link" data-view="templates">
                 <span class="nav-ico" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -643,6 +649,13 @@
                   </span>
                   <span class="ov-quick-label">Réseaux sociaux</span>
                   <span class="ov-quick-sub muted tiny">YouTube · Twitch live · clips</span>
+                </button>
+                <button type="button" class="ov-quick-btn" data-go="membercards">
+                  <span class="ov-quick-ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/></svg>
+                  </span>
+                  <span class="ov-quick-label">Arrivées</span>
+                  <span class="ov-quick-sub muted tiny">Join, départ, kick</span>
                 </button>
                 <button type="button" class="ov-quick-btn" data-go="ticketing">
                   <span class="ov-quick-ico">
@@ -1247,6 +1260,98 @@
                 <button type="button" class="btn ghost tiny" id="btn-social-refresh">Rafraîchir</button>
               </div>
               <div id="social-list" class="muted tiny">Charge un serveur pour voir les alertes.</div>
+            </div>
+          </section>
+
+          <section class="view" id="view-membercards" hidden>
+            <div class="view-head">
+              <h2>Arrivées &amp; départs</h2>
+              <p class="muted tiny">
+                Carte image quand quelqu'un rejoint, quitte ou se fait expulser.
+                Chaque cas a son propre salon, ses textes et ses couleurs, et s'active séparément.
+              </p>
+            </div>
+            <div class="mc-tabs" role="tablist">
+              <button type="button" class="mc-tab active" data-mc-kind="join">Arrivée</button>
+              <button type="button" class="mc-tab" data-mc-kind="leave">Départ</button>
+              <button type="button" class="mc-tab" data-mc-kind="kick">Expulsion</button>
+            </div>
+            <div class="mc-layout">
+              <div class="panel-block" id="mc-editor">
+                <label class="switch-row">
+                  <input type="checkbox" id="mc-enabled" />
+                  <span>Activer cette carte</span>
+                </label>
+                <label class="field-row">
+                  <span>Salon</span>
+                  <select id="mc-channel" class="input-sm input-wide"></select>
+                </label>
+                <label class="field-row">
+                  <span>Titre</span>
+                  <input type="text" id="mc-title" class="input-sm input-wide var-target" maxlength="48" />
+                </label>
+                <div class="mc-colors">
+                  <label class="field-row">
+                    <span>Couleur du titre</span>
+                  <input type="color" id="mc-title-color" value="#39ff14" />
+                </label>
+                <label class="field-row">
+                  <span>Couleur du pseudo</span>
+                  <input type="color" id="mc-name-color" value="#5dff4a" />
+                </label>
+                <label class="field-row">
+                  <span>Couleur du message</span>
+                  <input type="color" id="mc-text-color" value="#ffffff" />
+                </label>
+                <label class="field-row">
+                  <span>Couleur du cercle</span>
+                  <input type="color" id="mc-ring-color" value="#39ff14" />
+                </label>
+                </div>
+                <label class="field-row">
+                  <span>Ligne du pseudo</span>
+                  <input type="text" id="mc-name-text" class="input-sm input-wide var-target" maxlength="80" />
+                </label>
+                <label class="switch-row">
+                  <input type="checkbox" id="mc-name-upper" />
+                  <span>Pseudo en majuscules</span>
+                </label>
+                <label class="switch-row">
+                  <input type="checkbox" id="mc-show-avatar" />
+                  <span>Afficher l'avatar</span>
+                </label>
+                <label class="field-row">
+                  <span>Message sur l'image</span>
+                  <textarea id="mc-message" class="input-sm input-wide var-target" rows="3" maxlength="500"></textarea>
+                </label>
+                <label class="switch-row">
+                  <input type="checkbox" id="mc-bg-transparent" checked />
+                  <span>Fond transparent</span>
+                </label>
+                <label class="field-row" id="mc-bg-row">
+                  <span>Couleur de fond</span>
+                  <input type="color" id="mc-bg-color" value="#1e1f22" />
+                </label>
+                <label class="field-row">
+                  <span>Texte Discord sous l'image</span>
+                  <textarea id="mc-content" class="input-sm input-wide var-target" rows="2" maxlength="500" placeholder="Optionnel. {user} devient une mention."></textarea>
+                </label>
+                <div id="mc-vars" class="emb-tokens" aria-label="Variables des cartes"></div>
+                <p class="muted tiny">Clique une variable pour l'insérer dans le champ en cours. Sur l'image, <code>{user}</code> reste le pseudo. Dans le texte Discord, <code>{user}</code> mentionne la personne.</p>
+                <p class="muted tiny" id="mc-kind-hint"></p>
+                <div class="fonda-actions" style="margin-top:0.75rem">
+                  <button type="button" class="btn primary" id="btn-mc-save">Enregistrer</button>
+                  <button type="button" class="btn secondary" id="btn-mc-test">Envoyer un test</button>
+                </div>
+                <p class="muted tiny" id="mc-status"></p>
+              </div>
+              <div class="panel-block">
+                <h3>Aperçu</h3>
+                <div class="mc-preview-stage">
+                  <img id="mc-preview-img" alt="Aperçu de la carte" />
+                </div>
+                <p class="muted tiny">Avec un fond transparent, la carte se pose sur le wallpaper du salon.</p>
+              </div>
             </div>
           </section>
 

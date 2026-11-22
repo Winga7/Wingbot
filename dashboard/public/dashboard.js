@@ -472,6 +472,10 @@ function navigate(force = false) {
     queueMicrotask(() => loadSocialFeedsList());
   }
 
+  if (name === "membercards" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadMemberCards());
+  }
+
   if (name === "ticketing" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadTicketingView());
   }
@@ -3970,6 +3974,7 @@ function setViewsDisabled(noBot) {
     "warns",
     "announcements",
     "reactionroles",
+    "membercards",
   ];
   for (const key of keys) {
     const el = viewEls.get(key);
@@ -4095,6 +4100,7 @@ async function applyGuildData(data) {
   if (getHashView() === "announcements") loadScheduledMessagesList();
   if (getHashView() === "reactionroles") loadReactionRolesList();
   if (getHashView() === "social") loadSocialFeedsList();
+  if (getHashView() === "membercards") loadMemberCards();
   if (getHashView() === "embeds") {
     ensureEmbedWorkbenchLoaded()
       .then(() => window.wingbotEmbedWorkbench?.refresh())
@@ -5415,6 +5421,14 @@ fillVarBar($("custom-vars"), VARS_CUSTOM);
 fillVarBar($("sched-vars"), VARS_COMMON);
 fillVarBar($("ticket-vars"), VARS_TICKET);
 fillVarBar($("rr-vars"), VARS_COMMON);
+fillVarBar($("mc-vars"), [
+  "{username}",
+  "{displayName}",
+  "{server}",
+  "{memberCount}",
+  "{user}",
+  "{moderatorName}",
+]);
 updateSocialTypeUI();
 loadData();
 
@@ -5424,4 +5438,262 @@ document.addEventListener("click", (ev) => {
   const target = btn.dataset.go;
   if (!target) return;
   location.hash = `#${target}`;
+});
+
+const MC_HINTS = {
+  join: "Envoyée quand un membre rejoint le serveur.",
+  leave:
+    "Envoyée quand un membre part de lui-même. Une expulsion ou un ban n'utilise pas cette carte.",
+  kick:
+    "Envoyée seulement pour un kick visible dans les journaux d'audit (permission « Voir les journaux d'audit »). Un ban n'envoie pas cette carte.",
+};
+
+let memberCardsState = null;
+let memberCardsKind = "join";
+let memberCardsLoadedFor = null;
+let mcPreviewTimer = null;
+let mcPreviewAbort = null;
+let mcPreviewUrl = null;
+
+function setMemberCardStatus(text, isError) {
+  const el = $("mc-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+
+function fillMemberCardChannels(selectedId) {
+  const sel = $("mc-channel");
+  if (!sel) return;
+  sel.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "— Choisir un salon —";
+  sel.appendChild(empty);
+  for (const ch of lastGuildChannelsList || []) {
+    const option = document.createElement("option");
+    option.value = ch.id;
+    const cat = ch.category ? `${ch.category} / ` : "";
+    option.textContent = `${cat}#${ch.name}`;
+    sel.appendChild(option);
+  }
+  if (selectedId && ![...sel.options].some((o) => o.value === selectedId)) {
+    const option = document.createElement("option");
+    option.value = selectedId;
+    option.textContent = `Salon enregistré (${selectedId})`;
+    sel.appendChild(option);
+  }
+  sel.value = selectedId || "";
+}
+
+function syncMemberCardBackgroundRow() {
+  const row = $("mc-bg-row");
+  if (row) row.hidden = !!$("mc-bg-transparent")?.checked;
+}
+
+function readMemberCardEditor() {
+  const card = memberCardsState?.[memberCardsKind];
+  if (!card) return;
+  card.enabled = !!$("mc-enabled")?.checked;
+  card.channel_id = $("mc-channel")?.value || null;
+  card.title = $("mc-title")?.value ?? "";
+  card.title_color = $("mc-title-color")?.value || card.title_color;
+  card.name_text = $("mc-name-text")?.value ?? "";
+  card.name_color = $("mc-name-color")?.value || card.name_color;
+  card.name_uppercase = !!$("mc-name-upper")?.checked;
+  card.message = $("mc-message")?.value ?? "";
+  card.text_color = $("mc-text-color")?.value || card.text_color;
+  card.ring_color = $("mc-ring-color")?.value || card.ring_color;
+  card.show_avatar = !!$("mc-show-avatar")?.checked;
+  card.background = $("mc-bg-transparent")?.checked
+    ? ""
+    : $("mc-bg-color")?.value || "";
+  card.content = $("mc-content")?.value ?? "";
+  syncMemberCardBackgroundRow();
+}
+
+function renderMemberCardEditor() {
+  const card = memberCardsState?.[memberCardsKind];
+  if (!card) return;
+  document.querySelectorAll(".mc-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mcKind === memberCardsKind);
+  });
+  $("mc-enabled").checked = !!card.enabled;
+  fillMemberCardChannels(card.channel_id || "");
+  $("mc-title").value = card.title || "";
+  $("mc-title-color").value = card.title_color || "#39ff14";
+  $("mc-name-text").value = card.name_text || "";
+  $("mc-name-color").value = card.name_color || "#5dff4a";
+  $("mc-name-upper").checked = card.name_uppercase !== false;
+  $("mc-message").value = card.message || "";
+  $("mc-text-color").value = card.text_color || "#ffffff";
+  $("mc-ring-color").value = card.ring_color || "#39ff14";
+  $("mc-show-avatar").checked = card.show_avatar !== false;
+  const transparent = !card.background;
+  $("mc-bg-transparent").checked = transparent;
+  $("mc-bg-color").value = card.background || "#1e1f22";
+  $("mc-content").value = card.content || "";
+  const hint = $("mc-kind-hint");
+  if (hint) hint.textContent = MC_HINTS[memberCardsKind] || "";
+  syncMemberCardBackgroundRow();
+}
+
+async function loadMemberCards() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  if (memberCardsLoadedFor === selectedGuildId && memberCardsState) {
+    renderMemberCardEditor();
+    scheduleMemberCardPreview();
+    return;
+  }
+  setMemberCardStatus("Chargement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/member-cards`),
+    fetchOptsGet()
+  );
+  if (!res.ok) {
+    setMemberCardStatus("Impossible de charger les cartes.", true);
+    return;
+  }
+  const data = await res.json();
+  memberCardsState = data.cards;
+  memberCardsLoadedFor = selectedGuildId;
+  renderMemberCardEditor();
+  setMemberCardStatus("");
+  scheduleMemberCardPreview();
+}
+
+function scheduleMemberCardPreview() {
+  clearTimeout(mcPreviewTimer);
+  mcPreviewTimer = setTimeout(() => {
+    refreshMemberCardPreview().catch(() => null);
+  }, 400);
+}
+
+async function refreshMemberCardPreview() {
+  if (!memberCardsState || !selectedGuildId || !currentGuildHasBot()) return;
+  readMemberCardEditor();
+  const gid = selectedGuildId;
+  const kind = memberCardsKind;
+  mcPreviewAbort?.abort();
+  const ctrl = new AbortController();
+  mcPreviewAbort = ctrl;
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(gid)}/member-cards/preview`),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, card: memberCardsState[kind] }),
+      signal: ctrl.signal,
+    }
+  );
+  if (gid !== selectedGuildId || kind !== memberCardsKind) return;
+  if (!res.ok) {
+    let msg = "Aperçu indisponible.";
+    try {
+      const data = await res.json();
+      if (data?.message || data?.error) msg = String(data.message || data.error);
+    } catch {
+      /* réponse vide */
+    }
+    setMemberCardStatus(msg, true);
+    return;
+  }
+  const blob = await res.blob();
+  if (gid !== selectedGuildId || kind !== memberCardsKind) return;
+  if (mcPreviewUrl) URL.revokeObjectURL(mcPreviewUrl);
+  mcPreviewUrl = URL.createObjectURL(blob);
+  const img = $("mc-preview-img");
+  if (img) img.src = mcPreviewUrl;
+}
+
+async function saveMemberCards() {
+  if (!memberCardsState || !selectedGuildId) return;
+  readMemberCardEditor();
+  setMemberCardStatus("Enregistrement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/member-cards`),
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: authHeaders(),
+      body: JSON.stringify(memberCardsState),
+    }
+  );
+  if (!res.ok) {
+    let msg = "Enregistrement refusé.";
+    try {
+      const data = await res.json();
+      if (data?.message || data?.error) msg = String(data.message || data.error);
+    } catch {
+      /* ignore */
+    }
+    setMemberCardStatus(msg, true);
+    return;
+  }
+  const data = await res.json();
+  memberCardsState = data.cards;
+  memberCardsLoadedFor = selectedGuildId;
+  renderMemberCardEditor();
+  setMemberCardStatus("Enregistré.");
+  scheduleMemberCardPreview();
+}
+
+async function testMemberCard() {
+  if (!memberCardsState || !selectedGuildId) return;
+  readMemberCardEditor();
+  const card = memberCardsState[memberCardsKind];
+  if (!card?.channel_id) {
+    setMemberCardStatus("Choisis un salon avant d'envoyer le test.", true);
+    return;
+  }
+  setMemberCardStatus("Envoi du test…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/member-cards/test`),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: authHeaders(),
+      body: JSON.stringify({ kind: memberCardsKind, card }),
+    }
+  );
+  if (!res.ok) {
+    let msg = "Le test n'a pas pu être envoyé.";
+    try {
+      const data = await res.json();
+      if (data?.message || data?.error) msg = String(data.message || data.error);
+    } catch {
+      /* ignore */
+    }
+    setMemberCardStatus(msg, true);
+    return;
+  }
+  setMemberCardStatus("Test envoyé dans le salon.");
+}
+
+document.querySelectorAll(".mc-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (!memberCardsState) return;
+    readMemberCardEditor();
+    memberCardsKind = btn.dataset.mcKind || "join";
+    renderMemberCardEditor();
+    scheduleMemberCardPreview();
+  });
+});
+
+$("mc-editor")?.addEventListener("input", () => {
+  setMemberCardStatus("Modifications non enregistrées.");
+  scheduleMemberCardPreview();
+});
+$("mc-editor")?.addEventListener("change", () => {
+  syncMemberCardBackgroundRow();
+  scheduleMemberCardPreview();
+});
+$("btn-mc-save")?.addEventListener("click", () => {
+  saveMemberCards().catch(() =>
+    setMemberCardStatus("Enregistrement impossible.", true)
+  );
+});
+$("btn-mc-test")?.addEventListener("click", () => {
+  testMemberCard().catch(() => setMemberCardStatus("Envoi impossible.", true));
 });

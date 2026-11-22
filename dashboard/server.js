@@ -73,6 +73,8 @@ const {
   updateTicketPanel,
   deleteTicketPanel,
   listTickets,
+  getMemberCards,
+  setMemberCards,
   DB_PATH,
 } = require("../database");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
@@ -85,6 +87,16 @@ const {
 } = require("../lib/ticketConfig");
 const { resolveAndPreviewYoutubeChannel } = require("../lib/youtubeFeed");
 const { resolveAndPreviewTwitchChannel } = require("../lib/twitchApi");
+const {
+  normalizeCard,
+  previewVars,
+  applyCardVariables,
+  KINDS: MEMBER_CARD_KINDS,
+} = require("../lib/memberCardConfig");
+const {
+  renderMemberCardPng,
+  fetchImageBuffer,
+} = require("../lib/memberCardImage");
 const {
   defaultEmbedPayload,
   mergeEmbedPayload,
@@ -3368,6 +3380,182 @@ app.use(
       }
     },
   })
+);
+
+function memberCardKind(value) {
+  return MEMBER_CARD_KINDS.includes(value) ? value : "join";
+}
+
+async function memberCardPreviewContext(req, guildId) {
+  let server = "Serveur";
+  let memberCount = "80";
+  try {
+    const guild = await discordFetchJson(
+      `/guilds/${encodeURIComponent(guildId)}?with_counts=true`
+    );
+    if (guild?.name) server = String(guild.name);
+    if (guild?.approximate_member_count) {
+      memberCount = String(guild.approximate_member_count);
+    }
+  } catch {
+    /* valeurs de démo */
+  }
+  const username = req.discordSession?.username || "Membre";
+  const vars = previewVars({ username, server, memberCount });
+  let avatarBuffer = null;
+  const userId = normalizeSnowflakeId(req.discordSession?.userId);
+  if (userId) {
+    try {
+      const user = await discordFetchJson(`/users/${encodeURIComponent(userId)}`);
+      const url = user?.avatar
+        ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256`
+        : `https://cdn.discordapp.com/embed/avatars/${Number(
+            (BigInt(userId) >> 22n) % 6n
+          )}.png`;
+      avatarBuffer = await fetchImageBuffer(url);
+    } catch {
+      avatarBuffer = null;
+    }
+  }
+  return { vars, avatarBuffer, userId };
+}
+
+async function discordSendImage(channelId, { content, buffer, filename }) {
+  const botToken = (process.env.TOKEN || process.env.DISCORD_BOT_TOKEN || "").trim();
+  if (!botToken) {
+    const err = new Error("TOKEN du bot manquant dans .env");
+    err.status = 500;
+    throw err;
+  }
+  const form = new FormData();
+  const payload = {};
+  if (content) payload.content = content;
+  form.append("payload_json", JSON.stringify(payload));
+  form.append(
+    "files[0]",
+    new Blob([new Uint8Array(buffer)], { type: "image/png" }),
+    filename || "carte.png"
+  );
+  const response = await fetch(
+    `${DISCORD_API}/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        "User-Agent": "WingbotDashboard (https://discord.com)",
+      },
+      body: form,
+    }
+  );
+  const text = await response.text();
+  if (!response.ok) {
+    const err = new Error(`Discord POST message → ${response.status}: ${text.slice(0, 300)}`);
+    err.status = response.status >= 400 && response.status < 500 ? 400 : 502;
+    throw err;
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+app.get(
+  "/api/guilds/:guildId/member-cards",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      res.json({ cards: getMemberCards(req.guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/member-cards",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const cards = setMemberCards(req.guildId, req.body || {});
+      res.json({ cards });
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/member-cards/preview",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const kind = memberCardKind(req.body?.kind);
+      const card = normalizeCard(kind, req.body?.card);
+      const { vars, avatarBuffer } = await memberCardPreviewContext(req, req.guildId);
+      const png = await renderMemberCardPng({
+        card,
+        vars,
+        avatarBuffer: card.show_avatar ? avatarBuffer : null,
+      });
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "no-store");
+      res.send(png);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({
+        error: "preview_failed",
+        message: "Impossible de générer l'aperçu.",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/member-cards/test",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      if (!(await botGuildExists(guildId))) {
+        return res.status(400).json({ error: "bot_not_in_guild" });
+      }
+      const kind = memberCardKind(req.body?.kind);
+      const card = normalizeCard(kind, req.body?.card);
+      if (!card.channel_id) {
+        return res.status(400).json({
+          error: "channel_required",
+          message: "Choisis un salon avant d'envoyer le test.",
+        });
+      }
+      await assertGuildTextChannel(guildId, card.channel_id);
+      const { vars, avatarBuffer, userId } = await memberCardPreviewContext(req, guildId);
+      const contentVars = {
+        ...vars,
+        user: userId ? `<@${userId}>` : vars.username,
+      };
+      const content = applyCardVariables(card.content, contentVars).trim().slice(0, 1800);
+      const png = await renderMemberCardPng({
+        card,
+        vars,
+        avatarBuffer: card.show_avatar ? avatarBuffer : null,
+      });
+      await discordSendImage(card.channel_id, {
+        content,
+        buffer: png,
+        filename: "carte.png",
+      });
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 500).json({
+        error: "test_failed",
+        message: e.message || "Envoi impossible.",
+      });
+    }
+  }
 );
 
 app.listen(PORT, HOST, () => {

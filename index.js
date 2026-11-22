@@ -161,6 +161,9 @@ loadSocialFeeds(client);
 const loadTickets = require("./events/tickets");
 loadTickets(client);
 
+const loadMemberCards = require("./events/memberCards");
+loadMemberCards(client);
+
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
