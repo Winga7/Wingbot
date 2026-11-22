@@ -218,7 +218,6 @@
                   <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 </span>
                 <span class="nav-label">Statistiques</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
               <a href="#giveaways" class="nav-link" data-view="giveaways">
                 <span class="nav-ico" aria-hidden="true">
@@ -1420,6 +1419,57 @@
                 <button type="button" class="btn primary" id="btn-lvl-save">Enregistrer</button>
               </div>
               <p class="muted tiny" id="lvl-status"></p>
+            </div>
+          </section>
+
+          <section class="view" id="view-stats" hidden>
+            <div class="view-head">
+              <h2>Statistiques</h2>
+              <p class="muted tiny">
+                Compteurs du serveur sur 31 jours : messages, temps vocal, arrivées et départs.
+                Le contenu des messages et l'activité par membre ne sont pas enregistrés.
+                Commande : <code>/stats</code> ou <code>$stats</code> (exemple : <code>stats 30</code>).
+              </p>
+            </div>
+            <div class="panel-block">
+              <label class="switch-row">
+                <input type="checkbox" id="stats-enabled" />
+                <span>Activer le suivi</span>
+              </label>
+              <label class="switch-row">
+                <input type="checkbox" id="stats-messages" />
+                <span>Compter les messages</span>
+              </label>
+              <label class="switch-row">
+                <input type="checkbox" id="stats-members" />
+                <span>Compter les arrivées et les départs</span>
+              </label>
+              <label class="switch-row">
+                <input type="checkbox" id="stats-voice" />
+                <span>Compter le temps passé en vocal</span>
+              </label>
+              <label class="switch-row">
+                <input type="checkbox" id="stats-public" />
+                <span>Autoriser /stats à tout le monde (sinon : Gérer le serveur)</span>
+              </label>
+              <label class="field-row">
+                <span>Salons ignorés</span>
+                <select id="stats-ignore-channels" class="input-sm input-wide" multiple size="5"></select>
+              </label>
+              <p class="muted tiny">Les bots, les webhooks et le salon AFK sont ignorés. Une session déjà en cours au démarrage du bot n'est pas comptée, et une session vocale est plafonnée à 12 h. Les dates sont en UTC.</p>
+              <div class="fonda-actions" style="margin-top:0.85rem">
+                <button type="button" class="btn primary" id="btn-stats-save">Enregistrer</button>
+                <button type="button" class="btn danger" id="btn-stats-reset">Effacer les compteurs</button>
+              </div>
+              <p class="muted tiny" id="stats-status"></p>
+            </div>
+            <div class="panel-block">
+              <h3>7 derniers jours</h3>
+              <div class="stats-cards" id="stats-cards"></div>
+              <h3>Messages sur 14 jours</h3>
+              <div class="stats-bars" id="stats-bars" aria-label="Messages par jour"></div>
+              <h3>Salons les plus actifs (30 jours)</h3>
+              <div id="stats-channels"></div>
             </div>
           </section>
 

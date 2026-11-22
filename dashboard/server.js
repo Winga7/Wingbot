@@ -77,6 +77,10 @@ const {
   setMemberCards,
   getLevelConfig,
   setLevelConfig,
+  getStatsConfig,
+  setStatsConfig,
+  getActivityReport,
+  deleteGuildStats,
   DB_PATH,
 } = require("../database");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
@@ -3593,6 +3597,65 @@ app.put(
       res.status(e.status || 400).json({
         error: "levels_invalid",
         message: e.message || "Configuration refusée.",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/stats",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      res.json({
+        config: getStatsConfig(req.guildId),
+        report: getActivityReport(req.guildId, 30),
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/stats",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const saved = setStatsConfig(req.guildId, req.body || {});
+      res.json({ config: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "stats_invalid",
+        message: e.message || "Configuration refusée.",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/stats/reset",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      if (String(req.body?.confirmation || "") !== "RESET") {
+        return res.status(400).json({
+          error: "confirmation_required",
+          message: "Confirmation refusée.",
+        });
+      }
+      const removed = deleteGuildStats(req.guildId);
+      res.json({ ok: true, removed, report: getActivityReport(req.guildId, 30) });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "stats_reset_failed",
+        message: e.message || "Effacement refusé.",
       });
     }
   }

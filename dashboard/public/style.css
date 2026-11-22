@@ -3914,6 +3914,64 @@ code.tok {
   width: 5.5rem;
 }
 
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 1.1rem;
+}
+
+.stats-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+}
+
+.stats-card span {
+  display: block;
+  color: var(--muted, #a1a1aa);
+  font-size: 0.78rem;
+}
+
+.stats-card strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1.2rem;
+}
+
+.stats-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 128px;
+  margin: 0.6rem 0 1.1rem;
+}
+
+.stats-bar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+}
+
+.stats-bar i {
+  display: block;
+  width: 100%;
+  background: #6366f1;
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+}
+
+.stats-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .level-reward-row .lvl-reward-role {
   flex: 1;
   min-width: 0;

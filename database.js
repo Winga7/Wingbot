@@ -124,6 +124,7 @@ function initDatabase() {
   migrateTicketPanelsTable();
   migrateTicketsTable();
   migrateMemberLevelsTable();
+  migrateActivityTables();
 
   console.log("✅ Base de données initialisée");
 }
@@ -2190,6 +2191,12 @@ function migrateGuildConfigExtras() {
       "UPDATE guild_config SET level_config = ? WHERE level_config IS NULL"
     ).run("{}");
   }
+  if (!names.has("stats_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN stats_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET stats_config = ? WHERE stats_config IS NULL"
+    ).run("{}");
+  }
 }
 
 function migrateMemberLevelsTable() {
@@ -2238,6 +2245,14 @@ function getAntispamConfig(guildId) {
 const { parseWarnConfig, mergeWarnPatch } = require("./lib/warnConfig");
 const { parseMemberCards } = require("./lib/memberCardConfig");
 const { parseLevelConfig, clampXp } = require("./lib/levelConfig");
+const {
+  parseStatsConfig,
+  utcDay,
+  shiftUtcDay,
+  clampQueryDays,
+  RETENTION_DAYS,
+  MAX_VOICE_SECONDS,
+} = require("./lib/statsConfig");
 
 function getWarnConfig(guildId) {
   const row = db
@@ -2278,6 +2293,180 @@ function setLevelConfig(guildId, input) {
     "UPDATE guild_config SET level_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
   ).run(JSON.stringify(next), guildId);
   return next;
+}
+
+function migrateActivityTables() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS guild_activity_daily (
+      guild_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      messages INTEGER NOT NULL DEFAULT 0,
+      joins INTEGER NOT NULL DEFAULT 0,
+      leaves INTEGER NOT NULL DEFAULT 0,
+      voice_seconds INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (guild_id, day)
+    )
+  `
+  ).run();
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS channel_activity_daily (
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      messages INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (guild_id, channel_id, day)
+    )
+  `
+  ).run();
+  db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_channel_activity_guild_day ON channel_activity_daily (guild_id, day)"
+  ).run();
+}
+
+function guildSnowflake(guildId) {
+  const id = String(guildId || "");
+  return /^\d{17,20}$/.test(id) ? id : null;
+}
+
+function getStatsConfig(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return parseStatsConfig(null);
+  ensureGuildLogRow(id);
+  const row = db
+    .prepare("SELECT stats_config FROM guild_config WHERE guild_id = ?")
+    .get(id);
+  return parseStatsConfig(row?.stats_config);
+}
+
+function setStatsConfig(guildId, input) {
+  const id = guildSnowflake(guildId);
+  if (!id) throw new Error("Serveur invalide.");
+  ensureGuildLogRow(id);
+  const next = parseStatsConfig(input);
+  db.prepare(
+    "UPDATE guild_config SET stats_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), id);
+  return next;
+}
+
+let lastActivityPrune = 0;
+
+function pruneActivity() {
+  const now = Date.now();
+  if (now - lastActivityPrune < 10 * 60 * 1000) return;
+  lastActivityPrune = now;
+  const cutoff = shiftUtcDay(RETENTION_DAYS - 1);
+  db.prepare("DELETE FROM guild_activity_daily WHERE day < ?").run(cutoff);
+  db.prepare("DELETE FROM channel_activity_daily WHERE day < ?").run(cutoff);
+}
+
+function addGuildActivity(guildId, delta) {
+  const id = guildSnowflake(guildId);
+  if (!id) return;
+  const messages = Math.min(1, Math.max(0, Math.floor(Number(delta?.messages) || 0)));
+  const joins = Math.min(1, Math.max(0, Math.floor(Number(delta?.joins) || 0)));
+  const leaves = Math.min(1, Math.max(0, Math.floor(Number(delta?.leaves) || 0)));
+  const voice = Math.min(
+    MAX_VOICE_SECONDS,
+    Math.max(0, Math.floor(Number(delta?.voice_seconds) || 0))
+  );
+  if (!messages && !joins && !leaves && !voice) return;
+  pruneActivity();
+  db.prepare(
+    `
+    INSERT INTO guild_activity_daily (guild_id, day, messages, joins, leaves, voice_seconds)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id, day) DO UPDATE SET
+      messages = messages + excluded.messages,
+      joins = joins + excluded.joins,
+      leaves = leaves + excluded.leaves,
+      voice_seconds = voice_seconds + excluded.voice_seconds
+  `
+  ).run(id, utcDay(), messages, joins, leaves, voice);
+}
+
+function addChannelMessages(guildId, channelId) {
+  const id = guildSnowflake(guildId);
+  const channel = String(channelId || "");
+  if (!id || !/^\d{17,20}$/.test(channel)) return;
+  pruneActivity();
+  db.prepare(
+    `
+    INSERT INTO channel_activity_daily (guild_id, channel_id, day, messages)
+    VALUES (?, ?, ?, 1)
+    ON CONFLICT(guild_id, channel_id, day) DO UPDATE SET
+      messages = messages + 1
+  `
+  ).run(id, channel, utcDay());
+}
+
+function getActivityReport(guildId, days) {
+  const id = guildSnowflake(guildId);
+  const span = clampQueryDays(days);
+  const empty = {
+    days: span,
+    series: [],
+    totals: { messages: 0, joins: 0, leaves: 0, voice_seconds: 0 },
+    top_channels: [],
+  };
+  if (!id) return empty;
+  pruneActivity();
+  const start = shiftUtcDay(span - 1);
+  const rows = db
+    .prepare(
+      `SELECT day, messages, joins, leaves, voice_seconds
+       FROM guild_activity_daily
+       WHERE guild_id = ? AND day >= ?`
+    )
+    .all(id, start);
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  const series = [];
+  const totals = { messages: 0, joins: 0, leaves: 0, voice_seconds: 0 };
+  for (let ago = span - 1; ago >= 0; ago -= 1) {
+    const day = shiftUtcDay(ago);
+    const row = byDay.get(day);
+    const point = {
+      day,
+      messages: row?.messages || 0,
+      joins: row?.joins || 0,
+      leaves: row?.leaves || 0,
+      voice_seconds: row?.voice_seconds || 0,
+    };
+    series.push(point);
+    totals.messages += point.messages;
+    totals.joins += point.joins;
+    totals.leaves += point.leaves;
+    totals.voice_seconds += point.voice_seconds;
+  }
+  const top = db
+    .prepare(
+      `SELECT channel_id, SUM(messages) AS messages
+       FROM channel_activity_daily
+       WHERE guild_id = ? AND day >= ?
+       GROUP BY channel_id
+       ORDER BY messages DESC
+       LIMIT 8`
+    )
+    .all(id, start);
+  return {
+    days: span,
+    series,
+    totals,
+    top_channels: top.map((row) => ({
+      channel_id: row.channel_id,
+      messages: row.messages,
+    })),
+  };
+}
+
+function deleteGuildStats(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return 0;
+  const guilds = db.prepare("DELETE FROM guild_activity_daily WHERE guild_id = ?").run(id);
+  const channels = db.prepare("DELETE FROM channel_activity_daily WHERE guild_id = ?").run(id);
+  return guilds.changes + channels.changes;
 }
 
 function getMemberLevel(guildId, userId) {
@@ -2992,6 +3181,12 @@ module.exports = {
   setMemberCards,
   getLevelConfig,
   setLevelConfig,
+  getStatsConfig,
+  setStatsConfig,
+  addGuildActivity,
+  addChannelMessages,
+  getActivityReport,
+  deleteGuildStats,
   getMemberLevel,
   listLevelLeaderboard,
   countMembersAboveXp,

@@ -43,7 +43,7 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 
 | | Commandes |
 |---|---|
-| **Utilitaires** | `ping` · `help` · `userinfo` · `user` · `roleinfo` · `botinfo` · `avatar` · `server` · `serverlogo` · `messageinfo` · `rank` · `leaderboard` |
+| **Utilitaires** | `ping` · `help` · `userinfo` · `user` · `roleinfo` · `botinfo` · `avatar` · `server` · `serverlogo` · `messageinfo` · `rank` · `leaderboard` · `stats` |
 | **Modération** | `kick` · `ban` · `timeout` · `untimeout` · `warn` · `warns` · `unwarn` · `slowmode` · `clear` |
 | **Admin** | `setlogchannel` · `togglelog` · `logconfig` · `logtest` · `clearcache` · `xp` |
 | **Premium** | `backup` — sauvegarde / restauration complète du serveur |
@@ -62,6 +62,7 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 | **Antispam & warns** | Seuils et sanctions automatiques |
 | **Logs** | Salon + événements à tracer |
 | **Niveaux** | XP à l'écrit, annonce, rôles récompense, `rank` / `leaderboard` / `xp` |
+| **Statistiques** | Compteurs d'activité (messages, vocal, arrivées), `stats` |
 
 ---
 
@@ -181,6 +182,19 @@ Courbe : pour passer du niveau `n` au suivant, il faut `5n² + 50n + 100` XP. Ni
 
 ---
 
+## Statistiques
+
+Réglage dans le dashboard : **Communauté → Statistiques**. Le suivi est désactivé par défaut.
+
+| Commande | Qui | Effet |
+|---|---|---|
+| `/stats` · `$stats` | tout le monde, si l'option publique est cochée | Activité des 7 derniers jours |
+| `/stats jours:30` · `$stats 30` | idem | Activité de 1 à 30 jours |
+
+Seuls des compteurs sont gardés, pendant 31 jours (dates UTC) : nombre de messages par salon, arrivées, départs, secondes de vocal. Pas le texte des messages, pas de statistique par membre. Les bots, les webhooks et le salon AFK sont ignorés. L'effacement des compteurs se fait depuis le dashboard.
+
+---
+
 ## Structure du projet
 
 ```
@@ -188,7 +202,7 @@ Wingbot/
 ├── index.js           Point d’entrée bot
 ├── database.js        SQLite (better-sqlite3)
 ├── commands/          utility · moderation · admin · premium
-├── events/            logs · tickets · niveaux · antispam · feeds…
+├── events/            logs · tickets · niveaux · statistiques · antispam · feeds…
 ├── dashboard/         Express + front
 ├── backup/            Capture / restore (premium)
 ├── lib/               Configs partagées

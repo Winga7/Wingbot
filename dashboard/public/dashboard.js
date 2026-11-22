@@ -238,10 +238,6 @@ const PLACEHOLDER_VIEWS = {
     title: "Classement",
     desc: "Podium des membres les plus actifs.",
   },
-  stats: {
-    title: "Statistiques",
-    desc: "Graphiques et métriques d’activité du serveur.",
-  },
   tempvoice: {
     title: "Vocaux temp.",
     desc: "Crée des vocaux à la demande, supprimés quand ils sont vides.",
@@ -474,6 +470,10 @@ function navigate(force = false) {
 
   if (name === "levels" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadLevelsConfig());
+  }
+
+  if (name === "stats" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadStatsPage());
   }
 
   if (name === "ticketing" && selectedGuildId && currentGuildHasBot()) {
@@ -3976,6 +3976,7 @@ function setViewsDisabled(noBot) {
     "reactionroles",
     "membercards",
     "levels",
+    "stats",
   ];
   for (const key of keys) {
     const el = viewEls.get(key);
@@ -4103,6 +4104,7 @@ async function applyGuildData(data) {
   if (getHashView() === "social") loadSocialFeedsList();
   if (getHashView() === "membercards") loadMemberCards();
   if (getHashView() === "levels") loadLevelsConfig();
+  if (getHashView() === "stats") loadStatsPage();
   if (getHashView() === "embeds") {
     ensureEmbedWorkbenchLoaded()
       .then(() => window.wingbotEmbedWorkbench?.refresh())
@@ -5892,4 +5894,213 @@ async function saveLevelsConfig() {
 $("btn-lvl-add-reward")?.addEventListener("click", () => addLevelRewardRow(5, ""));
 $("btn-lvl-save")?.addEventListener("click", () => {
   saveLevelsConfig().catch(() => setLevelStatus("Enregistrement impossible.", true));
+});
+
+let statsPageState = null;
+
+function setStatsStatus(text, isError) {
+  const el = $("stats-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+
+function formatVoiceFr(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0) return `${hours} h ${minutes} min`;
+  return `${minutes} min`;
+}
+
+function sumStats(series) {
+  return (series || []).reduce(
+    (acc, row) => {
+      acc.messages += row.messages || 0;
+      acc.joins += row.joins || 0;
+      acc.leaves += row.leaves || 0;
+      acc.voice_seconds += row.voice_seconds || 0;
+      return acc;
+    },
+    { messages: 0, joins: 0, leaves: 0, voice_seconds: 0 }
+  );
+}
+
+function statsChannelLabel(channel) {
+  if (!channel) return "Salon supprimé";
+  const prefix = channel.category ? `${channel.category} / ` : "";
+  if (channel.type === 2 || channel.type === 13) return prefix + channel.name;
+  return `${prefix}#${channel.name}`;
+}
+
+function renderStatsCards(series) {
+  const root = $("stats-cards");
+  if (!root) return;
+  const totals = sumStats((series || []).slice(-7));
+  const items = [
+    ["Messages", String(totals.messages)],
+    ["Arrivées", String(totals.joins)],
+    ["Départs", String(totals.leaves)],
+    ["Vocal", formatVoiceFr(totals.voice_seconds)],
+  ];
+  root.replaceChildren();
+  for (const [label, value] of items) {
+    const card = document.createElement("div");
+    card.className = "stats-card";
+    const span = document.createElement("span");
+    span.textContent = label;
+    const strong = document.createElement("strong");
+    strong.textContent = value;
+    card.append(span, strong);
+    root.appendChild(card);
+  }
+}
+
+function renderStatsBars(series) {
+  const root = $("stats-bars");
+  if (!root) return;
+  const rows = (series || []).slice(-14);
+  const max = Math.max(1, ...rows.map((row) => row.messages || 0));
+  root.replaceChildren();
+  for (const row of rows) {
+    const bar = document.createElement("div");
+    bar.className = "stats-bar";
+    const mark = document.createElement("i");
+    const ratio = Math.round(((row.messages || 0) / max) * 100);
+    mark.style.height = `${Math.max(2, ratio)}%`;
+    const [year, month, day] = String(row.day || "").split("-");
+    bar.title = year ? `${day}/${month}/${year} · ${row.messages || 0} messages` : `${row.messages || 0} messages`;
+    bar.appendChild(mark);
+    root.appendChild(bar);
+  }
+}
+
+function renderStatsChannels(rows) {
+  const root = $("stats-channels");
+  if (!root) return;
+  root.replaceChildren();
+  if (!rows?.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted tiny";
+    empty.textContent = "Aucun message compté sur 30 jours.";
+    root.appendChild(empty);
+    return;
+  }
+  for (const row of rows) {
+    const line = document.createElement("div");
+    line.className = "stats-top";
+    const known = (lastGuildChannelsList || []).find((ch) => ch.id === row.channel_id);
+    const name = document.createElement("span");
+    name.textContent = statsChannelLabel(known);
+    const count = document.createElement("strong");
+    count.textContent = String(row.messages || 0);
+    line.append(name, count);
+    root.appendChild(line);
+  }
+}
+
+function renderStatsForm(config) {
+  $("stats-enabled").checked = !!config.enabled;
+  $("stats-messages").checked = config.track_messages !== false;
+  $("stats-members").checked = config.track_members !== false;
+  $("stats-voice").checked = config.track_voice !== false;
+  $("stats-public").checked = config.public_command !== false;
+  fillLevelMulti(
+    "stats-ignore-channels",
+    lastGuildChannelsList,
+    config.ignored_channel_ids,
+    statsChannelLabel
+  );
+}
+
+function readStatsForm() {
+  return {
+    enabled: !!$("stats-enabled")?.checked,
+    track_messages: !!$("stats-messages")?.checked,
+    track_members: !!$("stats-members")?.checked,
+    track_voice: !!$("stats-voice")?.checked,
+    public_command: !!$("stats-public")?.checked,
+    ignored_channel_ids: [...($("stats-ignore-channels")?.selectedOptions || [])].map((opt) => opt.value),
+  };
+}
+
+async function loadStatsPage() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  setStatsStatus("Chargement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/stats`),
+    fetchOptsGet()
+  );
+  if (!res.ok) {
+    setStatsStatus("Impossible de charger les statistiques.", true);
+    return;
+  }
+  const data = await res.json();
+  statsPageState = data;
+  renderStatsForm(data.config || {});
+  renderStatsCards(data.report?.series || []);
+  renderStatsBars(data.report?.series || []);
+  renderStatsChannels(data.report?.top_channels || []);
+  setStatsStatus("");
+}
+
+async function saveStatsConfig() {
+  if (!selectedGuildId) return;
+  setStatsStatus("Enregistrement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/stats`),
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: authHeaders(),
+      body: JSON.stringify(readStatsForm()),
+    }
+  );
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    setStatsStatus(data?.message || data?.error || "Enregistrement refusé.", true);
+    return;
+  }
+  statsPageState = { ...(statsPageState || {}), config: data.config };
+  renderStatsForm(data.config);
+  setStatsStatus("Enregistré.");
+}
+
+async function resetStatsCounters() {
+  if (!selectedGuildId) return;
+  if (!window.confirm("Effacer les compteurs de ce serveur ? Cette action est définitive.")) return;
+  setStatsStatus("Effacement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/stats/reset`),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: authHeaders(),
+      body: JSON.stringify({ confirmation: "RESET" }),
+    }
+  );
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    setStatsStatus(data?.message || data?.error || "Effacement refusé.", true);
+    return;
+  }
+  await loadStatsPage();
+  setStatsStatus("Compteurs effacés.");
+}
+
+$("btn-stats-save")?.addEventListener("click", () => {
+  saveStatsConfig().catch(() => setStatsStatus("Enregistrement impossible.", true));
+});
+$("btn-stats-reset")?.addEventListener("click", () => {
+  resetStatsCounters().catch(() => setStatsStatus("Effacement impossible.", true));
 });

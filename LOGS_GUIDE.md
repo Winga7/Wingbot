@@ -150,7 +150,7 @@ La base de données SQLite est déjà structurée pour être facilement utilisé
 - ⏳ Logs de modération (kick, ban, warn)
 - ⏳ Logs du serveur (salons, emojis, etc.)
 - ⏳ Dashboard web pour la configuration
-- ⏳ Statistiques et analytics
+- ✅ Statistiques d'activité (compteurs, dashboard Communauté → Statistiques, `/stats`)
 - ⏳ Export des logs en PDF/CSV
 
 ---

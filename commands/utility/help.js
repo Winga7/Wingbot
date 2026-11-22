@@ -13,6 +13,7 @@ const INFOS = [
   "messageinfo",
   "rank",
   "leaderboard",
+  "stats",
 ];
 
 const MODERATION = [
@@ -66,6 +67,12 @@ function buildEmbed() {
         inline: false,
       },
       {
+        name: "📊 Statistiques",
+        value:
+          "`stats` `stats 7` `stats 30` · dashboard : Communauté → Statistiques. Compteurs seulement, pas le contenu des messages.",
+        inline: false,
+      },
+      {
         name: "💎 Premium _(admin uniquement)_",
         value: fmt(PREMIUM),
         inline: false,
@@ -80,7 +87,7 @@ function buildEmbed() {
     ],
     timestamp: new Date(),
     footer: {
-      text: "Wingbot · /help ou $help · dashboard : niveaux, annonces, réseaux sociaux…",
+      text: "Wingbot · /help ou $help · dashboard : niveaux, statistiques, annonces…",
     },
   };
 }

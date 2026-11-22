@@ -167,6 +167,9 @@ loadMemberCards(client);
 const loadLevels = require("./events/levels");
 loadLevels(client);
 
+const loadStats = require("./events/stats");
+loadStats(client);
+
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);

@@ -156,6 +156,12 @@ const COMMANDS = [
     description: "Classement des niveaux",
   },
   {
+    id: "stats",
+    category: "utility",
+    label: "stats",
+    description: "Activité du serveur (messages, vocal, arrivées)",
+  },
+  {
     id: "setlogchannel",
     category: "admin",
     label: "setlogchannel",
