@@ -3903,6 +3903,22 @@ code.tok {
   color: #f87171;
 }
 
+.level-reward-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.4rem 0;
+}
+
+.level-reward-row .lvl-reward-level {
+  width: 5.5rem;
+}
+
+.level-reward-row .lvl-reward-role {
+  flex: 1;
+  min-width: 0;
+}
+
 @media (max-width: 980px) {
   .mc-layout,
   .mc-colors {

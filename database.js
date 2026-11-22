@@ -123,6 +123,7 @@ function initDatabase() {
   migrateSocialFeedsTable();
   migrateTicketPanelsTable();
   migrateTicketsTable();
+  migrateMemberLevelsTable();
 
   console.log("✅ Base de données initialisée");
 }
@@ -2183,6 +2184,26 @@ function migrateGuildConfigExtras() {
       "UPDATE guild_config SET member_cards = ? WHERE member_cards IS NULL"
     ).run("{}");
   }
+  if (!names.has("level_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN level_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET level_config = ? WHERE level_config IS NULL"
+    ).run("{}");
+  }
+}
+
+function migrateMemberLevelsTable() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS member_levels (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      xp INTEGER NOT NULL DEFAULT 0,
+      last_xp_at INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (guild_id, user_id)
+    )
+  `
+  ).run();
 }
 
 const COMMAND_GROUP_IDS = new Set(COMMAND_GROUPS.map((g) => g.id));
@@ -2216,6 +2237,7 @@ function getAntispamConfig(guildId) {
 
 const { parseWarnConfig, mergeWarnPatch } = require("./lib/warnConfig");
 const { parseMemberCards } = require("./lib/memberCardConfig");
+const { parseLevelConfig, clampXp } = require("./lib/levelConfig");
 
 function getWarnConfig(guildId) {
   const row = db
@@ -2239,6 +2261,107 @@ function setMemberCards(guildId, input) {
     "UPDATE guild_config SET member_cards = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
   ).run(JSON.stringify(next), guildId);
   return next;
+}
+
+function getLevelConfig(guildId) {
+  ensureGuildLogRow(guildId);
+  const row = db
+    .prepare("SELECT level_config FROM guild_config WHERE guild_id = ?")
+    .get(guildId);
+  return parseLevelConfig(row?.level_config);
+}
+
+function setLevelConfig(guildId, input) {
+  ensureGuildLogRow(guildId);
+  const next = parseLevelConfig(input);
+  db.prepare(
+    "UPDATE guild_config SET level_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), guildId);
+  return next;
+}
+
+function getMemberLevel(guildId, userId) {
+  return (
+    db
+      .prepare(
+        "SELECT xp, last_xp_at FROM member_levels WHERE guild_id = ? AND user_id = ?"
+      )
+      .get(String(guildId), String(userId)) || null
+  );
+}
+
+function listLevelLeaderboard(guildId, limit = 10) {
+  const cap = Math.min(10, Math.max(1, Math.floor(Number(limit) || 10)));
+  return db
+    .prepare(
+      `SELECT user_id, xp FROM member_levels
+       WHERE guild_id = ? AND xp > 0
+       ORDER BY xp DESC, user_id ASC
+       LIMIT ?`
+    )
+    .all(String(guildId), cap);
+}
+
+function countMembersAboveXp(guildId, xp) {
+  const row = db
+    .prepare(
+      "SELECT COUNT(*) AS n FROM member_levels WHERE guild_id = ? AND xp > ?"
+    )
+    .get(String(guildId), clampXp(xp));
+  return row?.n || 0;
+}
+
+function grantMemberXp(guildId, userId, gain, now, cooldownMs) {
+  const gid = String(guildId);
+  const uid = String(userId);
+  const amount = Math.max(0, Math.floor(Number(gain) || 0));
+  const at = Math.floor(Number(now) || Date.now());
+  const wait = Math.max(0, Math.floor(Number(cooldownMs) || 0));
+  const read = db.prepare(
+    "SELECT xp, last_xp_at FROM member_levels WHERE guild_id = ? AND user_id = ?"
+  );
+  const write = db.prepare(
+    `INSERT INTO member_levels (guild_id, user_id, xp, last_xp_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(guild_id, user_id) DO UPDATE SET
+       xp = excluded.xp,
+       last_xp_at = excluded.last_xp_at`
+  );
+  return db.transaction(() => {
+    const row = read.get(gid, uid);
+    const before = row?.xp || 0;
+    const last = row?.last_xp_at || 0;
+    if (last && at - last < wait) {
+      return { ok: false, before, after: before };
+    }
+    const after = clampXp(before + amount);
+    write.run(gid, uid, after, at);
+    return { ok: true, before, after };
+  })();
+}
+
+function setMemberXp(guildId, userId, xp) {
+  const amount = clampXp(xp);
+  db.prepare(
+    `INSERT INTO member_levels (guild_id, user_id, xp, last_xp_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(guild_id, user_id) DO UPDATE SET
+       xp = excluded.xp,
+       last_xp_at = excluded.last_xp_at`
+  ).run(String(guildId), String(userId), amount, Date.now());
+  return amount;
+}
+
+function deleteMemberLevel(guildId, userId) {
+  return db
+    .prepare("DELETE FROM member_levels WHERE guild_id = ? AND user_id = ?")
+    .run(String(guildId), String(userId)).changes;
+}
+
+function deleteGuildLevels(guildId) {
+  return db
+    .prepare("DELETE FROM member_levels WHERE guild_id = ?")
+    .run(String(guildId)).changes;
 }
 
 function insertGuildWarning({
@@ -2867,6 +2990,15 @@ module.exports = {
   getWarnConfig,
   getMemberCards,
   setMemberCards,
+  getLevelConfig,
+  setLevelConfig,
+  getMemberLevel,
+  listLevelLeaderboard,
+  countMembersAboveXp,
+  grantMemberXp,
+  setMemberXp,
+  deleteMemberLevel,
+  deleteGuildLevels,
   insertGuildWarning,
   countGuildWarnings,
   listGuildWarnings,

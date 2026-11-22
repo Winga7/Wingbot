@@ -11,6 +11,8 @@ const INFOS = [
   "roleinfo",
   "avatar",
   "messageinfo",
+  "rank",
+  "leaderboard",
 ];
 
 const MODERATION = [
@@ -31,6 +33,7 @@ const ADMIN = [
   "logconfig",
   "logtest",
   "clearcache",
+  "xp",
 ];
 
 const PREMIUM = [
@@ -57,6 +60,12 @@ function buildEmbed() {
       { name: "🛡️ Modération", value: fmt(MODERATION), inline: false },
       { name: "⚙️ Admin", value: fmt(ADMIN), inline: false },
       {
+        name: "🏆 Niveaux",
+        value:
+          "`rank` `leaderboard` · admin : `xp set` `xp add` `xp reset` · tout effacer : `/xp reset-all` (écris RESET) ou `$xp reset all CONFIRM`",
+        inline: false,
+      },
+      {
         name: "💎 Premium _(admin uniquement)_",
         value: fmt(PREMIUM),
         inline: false,
@@ -71,7 +80,7 @@ function buildEmbed() {
     ],
     timestamp: new Date(),
     footer: {
-      text: "Wingbot · /help ou $help · dashboard : annonces, réseaux sociaux, réactions rôles…",
+      text: "Wingbot · /help ou $help · dashboard : niveaux, annonces, réseaux sociaux…",
     },
   };
 }

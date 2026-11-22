@@ -75,6 +75,8 @@ const {
   listTickets,
   getMemberCards,
   setMemberCards,
+  getLevelConfig,
+  setLevelConfig,
   DB_PATH,
 } = require("../database");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
@@ -97,6 +99,7 @@ const {
   renderMemberCardPng,
   fetchImageBuffer,
 } = require("../lib/memberCardImage");
+const { parseLevelConfig } = require("../lib/levelConfig");
 const {
   defaultEmbedPayload,
   mergeEmbedPayload,
@@ -3553,6 +3556,43 @@ app.post(
       res.status(e.status || 500).json({
         error: "test_failed",
         message: e.message || "Envoi impossible.",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/levels",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      res.json({ config: getLevelConfig(req.guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/levels",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const guildId = req.guildId;
+      const next = parseLevelConfig(req.body || {});
+      if (next.announce_channel_id) {
+        await assertGuildTextChannel(guildId, next.announce_channel_id);
+      }
+      const saved = setLevelConfig(guildId, next);
+      res.json({ config: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "levels_invalid",
+        message: e.message || "Configuration refusée.",
       });
     }
   }

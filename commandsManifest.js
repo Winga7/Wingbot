@@ -144,6 +144,18 @@ const COMMANDS = [
     description: "Détails d’un message",
   },
   {
+    id: "rank",
+    category: "utility",
+    label: "rank",
+    description: "Niveau et XP d’un membre",
+  },
+  {
+    id: "leaderboard",
+    category: "utility",
+    label: "leaderboard",
+    description: "Classement des niveaux",
+  },
+  {
     id: "setlogchannel",
     category: "admin",
     label: "setlogchannel",
@@ -172,6 +184,12 @@ const COMMANDS = [
     category: "admin",
     label: "clearcache",
     description: "Vider le cache des messages",
+  },
+  {
+    id: "xp",
+    category: "admin",
+    label: "xp",
+    description: "Ajuster l’XP d’un membre (niveaux)",
   },
   {
     id: "backup",

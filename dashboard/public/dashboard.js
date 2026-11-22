@@ -234,10 +234,6 @@ const PLACEHOLDER_VIEWS = {
     title: "Giveaways",
     desc: "Concours et tirages au sort intégrés à Discord.",
   },
-  levels: {
-    title: "Niveaux",
-    desc: "Récompense l’activité des membres avec de l’expérience.",
-  },
   leaderboard: {
     title: "Classement",
     desc: "Podium des membres les plus actifs.",
@@ -474,6 +470,10 @@ function navigate(force = false) {
 
   if (name === "membercards" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadMemberCards());
+  }
+
+  if (name === "levels" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadLevelsConfig());
   }
 
   if (name === "ticketing" && selectedGuildId && currentGuildHasBot()) {
@@ -3975,6 +3975,7 @@ function setViewsDisabled(noBot) {
     "announcements",
     "reactionroles",
     "membercards",
+    "levels",
   ];
   for (const key of keys) {
     const el = viewEls.get(key);
@@ -4101,6 +4102,7 @@ async function applyGuildData(data) {
   if (getHashView() === "reactionroles") loadReactionRolesList();
   if (getHashView() === "social") loadSocialFeedsList();
   if (getHashView() === "membercards") loadMemberCards();
+  if (getHashView() === "levels") loadLevelsConfig();
   if (getHashView() === "embeds") {
     ensureEmbedWorkbenchLoaded()
       .then(() => window.wingbotEmbedWorkbench?.refresh())
@@ -5429,6 +5431,7 @@ fillVarBar($("mc-vars"), [
   "{user}",
   "{moderatorName}",
 ]);
+fillVarBar($("lvl-vars"), ["{user}", "{username}", "{level}", "{xp}", "{server}"]);
 updateSocialTypeUI();
 loadData();
 
@@ -5696,4 +5699,197 @@ $("btn-mc-save")?.addEventListener("click", () => {
 });
 $("btn-mc-test")?.addEventListener("click", () => {
   testMemberCard().catch(() => setMemberCardStatus("Envoi impossible.", true));
+});
+
+let levelConfigState = null;
+
+function setLevelStatus(text, isError) {
+  const el = $("lvl-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+
+function fillLevelMulti(selectId, items, selected, labelOf) {
+  const sel = $(selectId);
+  if (!sel) return;
+  const chosen = new Set(selected || []);
+  sel.replaceChildren();
+  for (const item of items || []) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = labelOf(item);
+    option.selected = chosen.has(item.id);
+    sel.appendChild(option);
+  }
+}
+
+function fillLevelAnnounceChannel(selectedId) {
+  const sel = $("lvl-announce-channel");
+  if (!sel) return;
+  sel.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "— Salon du message —";
+  sel.appendChild(empty);
+  for (const ch of lastGuildChannelsList || []) {
+    const option = document.createElement("option");
+    option.value = ch.id;
+    option.textContent = `${ch.category ? ch.category + " / " : ""}#${ch.name}`;
+    sel.appendChild(option);
+  }
+  if (selectedId && ![...sel.options].some((o) => o.value === selectedId)) {
+    const option = document.createElement("option");
+    option.value = selectedId;
+    option.textContent = `Salon enregistré (${selectedId})`;
+    sel.appendChild(option);
+  }
+  sel.value = selectedId || "";
+}
+
+function addLevelRewardRow(level = 5, roleId = "") {
+  const root = $("lvl-rewards");
+  if (!root || root.children.length >= 20) return;
+  const row = document.createElement("div");
+  row.className = "level-reward-row";
+  const levelInput = document.createElement("input");
+  levelInput.type = "number";
+  levelInput.min = "1";
+  levelInput.max = "150";
+  levelInput.className = "input-sm lvl-reward-level";
+  levelInput.value = String(level || 1);
+  const roleSel = document.createElement("select");
+  roleSel.className = "input-sm lvl-reward-role";
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = "— Rôle —";
+  roleSel.appendChild(blank);
+  for (const role of lastGuildRolesList || []) {
+    if (role.managed || role.name === "@everyone") continue;
+    const option = document.createElement("option");
+    option.value = role.id;
+    option.textContent = role.name;
+    if (role.id === roleId) option.selected = true;
+    roleSel.appendChild(option);
+  }
+  if (roleId && ![...roleSel.options].some((o) => o.value === roleId)) {
+    const option = document.createElement("option");
+    option.value = roleId;
+    option.textContent = `Rôle enregistré (${roleId})`;
+    option.selected = true;
+    roleSel.appendChild(option);
+  }
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "btn ghost tiny";
+  del.textContent = "Retirer";
+  del.addEventListener("click", () => row.remove());
+  row.appendChild(levelInput);
+  row.appendChild(roleSel);
+  row.appendChild(del);
+  root.appendChild(row);
+}
+
+function readLevelForm() {
+  const selected = (id) =>
+    [...($(id)?.selectedOptions || [])].map((option) => option.value);
+  const rewards = [];
+  document.querySelectorAll("#lvl-rewards .level-reward-row").forEach((row) => {
+    rewards.push({
+      level: Number(row.querySelector(".lvl-reward-level")?.value),
+      role_id: row.querySelector(".lvl-reward-role")?.value || "",
+    });
+  });
+  return {
+    enabled: !!$("lvl-enabled")?.checked,
+    xp_min: Number($("lvl-xp-min")?.value),
+    xp_max: Number($("lvl-xp-max")?.value),
+    cooldown_seconds: Number($("lvl-cooldown")?.value),
+    min_length: Number($("lvl-min-length")?.value),
+    announce: !!$("lvl-announce")?.checked,
+    announce_channel_id: $("lvl-announce-channel")?.value || null,
+    announce_text: $("lvl-announce-text")?.value || "",
+    stack_roles: !!$("lvl-stack")?.checked,
+    ignored_channel_ids: selected("lvl-ignore-channels"),
+    ignored_role_ids: selected("lvl-ignore-roles"),
+    rewards,
+  };
+}
+
+function renderLevelForm(config) {
+  $("lvl-enabled").checked = !!config.enabled;
+  $("lvl-xp-min").value = config.xp_min;
+  $("lvl-xp-max").value = config.xp_max;
+  $("lvl-cooldown").value = config.cooldown_seconds;
+  $("lvl-min-length").value = config.min_length;
+  $("lvl-announce").checked = !!config.announce;
+  fillLevelAnnounceChannel(config.announce_channel_id || "");
+  $("lvl-announce-text").value = config.announce_text || "";
+  $("lvl-stack").checked = !!config.stack_roles;
+  fillLevelMulti(
+    "lvl-ignore-channels",
+    lastGuildChannelsList,
+    config.ignored_channel_ids,
+    (ch) => `${ch.category ? ch.category + " / " : ""}#${ch.name}`
+  );
+  fillLevelMulti(
+    "lvl-ignore-roles",
+    (lastGuildRolesList || []).filter((role) => role.name !== "@everyone"),
+    config.ignored_role_ids,
+    (role) => role.name
+  );
+  const root = $("lvl-rewards");
+  root.replaceChildren();
+  for (const reward of config.rewards || []) {
+    addLevelRewardRow(reward.level, reward.role_id);
+  }
+}
+
+async function loadLevelsConfig() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  setLevelStatus("Chargement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/levels`),
+    fetchOptsGet()
+  );
+  if (!res.ok) {
+    setLevelStatus("Impossible de charger les niveaux.", true);
+    return;
+  }
+  const data = await res.json();
+  levelConfigState = data.config;
+  renderLevelForm(levelConfigState);
+  setLevelStatus("");
+}
+
+async function saveLevelsConfig() {
+  if (!selectedGuildId) return;
+  setLevelStatus("Enregistrement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/levels`),
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: authHeaders(),
+      body: JSON.stringify(readLevelForm()),
+    }
+  );
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    setLevelStatus(data?.message || data?.error || "Enregistrement refusé.", true);
+    return;
+  }
+  levelConfigState = data.config;
+  renderLevelForm(levelConfigState);
+  setLevelStatus("Enregistré.");
+}
+
+$("btn-lvl-add-reward")?.addEventListener("click", () => addLevelRewardRow(5, ""));
+$("btn-lvl-save")?.addEventListener("click", () => {
+  saveLevelsConfig().catch(() => setLevelStatus("Enregistrement impossible.", true));
 });

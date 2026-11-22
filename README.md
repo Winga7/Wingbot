@@ -43,9 +43,9 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 
 | | Commandes |
 |---|---|
-| **Utilitaires** | `ping` · `help` · `userinfo` · `user` · `roleinfo` · `botinfo` · `avatar` · `server` · `serverlogo` · `messageinfo` |
+| **Utilitaires** | `ping` · `help` · `userinfo` · `user` · `roleinfo` · `botinfo` · `avatar` · `server` · `serverlogo` · `messageinfo` · `rank` · `leaderboard` |
 | **Modération** | `kick` · `ban` · `timeout` · `untimeout` · `warn` · `warns` · `unwarn` · `slowmode` · `clear` |
-| **Admin** | `setlogchannel` · `togglelog` · `logconfig` · `logtest` · `clearcache` |
+| **Admin** | `setlogchannel` · `togglelog` · `logconfig` · `logtest` · `clearcache` · `xp` |
 | **Premium** | `backup` — sauvegarde / restauration complète du serveur |
 
 ### Depuis le dashboard
@@ -61,6 +61,7 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 | **Commandes perso** | Réponses au préfixe configurables |
 | **Antispam & warns** | Seuils et sanctions automatiques |
 | **Logs** | Salon + événements à tracer |
+| **Niveaux** | XP à l'écrit, annonce, rôles récompense, `rank` / `leaderboard` / `xp` |
 
 ---
 
@@ -163,6 +164,23 @@ docker compose up -d --build
 
 ---
 
+## Niveaux
+
+Réglage dans le dashboard : **Communauté → Niveaux**.
+
+| Commande | Qui | Effet |
+|---|---|---|
+| `/rank` · `$rank` | tout le monde | Niveau, barre d'XP et rang |
+| `/leaderboard` · `$leaderboard` | tout le monde | Top 10 |
+| `/xp set` · `$xp set @membre montant` | Gérer le serveur | Fixe l'XP totale (0 à 5&nbsp;000&nbsp;000) |
+| `/xp add` · `$xp add @membre montant` | Gérer le serveur | Ajoute ou retire jusqu'à 100&nbsp;000 XP |
+| `/xp reset` · `$xp reset @membre` | Gérer le serveur | Remet un membre à zéro et retire ses rôles récompense |
+| `/xp reset-all` · `$xp reset all CONFIRM` | Gérer le serveur | Efface toute l'XP du serveur (les rôles déjà donnés restent) |
+
+Courbe : pour passer du niveau `n` au suivant, il faut `5n² + 50n + 100` XP. Niveau maximum : 150.
+
+---
+
 ## Structure du projet
 
 ```
@@ -170,7 +188,7 @@ Wingbot/
 ├── index.js           Point d’entrée bot
 ├── database.js        SQLite (better-sqlite3)
 ├── commands/          utility · moderation · admin · premium
-├── events/            logs · tickets · antispam · feeds…
+├── events/            logs · tickets · niveaux · antispam · feeds…
 ├── dashboard/         Express + front
 ├── backup/            Capture / restore (premium)
 ├── lib/               Configs partagées

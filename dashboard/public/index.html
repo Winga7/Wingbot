@@ -212,7 +212,6 @@
                   <svg viewBox="0 0 24 24"><path d="M6 9H4.5a2.5 2.5 0 010-5H6"/><path d="M18 9h1.5a2.5 2.5 0 000-5H18"/><path d="M4 22h16"/><path d="M18 2H6v7a6 6 0 0012 0V2z"/></svg>
                 </span>
                 <span class="nav-label">Niveaux</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
               <a href="#stats" class="nav-link" data-view="stats">
                 <span class="nav-ico" aria-hidden="true">
@@ -1352,6 +1351,75 @@
                 </div>
                 <p class="muted tiny">Avec un fond transparent, la carte se pose sur le wallpaper du salon.</p>
               </div>
+            </div>
+          </section>
+
+          <section class="view" id="view-levels" hidden>
+            <div class="view-head">
+              <h2>Niveaux</h2>
+              <p class="muted tiny">
+                Les membres gagnent de l'XP en écrivant. Annonce de passage de niveau et rôles récompense.
+                Commandes : <code>/rank</code>, <code>/leaderboard</code>, et <code>/xp</code> (Gérer le serveur).
+              </p>
+            </div>
+            <div class="panel-block">
+              <label class="switch-row">
+                <input type="checkbox" id="lvl-enabled" />
+                <span>Activer le gain d'XP</span>
+              </label>
+              <div class="mc-colors">
+                <label class="field-row">
+                  <span>XP minimum</span>
+                  <input type="number" id="lvl-xp-min" class="input-sm" min="1" max="100" step="1" />
+                </label>
+                <label class="field-row">
+                  <span>XP maximum</span>
+                  <input type="number" id="lvl-xp-max" class="input-sm" min="1" max="100" step="1" />
+                </label>
+                <label class="field-row">
+                  <span>Délai entre deux gains (secondes)</span>
+                  <input type="number" id="lvl-cooldown" class="input-sm" min="10" max="3600" step="1" />
+                </label>
+                <label class="field-row">
+                  <span>Longueur mini du message</span>
+                  <input type="number" id="lvl-min-length" class="input-sm" min="1" max="200" step="1" />
+                </label>
+              </div>
+              <p class="muted tiny">Les commandes (préfixe) ne donnent pas d'XP. Les bots non plus. Le délai est enregistré en base, un redémarrage ne le remet pas à zéro.</p>
+              <label class="switch-row">
+                <input type="checkbox" id="lvl-announce" />
+                <span>Annoncer les passages de niveau</span>
+              </label>
+              <label class="field-row">
+                <span>Salon d'annonce (vide = salon du message)</span>
+                <select id="lvl-announce-channel" class="input-sm input-wide"></select>
+              </label>
+              <label class="field-row">
+                <span>Texte d'annonce</span>
+                <textarea id="lvl-announce-text" class="input-sm input-wide var-target" rows="2" maxlength="300"></textarea>
+              </label>
+              <div id="lvl-vars" class="emb-tokens"></div>
+              <p class="muted tiny">Les mentions <code>@everyone</code> et <code>@here</code> ne sont pas déclenchées. Seul <code>{user}</code> peut notifier la personne.</p>
+              <label class="switch-row">
+                <input type="checkbox" id="lvl-stack" />
+                <span>Empiler les rôles récompense (sinon seul le plus haut palier est gardé)</span>
+              </label>
+              <label class="field-row">
+                <span>Salons ignorés</span>
+                <select id="lvl-ignore-channels" class="input-sm input-wide" multiple size="5"></select>
+              </label>
+              <label class="field-row">
+                <span>Rôles ignorés</span>
+                <select id="lvl-ignore-roles" class="input-sm input-wide" multiple size="5"></select>
+              </label>
+              <h3>Rôles récompense</h3>
+              <p class="muted tiny">Le bot doit être au-dessus de ces rôles. Les rôles d'intégration sont ignorés. 20 paliers maximum, niveaux 1 à 150.</p>
+              <div id="lvl-rewards"></div>
+              <button type="button" class="btn ghost tiny" id="btn-lvl-add-reward">+ Ajouter un palier</button>
+              <div class="fonda-actions" style="margin-top:0.85rem">
+                <button type="button" class="btn primary" id="btn-lvl-save">Enregistrer</button>
+              </div>
+              <p class="muted tiny" id="lvl-status"></p>
             </div>
           </section>
 
