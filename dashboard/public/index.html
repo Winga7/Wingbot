@@ -38,7 +38,7 @@
     <link rel="stylesheet" href="/landing.css?v=ui3" />
     <link rel="stylesheet" href="/compat.css?v=ui3" />
     <link rel="stylesheet" href="/ticket-ui.css?v=3" />
-    <link rel="stylesheet" href="/ui-refresh.css?v=1" />
+    <link rel="stylesheet" href="/ui-refresh.css?v=2" />
   </head>
   <body>
     <div class="app app--landing" id="app">
@@ -687,6 +687,12 @@
               <p class="muted tiny">Préfixe des commandes par message et activation globale des logs</p>
             </div>
             <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Général</h3>
+                  <p class="muted tiny">Préfixe et module logs</p>
+                </div>
+              </div>
               <label class="field-row">
                 <span>Préfixe <span class="muted tiny">(commandes <code>$help</code> etc.)</span></span>
                 <input type="text" id="input-prefix" maxlength="16" class="input-sm mono" />
@@ -699,7 +705,14 @@
                 Si désactivé, <strong>aucun</strong> log n’est envoyé (même si des cases sont cochées
                 dans l’onglet Logs).
               </p>
-              <hr class="section-sep" />
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Identité du bot</h3>
+                  <p class="muted tiny">Pseudo serveur et avatar global</p>
+                </div>
+              </div>
               <label class="field-row">
                 <span>Pseudo du bot sur ce serveur</span>
                 <input
@@ -741,7 +754,12 @@
               <p class="muted tiny">Publie un nouveau message ou lie un message existant : les membres obtiennent ou perdent des rôles en réagissant.</p>
             </div>
             <div class="panel-block" id="rr-form-panel">
-              <h3>Nouveau panneau</h3>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Nouveau panneau</h3>
+                  <p class="muted tiny">Message Discord + réactions → rôles</p>
+                </div>
+              </div>
               <label class="field-row">
                 <span>Nom interne</span>
                 <input type="text" id="rr-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Rôles jeux" />
@@ -796,18 +814,25 @@
                 </div>
               </details>
               </div>
-              <h4 class="muted tiny" style="margin:1rem 0 0.5rem">Paires emoji → rôle</h4>
-              <p class="muted tiny">Emoji Unicode (<code>✅</code>) ou custom (<code>&lt;:nom:123&gt;</code>). Le bot doit être au-dessus des rôles dans la hiérarchie.</p>
-              <div id="rr-entries-root"></div>
-              <button type="button" class="btn secondary tiny" id="btn-rr-add-entry">+ Ajouter une réaction</button>
-              <div class="fonda-actions" style="margin-top:0.75rem">
+              <div class="form-section">
+                <h4 class="form-section-title">Paires emoji → rôle</h4>
+                <p class="muted tiny">Emoji Unicode (<code>✅</code>) ou custom (<code>&lt;:nom:123&gt;</code>). Le bot doit être au-dessus des rôles dans la hiérarchie.</p>
+                <div id="rr-entries-root"></div>
+                <button type="button" class="btn secondary tiny" id="btn-rr-add-entry">+ Ajouter une réaction</button>
+              </div>
+              <div class="form-actions">
                 <button type="button" class="btn primary" id="btn-rr-publish">Publier le panneau</button>
               </div>
             </div>
             <div class="panel-block">
-              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
-                <h3 style="margin:0">Panneaux actifs</h3>
-                <button type="button" class="btn ghost tiny" id="btn-rr-refresh">Rafraîchir</button>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Panneaux actifs</h3>
+                  <p class="muted tiny">Messages déjà publiés sur Discord</p>
+                </div>
+                <div class="panel-block-actions">
+                  <button type="button" class="btn ghost tiny" id="btn-rr-refresh">Rafraîchir</button>
+                </div>
               </div>
               <div id="rr-list" class="muted tiny">Charge un serveur pour voir les panneaux.</div>
             </div>
@@ -883,7 +908,12 @@
 
             <div class="ticket-section" id="ticket-section-panel" data-ticket-section="panel" hidden>
               <div class="panel-block">
-                <h3>Message panneau Discord</h3>
+                <div class="panel-block-head">
+                  <div>
+                    <h3>Message panneau Discord</h3>
+                    <p class="muted tiny">Texte, embed et salon de publication</p>
+                  </div>
+                </div>
                 <label class="field-row">
                   <span>Nom interne du panneau</span>
                   <input type="text" id="ticket-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Contact · Partenariat · Candidatures" />
@@ -923,8 +953,12 @@
 
             <div class="ticket-section" id="ticket-section-buttons" data-ticket-section="buttons" hidden>
               <div class="panel-block">
-                <h3>Boutons &amp; types de tickets</h3>
-                <p class="muted tiny">Un panneau = un message. Ajoute plusieurs types (Contact modération, Partenariat, Plainte…) ou crée un panneau séparé par type.</p>
+                <div class="panel-block-head">
+                  <div>
+                    <h3>Boutons &amp; types de tickets</h3>
+                    <p class="muted tiny">Un panneau = un message. Ajoute plusieurs types ou crée un panneau séparé par type.</p>
+                  </div>
+                </div>
                 <label class="field-row">
                   <span>Style interface</span>
                   <select id="ticket-ui-mode" class="input-sm input-wide">
@@ -937,7 +971,7 @@
                   <select id="ticket-category" class="input-sm input-wide"></select>
                 </label>
                 <div id="ticket-categories-root"></div>
-                <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:0.35rem">
+                <div class="form-actions">
                   <button type="button" class="btn secondary tiny" id="btn-ticket-add-cat">+ Type de ticket</button>
                   <button type="button" class="btn ghost tiny" id="btn-ticket-hub-template">Modèle hub (4 boutons)</button>
                 </div>
@@ -946,7 +980,12 @@
 
             <div class="ticket-section" id="ticket-section-permissions" data-ticket-section="permissions" hidden>
               <div class="panel-block">
-                <h3>Permissions &amp; équipe</h3>
+                <div class="panel-block-head">
+                  <div>
+                    <h3>Permissions &amp; équipe</h3>
+                    <p class="muted tiny">Qui peut voir et gérer les tickets</p>
+                  </div>
+                </div>
                 <label class="field-row">
                   <span>Rôles support (accès aux tickets)</span>
                   <select id="ticket-support-roles" class="input-sm input-wide" multiple size="5"></select>
@@ -969,7 +1008,12 @@
 
             <div class="ticket-section" id="ticket-section-forms" data-ticket-section="forms" hidden>
               <div class="panel-block">
-                <h3>Formulaires (modals)</h3>
+                <div class="panel-block-head">
+                  <div>
+                    <h3>Formulaires (modals)</h3>
+                    <p class="muted tiny">Questions avant l'ouverture d'un ticket</p>
+                  </div>
+                </div>
                 <label class="field-row checkbox-row">
                   <input type="checkbox" id="ticket-modal-enabled" />
                   <span>Demander un formulaire avant ouverture (défaut panneau)</span>
@@ -980,7 +1024,12 @@
 
             <div class="ticket-section" id="ticket-section-behavior" data-ticket-section="behavior" hidden>
               <div class="panel-block">
-                <h3>Comportement des tickets</h3>
+                <div class="panel-block-head">
+                  <div>
+                    <h3>Comportement des tickets</h3>
+                    <p class="muted tiny">Limites, noms de salon et boutons</p>
+                  </div>
+                </div>
                 <label class="field-row">
                   <span>Max tickets ouverts / membre</span>
                   <input type="number" id="ticket-max-open" class="input-sm" min="1" max="5" value="1" />
@@ -1016,7 +1065,12 @@
 
             <div class="ticket-section" id="ticket-section-transcripts" data-ticket-section="transcripts" hidden>
               <div class="panel-block">
-                <h3>Transcripts &amp; logs</h3>
+                <div class="panel-block-head">
+                  <div>
+                    <h3>Transcripts &amp; logs</h3>
+                    <p class="muted tiny">Historique à la fermeture</p>
+                  </div>
+                </div>
                 <label class="field-row">
                   <span>Salon logs ouverture/fermeture</span>
                   <select id="ticket-log-channel" class="input-sm input-wide"></select>
@@ -1036,9 +1090,14 @@
 
             <div class="ticket-section" id="ticket-section-open" data-ticket-section="open" hidden>
               <div class="panel-block">
-                <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
-                  <h3 style="margin:0">Tickets ouverts</h3>
-                  <button type="button" class="btn ghost tiny" id="btn-ticket-refresh">Rafraîchir</button>
+                <div class="panel-block-head">
+                  <div>
+                    <h3>Tickets ouverts</h3>
+                    <p class="muted tiny">Tickets actuellement actifs</p>
+                  </div>
+                  <div class="panel-block-actions">
+                    <button type="button" class="btn ghost tiny" id="btn-ticket-refresh">Rafraîchir</button>
+                  </div>
                 </div>
                 <div id="ticket-open-list" class="muted tiny">—</div>
               </div>
@@ -1051,12 +1110,26 @@
               <p class="muted tiny">Salon de destination et événements à tracer</p>
             </div>
             <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Destination</h3>
+                  <p class="muted tiny">Salon où le bot envoie les logs</p>
+                </div>
+              </div>
               <label class="field-row">
                 <span>Salon des logs</span>
                 <select id="log-channel-select"></select>
               </label>
             </div>
-            <div id="groups-root" class="groups-inner"></div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Événements</h3>
+                  <p class="muted tiny">Coche ce que tu veux tracer</p>
+                </div>
+              </div>
+              <div id="groups-root" class="groups-inner"></div>
+            </div>
           </section>
 
           <section class="view" id="view-commands" hidden>
@@ -1088,9 +1161,14 @@
               <p class="muted tiny">Réponses déclenchées par le préfixe (ex. <code>$règles</code>). Pas de slash Discord pour les perso.</p>
             </div>
             <div class="panel-block">
-              <p class="muted tiny">
-                <strong>Déclencheur :</strong> 1–32 caractères (lettres y compris accents, chiffres, <code>_</code>, <code>-</code>), nom différent d’une commande du bot. Il est enregistré en minuscules.
-              </p>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Tes commandes</h3>
+                  <p class="muted tiny">
+                    <strong>Déclencheur :</strong> 1–32 caractères (lettres y compris accents, chiffres, <code>_</code>, <code>-</code>), nom différent d’une commande du bot. Il est enregistré en minuscules.
+                  </p>
+                </div>
+              </div>
               <details class="custom-guide">
                 <summary>Mini-guide — texte dynamique dans la réponse</summary>
                 <div class="custom-guide-body muted tiny">
@@ -1129,7 +1207,13 @@
               <p class="muted tiny">Envoie un message (et optionnellement un embed) dans un salon à l'heure choisie.</p>
             </div>
             <div class="panel-block" id="sched-form-panel">
-              <h3 id="sched-form-title">Nouvelle annonce</h3>
+              <div class="panel-block-head">
+                <div>
+                  <h3 id="sched-form-title">Nouvelle annonce</h3>
+                  <p class="muted tiny">Planifie un message (et optionnellement un embed)</p>
+                </div>
+              </div>
+              <div class="settings-grid">
               <label class="field-row">
                 <span>Nom interne</span>
                 <input type="text" id="sched-label" class="input-sm input-wide" maxlength="80" placeholder="Ex. Rappel hebdo" />
@@ -1150,6 +1234,7 @@
                   <option value="weekly">Toutes les semaines</option>
                 </select>
               </label>
+              </div>
               <div id="sched-vars" class="emb-tokens" aria-label="Variables du message"></div>
               <p class="muted tiny">Clique une variable pour l’insérer dans le champ où tu écris.</p>
               <label class="field-row">
@@ -1173,15 +1258,20 @@
                   </label>
                 </div>
               </details>
-              <div class="fonda-actions" style="margin-top:0.75rem">
+              <div class="form-actions">
                 <button type="button" class="btn primary" id="btn-sched-save">Programmer</button>
                 <button type="button" class="btn ghost" id="btn-sched-cancel" hidden>Annuler</button>
               </div>
             </div>
             <div class="panel-block">
-              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
-                <h3 style="margin:0">Annonces planifiées</h3>
-                <button type="button" class="btn ghost tiny" id="btn-sched-refresh">Rafraîchir</button>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Annonces planifiées</h3>
+                  <p class="muted tiny">File d'attente et récurrences</p>
+                </div>
+                <div class="panel-block-actions">
+                  <button type="button" class="btn ghost tiny" id="btn-sched-refresh">Rafraîchir</button>
+                </div>
               </div>
               <div id="sched-list" class="muted tiny">Charge un serveur pour voir les annonces.</div>
             </div>
@@ -1193,7 +1283,12 @@
               <p class="muted tiny">Alertes YouTube (vidéos), Twitch (live ou clips) vers le salon Discord de ton choix. Plusieurs chaînes et types possibles.</p>
             </div>
             <div class="panel-block" id="social-form-panel">
-              <h3 id="social-form-title">Nouvelle alerte</h3>
+              <div class="panel-block-head">
+                <div>
+                  <h3 id="social-form-title">Nouvelle alerte</h3>
+                  <p class="muted tiny">YouTube, Twitch live ou clips</p>
+                </div>
+              </div>
               <label class="field-row">
                 <span>Type d'alerte</span>
                 <select id="social-alert-type" class="input-sm input-wide">
@@ -1210,9 +1305,9 @@
                 <span id="social-source-label">Chaîne / source</span>
                 <input type="text" id="social-source" class="input-sm input-wide" placeholder="URL, @pseudo ou ID…" />
               </label>
-              <div style="margin:-0.25rem 0 0.65rem">
+              <div class="inline-verify">
                 <button type="button" class="btn ghost tiny" id="btn-social-preview">Vérifier</button>
-                <span id="social-preview-hint" class="muted tiny" style="margin-left:0.5rem"></span>
+                <span id="social-preview-hint" class="muted tiny"></span>
               </div>
               <label class="field-row">
                 <span>Salon Discord</span>
@@ -1250,15 +1345,20 @@
                 </div>
               </details>
               <p class="muted tiny">Twitch requiert <code>TWITCH_CLIENT_ID</code> et <code>TWITCH_CLIENT_SECRET</code> dans le <code>.env</code> (app Dev dédiée au bot).</p>
-              <div class="fonda-actions" style="margin-top:0.75rem">
+              <div class="form-actions">
                 <button type="button" class="btn primary" id="btn-social-save">Activer l'alerte</button>
                 <button type="button" class="btn ghost" id="btn-social-cancel" hidden>Annuler</button>
               </div>
             </div>
             <div class="panel-block">
-              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
-                <h3 style="margin:0">Alertes actives</h3>
-                <button type="button" class="btn ghost tiny" id="btn-social-refresh">Rafraîchir</button>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Alertes actives</h3>
+                  <p class="muted tiny">Chaînes surveillées</p>
+                </div>
+                <div class="panel-block-actions">
+                  <button type="button" class="btn ghost tiny" id="btn-social-refresh">Rafraîchir</button>
+                </div>
               </div>
               <div id="social-list" class="muted tiny">Charge un serveur pour voir les alertes.</div>
             </div>
@@ -1279,6 +1379,12 @@
             </div>
             <div class="mc-layout">
               <div class="panel-block" id="mc-editor">
+                <div class="panel-block-head">
+                  <div>
+                    <h3>Éditeur</h3>
+                    <p class="muted tiny">Textes, couleurs et options de la carte</p>
+                  </div>
+                </div>
                 <label class="switch-row">
                   <input type="checkbox" id="mc-enabled" />
                   <span>Activer cette carte</span>
@@ -1291,6 +1397,8 @@
                   <span>Titre</span>
                   <input type="text" id="mc-title" class="input-sm input-wide var-target" maxlength="48" />
                 </label>
+                <div class="form-section">
+                  <h4 class="form-section-title">Couleurs</h4>
                 <div class="mc-colors">
                   <label class="field-row">
                     <span>Couleur du titre</span>
@@ -1308,6 +1416,7 @@
                   <span>Couleur du cercle</span>
                   <input type="color" id="mc-ring-color" value="#39ff14" />
                 </label>
+                </div>
                 </div>
                 <label class="field-row">
                   <span>Ligne du pseudo</span>
@@ -1340,14 +1449,19 @@
                 <div id="mc-vars" class="emb-tokens" aria-label="Variables des cartes"></div>
                 <p class="muted tiny">Clique une variable pour l'insérer dans le champ en cours. Sur l'image, <code>{user}</code> reste le pseudo. Dans le texte Discord, <code>{user}</code> mentionne la personne.</p>
                 <p class="muted tiny" id="mc-kind-hint"></p>
-                <div class="fonda-actions" style="margin-top:0.75rem">
+                <div class="form-actions">
                   <button type="button" class="btn primary" id="btn-mc-save">Enregistrer</button>
                   <button type="button" class="btn secondary" id="btn-mc-test">Envoyer un test</button>
+                  <p class="muted tiny" id="mc-status"></p>
                 </div>
-                <p class="muted tiny" id="mc-status"></p>
               </div>
               <div class="panel-block">
-                <h3>Aperçu</h3>
+                <div class="panel-block-head">
+                  <div>
+                    <h3>Aperçu</h3>
+                    <p class="muted tiny">Rendu en direct de la carte</p>
+                  </div>
+                </div>
                 <div class="mc-preview-stage">
                   <img id="mc-preview-img" alt="Aperçu de la carte" />
                 </div>
@@ -1365,11 +1479,17 @@
               </p>
             </div>
             <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Gain d'XP</h3>
+                  <p class="muted tiny">Règles de base pour gagner de l'expérience</p>
+                </div>
+              </div>
               <label class="switch-row">
                 <input type="checkbox" id="lvl-enabled" />
                 <span>Activer le gain d'XP</span>
               </label>
-              <div class="mc-colors">
+              <div class="settings-grid">
                 <label class="field-row">
                   <span>XP minimum</span>
                   <input type="number" id="lvl-xp-min" class="input-sm" min="1" max="100" step="1" />
@@ -1388,6 +1508,14 @@
                 </label>
               </div>
               <p class="muted tiny">Les commandes (préfixe) ne donnent pas d'XP. Les bots non plus. Le délai est enregistré en base, un redémarrage ne le remet pas à zéro.</p>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Annonces</h3>
+                  <p class="muted tiny">Message quand un membre monte de niveau</p>
+                </div>
+              </div>
               <label class="switch-row">
                 <input type="checkbox" id="lvl-announce" />
                 <span>Annoncer les passages de niveau</span>
@@ -1402,26 +1530,38 @@
               </label>
               <div id="lvl-vars" class="emb-tokens"></div>
               <p class="muted tiny">Les mentions <code>@everyone</code> et <code>@here</code> ne sont pas déclenchées. Seul <code>{user}</code> peut notifier la personne.</p>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Exclusions &amp; récompenses</h3>
+                  <p class="muted tiny">Salons / rôles ignorés et paliers de rôles</p>
+                </div>
+              </div>
               <label class="switch-row">
                 <input type="checkbox" id="lvl-stack" />
                 <span>Empiler les rôles récompense (sinon seul le plus haut palier est gardé)</span>
               </label>
-              <label class="field-row">
-                <span>Salons ignorés</span>
-                <select id="lvl-ignore-channels" class="input-sm input-wide" multiple size="5"></select>
-              </label>
-              <label class="field-row">
-                <span>Rôles ignorés</span>
-                <select id="lvl-ignore-roles" class="input-sm input-wide" multiple size="5"></select>
-              </label>
-              <h3>Rôles récompense</h3>
-              <p class="muted tiny">Le bot doit être au-dessus de ces rôles. Les rôles d'intégration sont ignorés. 20 paliers maximum, niveaux 1 à 150.</p>
-              <div id="lvl-rewards"></div>
-              <button type="button" class="btn ghost tiny" id="btn-lvl-add-reward">+ Ajouter un palier</button>
-              <div class="fonda-actions" style="margin-top:0.85rem">
-                <button type="button" class="btn primary" id="btn-lvl-save">Enregistrer</button>
+              <div class="settings-grid">
+                <label class="field-row">
+                  <span>Salons ignorés</span>
+                  <select id="lvl-ignore-channels" class="input-sm input-wide" multiple size="5"></select>
+                </label>
+                <label class="field-row">
+                  <span>Rôles ignorés</span>
+                  <select id="lvl-ignore-roles" class="input-sm input-wide" multiple size="5"></select>
+                </label>
               </div>
-              <p class="muted tiny" id="lvl-status"></p>
+              <div class="form-section">
+                <h4 class="form-section-title">Rôles récompense</h4>
+                <p class="muted tiny">Le bot doit être au-dessus de ces rôles. Les rôles d'intégration sont ignorés. 20 paliers maximum, niveaux 1 à 150.</p>
+                <div id="lvl-rewards"></div>
+                <button type="button" class="btn ghost tiny" id="btn-lvl-add-reward">+ Ajouter un palier</button>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn primary" id="btn-lvl-save">Enregistrer</button>
+                <p class="muted tiny" id="lvl-status"></p>
+              </div>
             </div>
           </section>
 
@@ -1434,19 +1574,39 @@
               </p>
             </div>
             <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Activation</h3>
+                  <p class="muted tiny">Salon, émoji et seuil de réactions</p>
+                </div>
+              </div>
               <label class="switch-row"><input type="checkbox" id="sb-enabled" /><span>Activer</span></label>
-              <label class="field-row"><span>Salon starboard</span><select id="sb-channel" class="input-sm input-wide"></select></label>
-              <label class="field-row"><span>Émoji</span><input type="text" id="sb-emoji" class="input-sm" maxlength="32" value="⭐" /></label>
-              <label class="field-row"><span>Réactions minimum</span><input type="number" id="sb-min" class="input-sm" min="1" max="25" value="3" /></label>
+              <div class="settings-grid">
+                <label class="field-row"><span>Salon starboard</span><select id="sb-channel" class="input-sm input-wide"></select></label>
+                <label class="field-row"><span>Émoji</span><input type="text" id="sb-emoji" class="input-sm" maxlength="32" value="⭐" /></label>
+                <label class="field-row"><span>Réactions minimum</span><input type="number" id="sb-min" class="input-sm" min="1" max="25" value="3" /></label>
+              </div>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Publication</h3>
+                  <p class="muted tiny">Format du message starboard</p>
+                </div>
+              </div>
               <label class="switch-row"><input type="checkbox" id="sb-ignore-bots" checked /><span>Ignorer les messages de bots</span></label>
               <label class="switch-row"><input type="checkbox" id="sb-remove-self" checked /><span>Retirer l'auto-réaction de l'auteur</span></label>
               <label class="switch-row"><input type="checkbox" id="sb-embed" checked /><span>Publier en embed</span></label>
-              <label class="field-row"><span>Couleur embed</span><input type="color" id="sb-color" value="#fbbf24" /></label>
-              <label class="field-row"><span>Texte au-dessus</span><input type="text" id="sb-content" class="input-sm input-wide" maxlength="300" /></label>
+              <div class="settings-grid">
+                <label class="field-row"><span>Couleur embed</span><input type="color" id="sb-color" value="#fbbf24" /></label>
+                <label class="field-row"><span>Texte au-dessus</span><input type="text" id="sb-content" class="input-sm input-wide" maxlength="300" /></label>
+              </div>
               <p class="muted tiny">Variables : <code>{emoji}</code> <code>{emoji.count}</code> <code>{message.url}</code></p>
               <label class="field-row"><span>Salons ignorés</span><select id="sb-ignore-channels" class="input-sm input-wide" multiple size="4"></select></label>
-              <div class="fonda-actions"><button type="button" class="btn primary" id="btn-sb-save">Enregistrer</button></div>
-              <p class="muted tiny" id="sb-status"></p>
+              <div class="form-actions">
+                <button type="button" class="btn primary" id="btn-sb-save">Enregistrer</button>
+                <p class="muted tiny" id="sb-status"></p>
+              </div>
             </div>
           </section>
 
@@ -1459,16 +1619,36 @@
               </p>
             </div>
             <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Annonces</h3>
+                  <p class="muted tiny">Salon, horaire et message du jour</p>
+                </div>
+              </div>
               <label class="switch-row"><input type="checkbox" id="bd-enabled" /><span>Activer les annonces</span></label>
-              <label class="field-row"><span>Salon d'annonce</span><select id="bd-channel" class="input-sm input-wide"></select></label>
-              <label class="field-row"><span>Heure locale (0-23)</span><input type="number" id="bd-hour" class="input-sm" min="0" max="23" value="9" /></label>
-              <label class="field-row"><span>Décalage UTC (minutes, ex. 60 = UTC+1)</span><input type="number" id="bd-offset" class="input-sm" min="-720" max="840" value="60" /></label>
+              <div class="settings-grid">
+                <label class="field-row"><span>Salon d'annonce</span><select id="bd-channel" class="input-sm input-wide"></select></label>
+                <label class="field-row"><span>Heure locale (0-23)</span><input type="number" id="bd-hour" class="input-sm" min="0" max="23" value="9" /></label>
+                <label class="field-row"><span>Décalage UTC (minutes, ex. 60 = UTC+1)</span><input type="number" id="bd-offset" class="input-sm" min="-720" max="840" value="60" /></label>
+              </div>
               <label class="field-row"><span>Message</span><textarea id="bd-message" class="input-sm input-wide" rows="2" maxlength="500"></textarea></label>
               <p class="muted tiny">Variables : <code>{user}</code> <code>{role}</code></p>
-              <label class="field-row"><span>Rôle à mentionner</span><select id="bd-mention-role" class="input-sm input-wide"></select></label>
-              <label class="field-row"><span>Rôle temporaire du jour</span><select id="bd-temp-role" class="input-sm input-wide"></select></label>
-              <div class="fonda-actions"><button type="button" class="btn primary" id="btn-bd-save">Enregistrer</button></div>
-              <p class="muted tiny" id="bd-status"></p>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Rôles</h3>
+                  <p class="muted tiny">Mention et rôle temporaire du jour</p>
+                </div>
+              </div>
+              <div class="settings-grid">
+                <label class="field-row"><span>Rôle à mentionner</span><select id="bd-mention-role" class="input-sm input-wide"></select></label>
+                <label class="field-row"><span>Rôle temporaire du jour</span><select id="bd-temp-role" class="input-sm input-wide"></select></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn primary" id="btn-bd-save">Enregistrer</button>
+                <p class="muted tiny" id="bd-status"></p>
+              </div>
             </div>
           </section>
 
@@ -1482,6 +1662,12 @@
               </p>
             </div>
             <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Module</h3>
+                  <p class="muted tiny">Activation et catégorie Discord</p>
+                </div>
+              </div>
               <label class="switch-row">
                 <input type="checkbox" id="tv-enabled" />
                 <span>Activer les salons temporaires</span>
@@ -1490,34 +1676,51 @@
                 <span>Catégorie où placer « Créer votre salon »</span>
                 <select id="tv-category" class="input-sm input-wide"></select>
               </label>
-              <div class="fonda-actions">
+              <div class="form-actions">
                 <button type="button" class="btn primary" id="btn-tv-save-module">Enregistrer</button>
                 <button type="button" class="btn secondary" id="btn-tv-create-hub">Créer « ➕ Créer votre salon »</button>
+                <p class="muted tiny" id="tv-status"></p>
               </div>
-              <p class="muted tiny" id="tv-status"></p>
               <p class="muted tiny" id="tv-limits"></p>
             </div>
             <div class="panel-block">
-              <h3>Salons de création</h3>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Salons de création</h3>
+                  <p class="muted tiny">Hubs déjà créés sur le serveur</p>
+                </div>
+              </div>
               <div id="tv-hubs"></div>
             </div>
             <div class="panel-block" id="tv-edit-wrap" hidden>
-              <h3>Réglages <span id="tv-edit-id"></span></h3>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Réglages <span id="tv-edit-id"></span></h3>
+                  <p class="muted tiny">Comportement du salon temporaire</p>
+                </div>
+              </div>
               <label class="switch-row"><input type="checkbox" id="tv-hub-enabled" /><span>Actif</span></label>
               <label class="field-row"><span>Nom des salons créés</span><input type="text" id="tv-name-format" class="input-sm input-wide" maxlength="100" /></label>
               <p class="muted tiny">Variables : <code>{user}</code> <code>{user.username}</code> <code>{index}</code> <code>{random_word}</code> <code>{custom_word}</code> (premium)</p>
-              <label class="field-row"><span>Permissions de base</span>
-                <select id="tv-perm-source" class="input-sm"><option value="category">Celles de la catégorie</option><option value="hub">Celles du salon « Créer votre salon »</option></select>
-              </label>
-              <label class="field-row"><span>Limite de membres (0 = ∞)</span><input type="number" id="tv-user-limit" class="input-sm" min="0" max="99" /></label>
+              <div class="settings-grid">
+                <label class="field-row"><span>Permissions de base</span>
+                  <select id="tv-perm-source" class="input-sm"><option value="category">Celles de la catégorie</option><option value="hub">Celles du salon « Créer votre salon »</option></select>
+                </label>
+                <label class="field-row"><span>Limite de membres (0 = ∞)</span><input type="number" id="tv-user-limit" class="input-sm" min="0" max="99" /></label>
+              </div>
               <label class="switch-row"><input type="checkbox" id="tv-settings-embed" /><span>Afficher le panel de boutons dans le vocal</span></label>
               <label class="switch-row"><input type="checkbox" id="tv-allow-claim" /><span>Permettre de reprendre le salon si le propriétaire part</span></label>
               <label class="switch-row"><input type="checkbox" id="tv-saves" /><span>Sauvegardes de config (premium)</span></label>
-              <label class="field-row"><span>Rôles d'accès (vide = tout le monde, max 5)</span><select id="tv-access-roles" class="input-sm input-wide" multiple size="4"></select></label>
-              <label class="field-row"><span>Rôles modérateurs</span><select id="tv-mod-roles" class="input-sm input-wide" multiple size="4"></select></label>
-              <label class="field-row"><span>Rôles intouchables</span><select id="tv-untouch-roles" class="input-sm input-wide" multiple size="4"></select></label>
-              <label class="field-row"><span>Mots custom (premium, un par ligne)</span><textarea id="tv-custom-words" class="input-sm input-wide" rows="3"></textarea></label>
-              <div class="fonda-actions">
+              <div class="form-section">
+                <h4 class="form-section-title">Rôles</h4>
+                <div class="settings-grid">
+                  <label class="field-row"><span>Rôles d'accès (vide = tout le monde, max 5)</span><select id="tv-access-roles" class="input-sm input-wide" multiple size="4"></select></label>
+                  <label class="field-row"><span>Rôles modérateurs</span><select id="tv-mod-roles" class="input-sm input-wide" multiple size="4"></select></label>
+                  <label class="field-row"><span>Rôles intouchables</span><select id="tv-untouch-roles" class="input-sm input-wide" multiple size="4"></select></label>
+                </div>
+                <label class="field-row"><span>Mots custom (premium, un par ligne)</span><textarea id="tv-custom-words" class="input-sm input-wide" rows="3"></textarea></label>
+              </div>
+              <div class="form-actions">
                 <button type="button" class="btn primary" id="btn-tv-save-hub">Enregistrer</button>
                 <button type="button" class="btn danger" id="btn-tv-delete-hub">Retirer</button>
               </div>
@@ -1534,27 +1737,40 @@
               </p>
             </div>
             <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Configuration</h3>
+                  <p class="muted tiny">Limites et organisateurs</p>
+                </div>
+              </div>
               <label class="switch-row">
                 <input type="checkbox" id="gw-enabled" />
                 <span>Activer les giveaways</span>
               </label>
-              <label class="field-row">
-                <span>Giveaways actifs maximum</span>
-                <input type="number" id="gw-max-active" class="input-sm" min="1" max="10" step="1" />
-              </label>
-              <label class="field-row">
-                <span>Rôles organisateurs (en plus de Gérer le serveur)</span>
-                <select id="gw-manager-roles" class="input-sm input-wide" multiple size="5"></select>
-              </label>
+              <div class="settings-grid">
+                <label class="field-row">
+                  <span>Giveaways actifs maximum</span>
+                  <input type="number" id="gw-max-active" class="input-sm" min="1" max="10" step="1" />
+                </label>
+                <label class="field-row">
+                  <span>Rôles organisateurs (en plus de Gérer le serveur)</span>
+                  <select id="gw-manager-roles" class="input-sm input-wide" multiple size="5"></select>
+                </label>
+              </div>
               <p class="muted tiny">Durée entre 1 minute et 30 jours. Jusqu'à 20 gagnants. Tirage avec crypto côté serveur. Les bots ne participent pas.</p>
-              <div class="fonda-actions" style="margin-top:0.85rem">
+              <div class="form-actions">
                 <button type="button" class="btn primary" id="btn-gw-save">Enregistrer</button>
                 <button type="button" class="btn secondary" id="btn-gw-refresh">Actualiser la liste</button>
+                <p class="muted tiny" id="gw-status"></p>
               </div>
-              <p class="muted tiny" id="gw-status"></p>
             </div>
             <div class="panel-block">
-              <h3>Giveaways récents</h3>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Giveaways récents</h3>
+                  <p class="muted tiny">Tirages en cours et terminés</p>
+                </div>
+              </div>
               <div id="gw-list"></div>
             </div>
           </section>
@@ -1569,6 +1785,12 @@
               </p>
             </div>
             <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Suivi</h3>
+                  <p class="muted tiny">Ce que le bot compte sur le serveur</p>
+                </div>
+              </div>
               <label class="switch-row">
                 <input type="checkbox" id="stats-enabled" />
                 <span>Activer le suivi</span>
@@ -1594,18 +1816,24 @@
                 <select id="stats-ignore-channels" class="input-sm input-wide" multiple size="5"></select>
               </label>
               <p class="muted tiny">Les bots, les webhooks et le salon AFK sont ignorés. Une session déjà en cours au démarrage du bot n'est pas comptée, et une session vocale est plafonnée à 12 h. Les dates sont en UTC.</p>
-              <div class="fonda-actions" style="margin-top:0.85rem">
+              <div class="form-actions">
                 <button type="button" class="btn primary" id="btn-stats-save">Enregistrer</button>
                 <button type="button" class="btn danger" id="btn-stats-reset">Effacer les compteurs</button>
+                <p class="muted tiny" id="stats-status"></p>
               </div>
-              <p class="muted tiny" id="stats-status"></p>
             </div>
             <div class="panel-block">
-              <h3>7 derniers jours</h3>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Aperçu</h3>
+                  <p class="muted tiny">Activité récente du serveur</p>
+                </div>
+              </div>
+              <h4 class="form-section-title">7 derniers jours</h4>
               <div class="stats-cards" id="stats-cards"></div>
-              <h3>Messages sur 14 jours</h3>
+              <h4 class="form-section-title">Messages sur 14 jours</h4>
               <div class="stats-bars" id="stats-bars" aria-label="Messages par jour"></div>
-              <h3>Salons les plus actifs (30 jours)</h3>
+              <h4 class="form-section-title">Salons les plus actifs (30 jours)</h4>
               <div id="stats-channels"></div>
             </div>
           </section>
@@ -1618,7 +1846,15 @@
                 publication ou mise à jour du message du bot dans le salon choisi.
               </p>
             </div>
-            <div id="embed-builder-root" class="panel-block embed-builder-root"></div>
+            <div class="panel-block embed-builder-shell">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Workbench</h3>
+                  <p class="muted tiny">Brouillons, aperçu Discord et publication</p>
+                </div>
+              </div>
+              <div id="embed-builder-root" class="embed-builder-root"></div>
+            </div>
           </section>
 
           <section class="view" id="view-moderation" hidden>
@@ -1629,17 +1865,24 @@
 
             <div class="panel-block" id="antispam-panel-root">
               <div class="panel-block-head">
-                <h3>Antispam</h3>
-                <p class="muted tiny">
-                  Détecte les comptes compromis (liens ou images postés sur plusieurs salons).
-                  Supprime le message, envoie un MP d’avertissement, puis applique une sourdine Discord (messages + vocal) en cas de récidive.
-                </p>
+                <div>
+                  <h3>Antispam</h3>
+                  <p class="muted tiny">
+                    Détecte les comptes compromis (liens ou images postés sur plusieurs salons).
+                    Supprime le message, envoie un MP d’avertissement, puis applique une sourdine Discord (messages + vocal) en cas de récidive.
+                  </p>
+                </div>
               </div>
               <div id="antispam-panel"></div>
             </div>
 
             <div class="panel-block">
-              <h3>Commandes manuelles</h3>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Commandes manuelles</h3>
+                  <p class="muted tiny">Outils de modération côté Discord</p>
+                </div>
+              </div>
               <ul class="mod-doc-list muted">
                 <li><strong class="mono">kick</strong> — Expulser (<code>KickMembers</code>)</li>
                 <li><strong class="mono">ban</strong> — Bannir (<code>BanMembers</code>)</li>
@@ -1662,24 +1905,31 @@
             </div>
 
             <div class="panel-block" id="warn-config-root">
-              <h3>Configuration</h3>
-              <p class="muted tiny">Sanctions automatiques quand le seuil est atteint. Les warns antispam comptent aussi.</p>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Configuration</h3>
+                  <p class="muted tiny">Sanctions automatiques quand le seuil est atteint. Les warns antispam comptent aussi.</p>
+                </div>
+              </div>
               <div id="warn-config-panel"></div>
-              <div class="fonda-actions" style="margin-top:0.75rem">
+              <div class="form-actions">
                 <button type="button" class="btn secondary" id="btn-test-warn-dm">
                   Tester le DM d’avertissement
                 </button>
                 <span class="muted tiny" id="warn-test-dm-status"></span>
               </div>
-              <p class="muted tiny" style="margin-top:0.35rem">
+              <p class="muted tiny">
                 Envoie un embed de démo en message privé sur <strong>ton</strong> compte Discord (aucun warn réel créé).
               </p>
             </div>
 
             <div class="panel-block" id="warn-list-root">
-              <div class="panel-block-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
-                <h3 style="margin:0">Warns actifs <span class="muted tiny" id="warn-list-count"></span></h3>
-                <div style="display:flex;gap:0.35rem;flex-wrap:wrap">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Warns actifs <span class="muted tiny" id="warn-list-count"></span></h3>
+                  <p class="muted tiny">Historique filtrable</p>
+                </div>
+                <div class="panel-block-actions">
                   <button type="button" class="btn ghost tiny" id="btn-clear-user-warns" hidden>Tout retirer (filtre)</button>
                   <button type="button" class="btn ghost tiny" id="btn-refresh-warns">Rafraîchir</button>
                 </div>
@@ -1692,7 +1942,12 @@
             </div>
 
             <div class="panel-block">
-              <h3>Commandes Discord</h3>
+              <div class="panel-block-head">
+                <div>
+                  <h3>Commandes Discord</h3>
+                  <p class="muted tiny">Slash et préfixe</p>
+                </div>
+              </div>
               <ul class="mod-doc-list muted">
                 <li><strong class="mono">/warn</strong> ou <code>warn @membre raison</code> — Enregistre un warn (+ DM embed + log)</li>
                 <li><strong class="mono">/warns</strong> — Liste les warns d’un membre</li>
