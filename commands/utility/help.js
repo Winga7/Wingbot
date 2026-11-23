@@ -83,7 +83,7 @@ function buildEmbed() {
       {
         name: "🔊 Vocaux temporaires",
         value:
-          "`tempvoice create` `list` `enable` · dashboard : Communauté → Vocaux temp. (hub + panel style DraftBot)",
+          "`/tempvoice setup` `list` `enable` · dashboard : choisir une catégorie → « Créer votre salon »",
         inline: false,
       },
       {

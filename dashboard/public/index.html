@@ -1424,46 +1424,50 @@
             <div class="view-head">
               <h2>Vocaux temporaires</h2>
               <p class="muted tiny">
-                Comme DraftBot : un hub « ➕ Créer votre salon », création auto, panel de réglages
-                (Ouvert / Fermé / Privé, listes, purge, micro, transfert…). Commandes :
-                <code>/tempvoice</code> · <code>$tempvoice create</code>.
+                Choisis une catégorie, le bot y crée <code>➕ Créer votre salon</code>.
+                Quand un membre le rejoint, il est déplacé dans son propre vocal avec un panel
+                (Ouvert / Fermé / Privé, listes, etc.). Commande : <code>/tempvoice setup</code>.
               </p>
             </div>
             <div class="panel-block">
               <label class="switch-row">
                 <input type="checkbox" id="tv-enabled" />
-                <span>Activer le module</span>
+                <span>Activer les salons temporaires</span>
               </label>
-              <p class="muted tiny" id="tv-limits"></p>
+              <label class="field-row">
+                <span>Catégorie où placer « Créer votre salon »</span>
+                <select id="tv-category" class="input-sm input-wide"></select>
+              </label>
               <div class="fonda-actions">
-                <button type="button" class="btn primary" id="btn-tv-save-module">Enregistrer le module</button>
-                <button type="button" class="btn secondary" id="btn-tv-create-hub">Créer un hub</button>
+                <button type="button" class="btn primary" id="btn-tv-save-module">Enregistrer</button>
+                <button type="button" class="btn secondary" id="btn-tv-create-hub">Créer « ➕ Créer votre salon »</button>
               </div>
               <p class="muted tiny" id="tv-status"></p>
+              <p class="muted tiny" id="tv-limits"></p>
             </div>
             <div class="panel-block">
-              <h3>Hubs</h3>
+              <h3>Salons de création</h3>
               <div id="tv-hubs"></div>
             </div>
             <div class="panel-block" id="tv-edit-wrap" hidden>
-              <h3>Modifier le hub <span id="tv-edit-id"></span></h3>
-              <label class="switch-row"><input type="checkbox" id="tv-hub-enabled" /><span>Hub activé</span></label>
-              <label class="field-row"><span>Format du nom</span><input type="text" id="tv-name-format" class="input-sm input-wide" maxlength="100" /></label>
+              <h3>Réglages <span id="tv-edit-id"></span></h3>
+              <label class="switch-row"><input type="checkbox" id="tv-hub-enabled" /><span>Actif</span></label>
+              <label class="field-row"><span>Nom des salons créés</span><input type="text" id="tv-name-format" class="input-sm input-wide" maxlength="100" /></label>
               <p class="muted tiny">Variables : <code>{user}</code> <code>{user.username}</code> <code>{index}</code> <code>{random_word}</code> <code>{custom_word}</code> (premium)</p>
-              <label class="field-row"><span>Permissions par défaut</span>
-                <select id="tv-perm-source" class="input-sm"><option value="category">Catégorie</option><option value="hub">Salon hub</option></select>
+              <label class="field-row"><span>Permissions de base</span>
+                <select id="tv-perm-source" class="input-sm"><option value="category">Celles de la catégorie</option><option value="hub">Celles du salon « Créer votre salon »</option></select>
               </label>
               <label class="field-row"><span>Limite de membres (0 = ∞)</span><input type="number" id="tv-user-limit" class="input-sm" min="0" max="99" /></label>
-              <label class="switch-row"><input type="checkbox" id="tv-settings-embed" /><span>Embed de réglages</span></label>
-              <label class="switch-row"><input type="checkbox" id="tv-allow-claim" /><span>Réquisition si le propriétaire part</span></label>
-              <label class="switch-row"><input type="checkbox" id="tv-saves" /><span>Sauvegardes (premium)</span></label>
-              <label class="field-row"><span>Rôles d'accès (vide = @everyone, max 5)</span><select id="tv-access-roles" class="input-sm input-wide" multiple size="4"></select></label>
+              <label class="switch-row"><input type="checkbox" id="tv-settings-embed" /><span>Afficher le panel de boutons dans le vocal</span></label>
+              <label class="switch-row"><input type="checkbox" id="tv-allow-claim" /><span>Permettre de reprendre le salon si le propriétaire part</span></label>
+              <label class="switch-row"><input type="checkbox" id="tv-saves" /><span>Sauvegardes de config (premium)</span></label>
+              <label class="field-row"><span>Rôles d'accès (vide = tout le monde, max 5)</span><select id="tv-access-roles" class="input-sm input-wide" multiple size="4"></select></label>
               <label class="field-row"><span>Rôles modérateurs</span><select id="tv-mod-roles" class="input-sm input-wide" multiple size="4"></select></label>
               <label class="field-row"><span>Rôles intouchables</span><select id="tv-untouch-roles" class="input-sm input-wide" multiple size="4"></select></label>
               <label class="field-row"><span>Mots custom (premium, un par ligne)</span><textarea id="tv-custom-words" class="input-sm input-wide" rows="3"></textarea></label>
               <div class="fonda-actions">
-                <button type="button" class="btn primary" id="btn-tv-save-hub">Enregistrer le hub</button>
-                <button type="button" class="btn danger" id="btn-tv-delete-hub">Supprimer le hub</button>
+                <button type="button" class="btn primary" id="btn-tv-save-hub">Enregistrer</button>
+                <button type="button" class="btn danger" id="btn-tv-delete-hub">Retirer</button>
               </div>
             </div>
           </section>

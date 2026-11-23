@@ -78,14 +78,7 @@ const FEATURES = {
   // Custom commands étendues (au-delà du quota free)
   custom_commands_extended: {},
 
-  // Salons vocaux temporaires (parité DraftBot)
-  temp_voice_multi_hubs: {
-    limits: {
-      free: { hubs: 1 },
-      premium: { hubs: 10 },
-      founder: { hubs: 10 },
-    },
-  },
+  // Salons vocaux temporaires — sauvegardes / mots custom (le salon de création n'est pas limité)
   temp_voice_saves: {},
   temp_voice_custom_words: {},
 };

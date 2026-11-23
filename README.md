@@ -215,23 +215,25 @@ Participation uniquement via le bouton Discord (toggle). Tirage avec `crypto` c�
 
 ## Vocaux temporaires
 
-Réglage dans le dashboard : **Communauté → Vocaux temp.** (parité DraftBot).
+Réglage dans le dashboard : **Communauté → Vocaux temp.**
+
+1. Choisis une **catégorie**
+2. Clique **Créer « ➕ Créer votre salon »** (ou `/tempvoice setup`)
+3. Les membres qui rejoignent ce salon sont déplacés dans leur vocal + panel de boutons
 
 | | |
 |---|---|
-| **Hub** | Rejoindre `➕ Créer votre salon` crée un vocal perso et y déplace le membre |
-| **Fin** | Salon supprimé quand il est vide (sauf salons marqués permanents) |
-| **Panel** | Ouvert / Fermé / Privé, listes blanche & noire, purge, micro, vidéo, soundboard, statut, réglages, transfert |
-| **Réquisition** | Si activée et que le propriétaire est parti, un membre peut reprendre le salon |
-| **Premium** | Jusqu'à 10 hubs, mots `{custom_word}`, sauvegardes de config (5 / hub / membre) |
-| **Gratuit** | 1 hub |
+| **Création** | Rejoindre `➕ Créer votre salon` → vocal perso + déplacement |
+| **Fin** | Salon supprimé quand il est vide |
+| **Panel** | Ouvert / Fermé / Privé, listes, purge, micro, vidéo, soundboard, statut, réglages, transfert |
+| **Premium** | `{custom_word}` et sauvegardes de config (pas de limite artificielle de salons de création) |
 
 | Commande | Effet |
 |---|---|
-| `/tempvoice hub-create` · `$tempvoice create` | Crée catégorie + hub |
-| `/tempvoice list` · `$tempvoice list` | Liste les hubs |
+| `/tempvoice setup` | Crée « Créer votre salon » dans la catégorie choisie |
+| `/tempvoice list` · `$tempvoice list` | Liste les salons de création |
 | `/tempvoice enable` · `$tempvoice enable\|disable` | Active le module |
-| `/tempvoice hub-toggle` / `hub-delete` | Active ou retire un hub |
+| `/tempvoice toggle` / `remove` | Active ou retire un salon de création |
 
 Permissions bot : Gérer les salons, Déplacer des membres, Voir, Se connecter. Test local : `node scripts/test-tempvoice-perms.js`.
 

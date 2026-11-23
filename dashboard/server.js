@@ -97,7 +97,7 @@ const {
   getTempVoiceHub,
   DB_PATH,
 } = require("../database");
-const { DEFAULT_HUB, MAX_HUBS_FREE, MAX_HUBS_PREMIUM } = require("../lib/tempVoiceConfig");
+const { DEFAULT_HUB, MAX_CREATORS } = require("../lib/tempVoiceConfig");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
 const {
   parseCategories,
@@ -3777,17 +3777,6 @@ app.post(
   }
 );
 
-function tempVoiceMaxHubs(req, guildId) {
-  const n = premiumGate.getFeatureLimit(
-    req.discordSession.userId,
-    guildId,
-    "temp_voice_multi_hubs",
-    "hubs"
-  );
-  if (n == null) return MAX_HUBS_FREE;
-  return Math.min(MAX_HUBS_PREMIUM, Math.max(1, n));
-}
-
 app.get(
   "/api/guilds/:guildId/tempvoice",
   requireDiscordSession,
@@ -3797,7 +3786,7 @@ app.get(
       res.json({
         config: getTempVoiceGuildConfig(req.guildId),
         hubs: listTempVoiceHubs(req.guildId),
-        max_hubs: tempVoiceMaxHubs(req, req.guildId),
+        max_creators: MAX_CREATORS,
         premium: premiumGate.isGuildPremium(req.guildId),
       });
     } catch (e) {
@@ -3831,26 +3820,38 @@ app.post(
   requireGuildManageAccess,
   async (req, res) => {
     try {
-      const max = tempVoiceMaxHubs(req, req.guildId);
-      if (countTempVoiceHubs(req.guildId) >= max) {
+      if (countTempVoiceHubs(req.guildId) >= MAX_CREATORS) {
         return res.status(400).json({
-          error: "hub_limit",
-          message: `Limite de hubs atteinte (${max}).`,
+          error: "creator_limit",
+          message: `Trop de salons de création (${MAX_CREATORS} max technique).`,
         });
       }
-      let categoryId = String(req.body?.category_id || "").replace(/\D/g, "");
-      let hubChannelId = String(req.body?.hub_channel_id || "").replace(/\D/g, "");
 
-      if (req.body?.create_defaults || !categoryId || !hubChannelId) {
-        const category = await discordBotJson(
-          "POST",
-          `/guilds/${encodeURIComponent(req.guildId)}/channels`,
-          {
-            name: "Salons temporaires",
-            type: 4,
-          }
-        );
-        categoryId = category.id;
+      let categoryId = String(req.body?.category_id || "").replace(/\D/g, "");
+      if (!/^\d{17,20}$/.test(categoryId)) {
+        return res.status(400).json({
+          error: "category_required",
+          message: "Choisis une catégorie Discord.",
+        });
+      }
+
+      // Vérifie que la catégorie existe sur le serveur
+      const channels = await discordBotJson(
+        "GET",
+        `/guilds/${encodeURIComponent(req.guildId)}/channels`
+      );
+      const category = (channels || []).find(
+        (ch) => ch.id === categoryId && ch.type === 4
+      );
+      if (!category) {
+        return res.status(400).json({
+          error: "category_invalid",
+          message: "Cette catégorie est introuvable sur le serveur.",
+        });
+      }
+
+      let hubChannelId = String(req.body?.hub_channel_id || "").replace(/\D/g, "");
+      if (!/^\d{17,20}$/.test(hubChannelId)) {
         const hubCh = await discordBotJson(
           "POST",
           `/guilds/${encodeURIComponent(req.guildId)}/channels`,
@@ -3875,8 +3876,8 @@ app.post(
     } catch (e) {
       console.error(e);
       res.status(e.status || 400).json({
-        error: "tempvoice_hub_create_failed",
-        message: e.message || "Création refusée.",
+        error: "tempvoice_setup_failed",
+        message: e.message || "Mise en place refusée.",
       });
     }
   }

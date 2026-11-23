@@ -207,7 +207,7 @@ const COMMANDS = [
     id: "tempvoice",
     category: "admin",
     label: "tempvoice",
-    description: "Salons vocaux temporaires (hubs)",
+    description: "Salons vocaux temporaires (Créer votre salon)",
   },
   {
     id: "backup",

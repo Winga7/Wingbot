@@ -9,18 +9,11 @@ const {
   deleteTempVoiceHub,
   getTempVoiceHub,
 } = require("../../database");
-const { MAX_HUBS_FREE, MAX_HUBS_PREMIUM, DEFAULT_HUB } = require("../../lib/tempVoiceConfig");
-const { getFeatureLimit } = require("../../premiumGate");
+const { MAX_CREATORS, DEFAULT_HUB } = require("../../lib/tempVoiceConfig");
 const { memberHasPermOrAdmin } = require("../../memberPerms");
 
 function deny(send, text) {
   return send(`❌ ${text}`);
-}
-
-function maxHubsFor(userId, guildId) {
-  const n = getFeatureLimit(userId, guildId, "temp_voice_multi_hubs", "hubs");
-  if (n == null) return MAX_HUBS_FREE;
-  return Math.min(MAX_HUBS_PREMIUM, Math.max(1, n));
 }
 
 async function ensureBotVoicePerms(guild) {
@@ -41,7 +34,7 @@ async function ensureBotVoicePerms(guild) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("tempvoice")
-    .setDescription("Configurer les salons vocaux temporaires")
+    .setDescription("Salons vocaux temporaires")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((sub) =>
       sub
@@ -53,25 +46,28 @@ module.exports = {
     )
     .addSubcommand((sub) =>
       sub
-        .setName("hub-create")
-        .setDescription("Crée un hub (salon ➕ Créer votre salon)")
+        .setName("setup")
+        .setDescription("Crée « ➕ Créer votre salon » dans une catégorie")
         .addChannelOption((o) =>
           o
             .setName("categorie")
-            .setDescription("Catégorie des salons temporaires")
+            .setDescription("Catégorie où placer le salon")
             .addChannelTypes(ChannelType.GuildCategory)
-            .setRequired(false)
+            .setRequired(true)
         )
         .addStringOption((o) =>
-          o.setName("nom_hub").setDescription("Nom du salon hub").setRequired(false)
+          o
+            .setName("nom")
+            .setDescription("Nom du salon (défaut : ➕ Créer votre salon)")
+            .setRequired(false)
         )
     )
     .addSubcommand((sub) =>
       sub
-        .setName("hub-toggle")
-        .setDescription("Active ou désactive un hub")
+        .setName("toggle")
+        .setDescription("Active ou désactive un salon de création")
         .addIntegerOption((o) =>
-          o.setName("id").setDescription("ID du hub").setRequired(true)
+          o.setName("id").setDescription("ID affiché par /tempvoice list").setRequired(true)
         )
         .addBooleanOption((o) =>
           o.setName("actif").setDescription("Activer").setRequired(true)
@@ -79,14 +75,14 @@ module.exports = {
     )
     .addSubcommand((sub) =>
       sub
-        .setName("hub-delete")
-        .setDescription("Supprime un hub")
+        .setName("remove")
+        .setDescription("Retire un salon de création (sans supprimer le vocal Discord)")
         .addIntegerOption((o) =>
-          o.setName("id").setDescription("ID du hub").setRequired(true)
+          o.setName("id").setDescription("ID affiché par /tempvoice list").setRequired(true)
         )
     )
     .addSubcommand((sub) =>
-      sub.setName("list").setDescription("Liste les hubs")
+      sub.setName("list").setDescription("Liste les salons de création")
     ),
 
   async execute(interaction) {
@@ -106,8 +102,8 @@ module.exports = {
       setTempVoiceGuildConfig(interaction.guildId, { enabled: actif });
       return interaction.reply({
         content: actif
-          ? "✅ Module salons temporaires activé."
-          : "✅ Module désactivé (les hubs restent, sans création).",
+          ? "✅ Salons temporaires activés."
+          : "✅ Module désactivé (les salons de création restent, sans nouvel usage).",
         ephemeral: true,
       });
     }
@@ -117,13 +113,15 @@ module.exports = {
       const hubs = listTempVoiceHubs(interaction.guildId);
       if (!hubs.length) {
         return interaction.reply({
-          content: `Module : ${cfg.enabled ? "on" : "off"} · aucun hub. Dashboard : Communauté → Vocaux temp.`,
+          content:
+            `Module : ${cfg.enabled ? "on" : "off"} · aucun salon de création.\n` +
+            `Dashboard : Communauté → Vocaux temp. ou \`/tempvoice setup\`.`,
           ephemeral: true,
         });
       }
       const lines = hubs.map(
         (h) =>
-          `\`#${h.id}\` ${h.enabled ? "🟢" : "⚪"} hub <#${h.hub_channel_id || "?"}> · cat <#${h.category_id || "?"}> · \`${h.name_format}\``
+          `\`#${h.id}\` ${h.enabled ? "🟢" : "⚪"} <#${h.hub_channel_id || "?"}> · cat <#${h.category_id || "?"}>`
       );
       return interaction.reply({
         content: `Module : **${cfg.enabled ? "on" : "off"}**\n${lines.join("\n")}`,
@@ -131,32 +129,24 @@ module.exports = {
       });
     }
 
-    if (sub === "hub-create") {
+    if (sub === "setup") {
       await interaction.deferReply({ ephemeral: true });
       const permErr = await ensureBotVoicePerms(interaction.guild);
       if (permErr) return interaction.editReply({ content: `❌ ${permErr}` });
-      const max = maxHubsFor(interaction.user.id, interaction.guildId);
-      if (countTempVoiceHubs(interaction.guildId) >= max) {
+      if (countTempVoiceHubs(interaction.guildId) >= MAX_CREATORS) {
         return interaction.editReply({
-          content: `❌ Limite de hubs atteinte (${max}). Premium : jusqu'à ${MAX_HUBS_PREMIUM}.`,
+          content: `❌ Trop de salons de création (max technique ${MAX_CREATORS}).`,
         });
       }
-      let category = interaction.options.getChannel("categorie");
-      if (!category) {
-        category = await interaction.guild.channels.create({
-          name: "Salons temporaires",
-          type: ChannelType.GuildCategory,
-          reason: "Hub vocaux temporaires Wingbot",
-        });
-      }
+      const category = interaction.options.getChannel("categorie", true);
       const hubName =
-        interaction.options.getString("nom_hub")?.trim().slice(0, 100) ||
+        interaction.options.getString("nom")?.trim().slice(0, 100) ||
         "➕ Créer votre salon";
       const hubChannel = await interaction.guild.channels.create({
         name: hubName,
         type: ChannelType.GuildVoice,
         parent: category.id,
-        reason: "Hub vocaux temporaires Wingbot",
+        reason: "Salon de création temporaire Wingbot",
       });
       const hub = createTempVoiceHub(interaction.guildId, {
         ...DEFAULT_HUB,
@@ -166,33 +156,33 @@ module.exports = {
       });
       setTempVoiceGuildConfig(interaction.guildId, { enabled: true });
       return interaction.editReply({
-        content: `✅ Hub **#${hub.id}** créé : ${hubChannel} dans ${category}.`,
+        content: `✅ ${hubChannel} est prêt dans ${category}. Les membres qui le rejoignent obtiennent leur salon.`,
       });
     }
 
-    if (sub === "hub-toggle") {
+    if (sub === "toggle") {
       const id = interaction.options.getInteger("id", true);
       const hub = getTempVoiceHub(id);
       if (!hub || hub.guild_id !== interaction.guildId) {
-        return interaction.reply({ content: "❌ Hub introuvable.", ephemeral: true });
+        return interaction.reply({ content: "❌ Introuvable.", ephemeral: true });
       }
       const actif = interaction.options.getBoolean("actif", true);
       updateTempVoiceHub(id, { enabled: actif });
       return interaction.reply({
-        content: actif ? `✅ Hub #${id} activé.` : `✅ Hub #${id} désactivé.`,
+        content: actif ? `✅ #${id} activé.` : `✅ #${id} désactivé.`,
         ephemeral: true,
       });
     }
 
-    if (sub === "hub-delete") {
+    if (sub === "remove") {
       const id = interaction.options.getInteger("id", true);
       const hub = getTempVoiceHub(id);
       if (!hub || hub.guild_id !== interaction.guildId) {
-        return interaction.reply({ content: "❌ Hub introuvable.", ephemeral: true });
+        return interaction.reply({ content: "❌ Introuvable.", ephemeral: true });
       }
       deleteTempVoiceHub(id);
       return interaction.reply({
-        content: `✅ Hub #${id} supprimé de la base (le salon Discord n'est pas effacé automatiquement).`,
+        content: `✅ #${id} retiré de la config (le vocal Discord n'est pas effacé).`,
         ephemeral: true,
       });
     }
@@ -208,7 +198,7 @@ module.exports = {
     if (sub === "list") {
       const hubs = listTempVoiceHubs(message.guild.id);
       const cfg = getTempVoiceGuildConfig(message.guild.id);
-      if (!hubs.length) return send(`Module ${cfg.enabled ? "on" : "off"} · aucun hub.`);
+      if (!hubs.length) return send(`Module ${cfg.enabled ? "on" : "off"} · aucun salon de création.`);
       return send(
         hubs
           .map((h) => `\`#${h.id}\` ${h.enabled ? "on" : "off"} · <#${h.hub_channel_id}>`)
@@ -217,39 +207,21 @@ module.exports = {
     }
     if (sub === "enable" || sub === "on") {
       setTempVoiceGuildConfig(message.guild.id, { enabled: true });
-      return send("✅ Module activé.");
+      return send("✅ Activé.");
     }
     if (sub === "disable" || sub === "off") {
       setTempVoiceGuildConfig(message.guild.id, { enabled: false });
-      return send("✅ Module désactivé.");
+      return send("✅ Désactivé.");
     }
-    if (sub === "create" || sub === "hub-create") {
-      const max = maxHubsFor(message.author.id, message.guild.id);
-      if (countTempVoiceHubs(message.guild.id) >= max) {
-        return deny(send, `Limite de hubs (${max}).`);
-      }
-      const permErr = await ensureBotVoicePerms(message.guild);
-      if (permErr) return deny(send, permErr);
-      const category = await message.guild.channels.create({
-        name: "Salons temporaires",
-        type: ChannelType.GuildCategory,
-      });
-      const hubChannel = await message.guild.channels.create({
-        name: "➕ Créer votre salon",
-        type: ChannelType.GuildVoice,
-        parent: category.id,
-      });
-      const hub = createTempVoiceHub(message.guild.id, {
-        ...DEFAULT_HUB,
-        hub_channel_id: hubChannel.id,
-        category_id: category.id,
-      });
-      setTempVoiceGuildConfig(message.guild.id, { enabled: true });
-      return send(`✅ Hub **#${hub.id}** · ${hubChannel}`);
+    if (sub === "setup" || sub === "create") {
+      return deny(
+        send,
+        "Pour le préfixe, utilise le dashboard (choisir la catégorie) ou `/tempvoice setup`."
+      );
     }
     return deny(
       send,
-      "Usage : `tempvoice list` · `enable` · `disable` · `create` · slash pour le reste"
+      "Usage : `tempvoice list` · `enable` · `disable` · `/tempvoice setup` pour créer le salon"
     );
   },
 };

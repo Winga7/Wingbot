@@ -6272,6 +6272,32 @@ function selectedMulti(id) {
   return [...($(id)?.selectedOptions || [])].map((o) => o.value);
 }
 
+function fillTempVoiceCategories(selectedId) {
+  const sel = $("tv-category");
+  if (!sel) return;
+  sel.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "— Choisir une catégorie —";
+  sel.appendChild(empty);
+  for (const cat of lastGuildCategoriesList || []) {
+    const option = document.createElement("option");
+    option.value = cat.id;
+    option.textContent = cat.name;
+    if (selectedId && selectedId === cat.id) option.selected = true;
+    sel.appendChild(option);
+  }
+}
+
+function categoryName(id) {
+  return (lastGuildCategoriesList || []).find((c) => c.id === id)?.name || id || "—";
+}
+
+function channelLabelById(id) {
+  const ch = (lastGuildChannelsList || []).find((c) => c.id === id);
+  return ch ? ch.name : id || "—";
+}
+
 function renderTempVoiceHubs(hubs) {
   const root = $("tv-hubs");
   if (!root) return;
@@ -6279,7 +6305,7 @@ function renderTempVoiceHubs(hubs) {
   if (!hubs?.length) {
     const p = document.createElement("p");
     p.className = "muted tiny";
-    p.textContent = "Aucun hub. Clique « Créer un hub ».";
+    p.textContent = "Aucun salon de création pour l'instant.";
     root.appendChild(p);
     return;
   }
@@ -6289,15 +6315,15 @@ function renderTempVoiceHubs(hubs) {
     const meta = document.createElement("div");
     meta.className = "gw-row-meta";
     const title = document.createElement("strong");
-    title.textContent = `#${hub.id} · ${hub.enabled ? "actif" : "off"} · ${hub.name_format}`;
+    title.textContent = `${hub.enabled ? "Actif" : "Off"} · ${channelLabelById(hub.hub_channel_id)}`;
     const detail = document.createElement("span");
     detail.className = "muted tiny";
-    detail.textContent = `hub ${hub.hub_channel_id || "—"} · cat ${hub.category_id || "—"}`;
+    detail.textContent = `Catégorie : ${categoryName(hub.category_id)} · noms : ${hub.name_format}`;
     meta.append(title, detail);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "btn secondary tiny";
-    btn.textContent = "Modifier";
+    btn.textContent = "Réglages";
     btn.addEventListener("click", () => openTempVoiceEditor(hub));
     row.append(meta, btn);
     root.appendChild(row);
@@ -6307,7 +6333,7 @@ function renderTempVoiceHubs(hubs) {
 function openTempVoiceEditor(hub) {
   tempVoiceEditId = hub.id;
   $("tv-edit-wrap").hidden = false;
-  $("tv-edit-id").textContent = "#" + hub.id;
+  $("tv-edit-id").textContent = channelLabelById(hub.hub_channel_id);
   $("tv-hub-enabled").checked = !!hub.enabled;
   $("tv-name-format").value = hub.name_format || "";
   $("tv-perm-source").value = hub.permission_source || "category";
@@ -6320,6 +6346,7 @@ function openTempVoiceEditor(hub) {
   fillLevelMulti("tv-mod-roles", roles, hub.moderator_role_ids, (r) => r.name);
   fillLevelMulti("tv-untouch-roles", roles, hub.untouchable_role_ids, (r) => r.name);
   $("tv-custom-words").value = (hub.custom_words || []).join("\n");
+  if (hub.category_id) fillTempVoiceCategories(hub.category_id);
 }
 
 async function loadTempVoicePage() {
@@ -6336,7 +6363,14 @@ async function loadTempVoicePage() {
   const data = await res.json();
   tempVoiceState = data;
   $("tv-enabled").checked = !!data.config?.enabled;
-  $("tv-limits").textContent = `Hubs : ${data.hubs?.length || 0} / ${data.max_hubs || 1}${data.premium ? " (premium)" : ""}`;
+  const preferred =
+    data.hubs?.[0]?.category_id ||
+    lastGuildCategoriesList?.[0]?.id ||
+    "";
+  fillTempVoiceCategories(preferred);
+  $("tv-limits").textContent = data.hubs?.length
+    ? `${data.hubs.length} salon(s) de création`
+    : "Choisis une catégorie puis crée le salon.";
   renderTempVoiceHubs(data.hubs || []);
   setTvStatus("");
 }
@@ -6356,20 +6390,24 @@ async function saveTempVoiceModule() {
     setTvStatus(data?.message || "Refusé.", true);
     return;
   }
-  setTvStatus("Module enregistré.");
+  setTvStatus("Enregistré.");
   await loadTempVoicePage();
 }
 
 async function createTempVoiceHubUi() {
-  if (!window.confirm("Créer une catégorie « Salons temporaires » et un hub « ➕ Créer votre salon » ?")) return;
-  setTvStatus("Création…");
+  const categoryId = $("tv-category")?.value;
+  if (!categoryId) {
+    setTvStatus("Choisis d'abord une catégorie.", true);
+    return;
+  }
+  setTvStatus("Création de « ➕ Créer votre salon »…");
   const res = await fetch(
     apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/tempvoice/hubs`),
     {
       method: "POST",
       credentials: "include",
       headers: authHeaders(),
-      body: JSON.stringify({ create_defaults: true }),
+      body: JSON.stringify({ category_id: categoryId }),
     }
   );
   const data = await res.json().catch(() => null);
@@ -6377,13 +6415,13 @@ async function createTempVoiceHubUi() {
     setTvStatus(data?.message || "Création refusée.", true);
     return;
   }
-  setTvStatus("Hub créé.");
+  setTvStatus("Salon de création prêt. Les membres peuvent l'utiliser.");
   await loadTempVoicePage();
 }
 
 async function saveTempVoiceHubUi() {
   if (!tempVoiceEditId) return;
-  setTvStatus("Enregistrement du hub…");
+  setTvStatus("Enregistrement…");
   const body = {
     enabled: !!$("tv-hub-enabled")?.checked,
     name_format: $("tv-name-format")?.value || "",
@@ -6414,14 +6452,14 @@ async function saveTempVoiceHubUi() {
     setTvStatus(data?.message || "Refusé.", true);
     return;
   }
-  setTvStatus("Hub enregistré.");
+  setTvStatus("Réglages enregistrés.");
   await loadTempVoicePage();
   if (data.hub) openTempVoiceEditor(data.hub);
 }
 
 async function deleteTempVoiceHubUi() {
   if (!tempVoiceEditId) return;
-  if (!window.confirm("Supprimer ce hub de la base ?")) return;
+  if (!window.confirm("Retirer ce salon de création ? (le salon Discord n'est pas supprimé automatiquement)")) return;
   const res = await fetch(
     apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/tempvoice/hubs/${tempVoiceEditId}`),
     {
@@ -6437,7 +6475,7 @@ async function deleteTempVoiceHubUi() {
   }
   tempVoiceEditId = null;
   $("tv-edit-wrap").hidden = true;
-  setTvStatus("Hub supprimé.");
+  setTvStatus("Salon de création retiré.");
   await loadTempVoicePage();
 }
 
