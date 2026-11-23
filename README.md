@@ -43,9 +43,9 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 
 | | Commandes |
 |---|---|
-| **Utilitaires** | `ping` · `help` · `userinfo` · `user` · `roleinfo` · `botinfo` · `avatar` · `server` · `serverlogo` · `messageinfo` · `rank` · `leaderboard` · `stats` |
+| **Utilitaires** | `ping` · `help` · `userinfo` · `user` · `roleinfo` · `botinfo` · `avatar` · `server` · `serverlogo` · `messageinfo` · `rank` · `leaderboard` · `stats` · `birthday` |
 | **Modération** | `kick` · `ban` · `timeout` · `untimeout` · `warn` · `warns` · `unwarn` · `slowmode` · `clear` |
-| **Admin** | `setlogchannel` · `togglelog` · `logconfig` · `logtest` · `clearcache` · `xp` · `giveaway` · `tempvoice` |
+| **Admin** | `setlogchannel` · `togglelog` · `logconfig` · `logtest` · `clearcache` · `xp` · `giveaway` · `tempvoice` · `starboard` |
 | **Premium** | `backup` — sauvegarde / restauration complète du serveur |
 
 ### Depuis le dashboard
@@ -64,7 +64,9 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 | **Niveaux** | XP à l'écrit, annonce, rôles récompense, `rank` / `leaderboard` / `xp` |
 | **Statistiques** | Compteurs d'activité (messages, vocal, arrivées), `stats` |
 | **Giveaways** | Tirages au sort (bouton Participer), `giveaway` |
-| **Vocaux temp.** | Hubs DraftBot-like + panel de réglages, `tempvoice` |
+| **Vocaux temp.** | « Créer votre salon » + panel, `tempvoice` |
+| **Starboard** | Messages populaires (⭐) dans un salon dédié |
+| **Anniversaires** | Dates, annonce du jour, rôle temporaire |
 
 ---
 
@@ -239,6 +241,33 @@ Permissions bot : Gérer les salons, Déplacer des membres, Voir, Se connecter. 
 
 ---
 
+## Starboard
+
+Réglage : **Communauté → Starboard** ou `/starboard setup #salon`.
+
+Quand un message atteint le nombre de réactions choisi (défaut ⭐ × 3), le bot le republie dans le salon starboard (embed + lien). Si les réactions redescendent sous le seuil, le post est retiré. Les bots peuvent être ignorés ; l'auto-réaction de l'auteur peut être retirée.
+
+Test local : `node scripts/test-starboard-config.js`.
+
+---
+
+## Anniversaires
+
+Réglage : **Communauté → Anniversaires**.
+
+| Commande | Effet |
+|---|---|
+| `/birthday set 23/11` · `$birthday set 23/11` | Enregistre ta date (cooldown 24 h pour remodifier) |
+| `/birthday list` · `$birthday list` | Prochains anniversaires |
+| `/birthday toggle` · `$birthday on\|off` | Visible / masqué sur ce serveur |
+| `/birthday admin-set` | Admin : définir pour un membre |
+
+Annonce à l'heure configurée (décalage UTC), mention optionnelle, rôle temporaire du jour. Mode serveur uniquement (dates propres à chaque guilde).
+
+Test local : `node scripts/test-birthday-config.js`.
+
+---
+
 ## Structure du projet
 
 ```
@@ -246,7 +275,7 @@ Wingbot/
 ├── index.js           Point d’entrée bot
 ├── database.js        SQLite (better-sqlite3)
 ├── commands/          utility · moderation · admin · premium
-├── events/            logs · tickets · niveaux · stats · giveaways · tempvoice · antispam · feeds…
+├── events/            logs · tickets · niveaux · stats · giveaways · tempvoice · starboard · birthdays…
 ├── dashboard/         Express + front
 ├── backup/            Capture / restore (premium)
 ├── lib/               Configs partagées

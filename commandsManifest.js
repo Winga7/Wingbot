@@ -210,6 +210,18 @@ const COMMANDS = [
     description: "Salons vocaux temporaires (Créer votre salon)",
   },
   {
+    id: "starboard",
+    category: "admin",
+    label: "starboard",
+    description: "Mettre en avant les messages populaires",
+  },
+  {
+    id: "birthday",
+    category: "utility",
+    label: "birthday",
+    description: "Anniversaires du serveur",
+  },
+  {
     id: "backup",
     category: "premium",
     label: "backup",

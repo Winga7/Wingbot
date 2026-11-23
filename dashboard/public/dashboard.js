@@ -234,14 +234,6 @@ const PLACEHOLDER_VIEWS = {
     title: "Classement",
     desc: "Podium des membres les plus actifs.",
   },
-  starboard: {
-    title: "Starboard",
-    desc: "Met en avant les messages les plus appréciés.",
-  },
-  birthdays: {
-    title: "Anniversaires",
-    desc: "Souhaite l’anniversaire de tes membres automatiquement.",
-  },
 };
 
 const PLACEHOLDER_SET = new Set(Object.keys(PLACEHOLDER_VIEWS));
@@ -474,6 +466,14 @@ function navigate(force = false) {
 
   if (name === "tempvoice" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadTempVoicePage());
+  }
+
+  if (name === "starboard" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadStarboardPage());
+  }
+
+  if (name === "birthdays" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadBirthdaysPage());
   }
 
   if (name === "ticketing" && selectedGuildId && currentGuildHasBot()) {
@@ -3979,6 +3979,8 @@ function setViewsDisabled(noBot) {
     "stats",
     "giveaways",
     "tempvoice",
+    "starboard",
+    "birthdays",
   ];
   for (const key of keys) {
     const el = viewEls.get(key);
@@ -4109,6 +4111,8 @@ async function applyGuildData(data) {
   if (getHashView() === "stats") loadStatsPage();
   if (getHashView() === "giveaways") loadGiveawaysPage();
   if (getHashView() === "tempvoice") loadTempVoicePage();
+  if (getHashView() === "starboard") loadStarboardPage();
+  if (getHashView() === "birthdays") loadBirthdaysPage();
   if (getHashView() === "embeds") {
     ensureEmbedWorkbenchLoaded()
       .then(() => window.wingbotEmbedWorkbench?.refresh())
@@ -6491,3 +6495,141 @@ $("btn-tv-save-hub")?.addEventListener("click", () => {
 $("btn-tv-delete-hub")?.addEventListener("click", () => {
   deleteTempVoiceHubUi().catch(() => setTvStatus("Erreur.", true));
 });
+
+function setSbStatus(text, isError) {
+  const el = $("sb-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+function setBdStatus(text, isError) {
+  const el = $("bd-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+function fillSimpleChannelSelect(selectId, selectedId) {
+  const sel = $(selectId);
+  if (!sel) return;
+  sel.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "— Aucun —";
+  sel.appendChild(empty);
+  for (const ch of lastGuildChannelsList || []) {
+    if (ch.type === 2 || ch.type === 13) continue;
+    const option = document.createElement("option");
+    option.value = ch.id;
+    option.textContent = `${ch.category ? ch.category + " / " : ""}#${ch.name}`;
+    if (selectedId && selectedId === ch.id) option.selected = true;
+    sel.appendChild(option);
+  }
+}
+function fillSimpleRoleSelect(selectId, selectedId) {
+  const sel = $(selectId);
+  if (!sel) return;
+  sel.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "— Aucun —";
+  sel.appendChild(empty);
+  for (const role of lastGuildRolesList || []) {
+    if (role.name === "@everyone") continue;
+    const option = document.createElement("option");
+    option.value = role.id;
+    option.textContent = role.name;
+    if (selectedId && selectedId === role.id) option.selected = true;
+    sel.appendChild(option);
+  }
+}
+function renderStarboardForm(config) {
+  $("sb-enabled").checked = !!config.enabled;
+  fillSimpleChannelSelect("sb-channel", config.channel_id || "");
+  $("sb-emoji").value = config.emoji || "⭐";
+  $("sb-min").value = config.min_reactions ?? 3;
+  $("sb-ignore-bots").checked = config.ignore_bots !== false;
+  $("sb-remove-self").checked = config.remove_self_stars !== false;
+  $("sb-embed").checked = config.use_embed !== false;
+  $("sb-color").value = config.embed_color || "#fbbf24";
+  $("sb-content").value = config.content || "";
+  fillLevelMulti(
+    "sb-ignore-channels",
+    (lastGuildChannelsList || []).filter((ch) => ch.type !== 2 && ch.type !== 13),
+    config.ignored_channel_ids,
+    (ch) => `${ch.category ? ch.category + " / " : ""}#${ch.name}`
+  );
+}
+function readStarboardForm() {
+  return {
+    enabled: !!$("sb-enabled")?.checked,
+    channel_id: $("sb-channel")?.value || null,
+    emoji: $("sb-emoji")?.value || "⭐",
+    min_reactions: Number($("sb-min")?.value || 3),
+    ignore_bots: !!$("sb-ignore-bots")?.checked,
+    remove_self_stars: !!$("sb-remove-self")?.checked,
+    use_embed: !!$("sb-embed")?.checked,
+    embed_color: $("sb-color")?.value || "#fbbf24",
+    content: $("sb-content")?.value || "",
+    ignored_channel_ids: selectedMulti("sb-ignore-channels"),
+  };
+}
+async function loadStarboardPage() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  setSbStatus("Chargement…");
+  const res = await fetch(apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/starboard`), fetchOptsGet());
+  if (!res.ok) { setSbStatus("Chargement impossible.", true); return; }
+  const data = await res.json();
+  renderStarboardForm(data.config || {});
+  setSbStatus("");
+}
+async function saveStarboardConfig() {
+  setSbStatus("Enregistrement…");
+  const res = await fetch(apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/starboard`), {
+    method: "PUT", credentials: "include", headers: authHeaders(), body: JSON.stringify(readStarboardForm()),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) { setSbStatus(data?.message || "Refusé.", true); return; }
+  renderStarboardForm(data.config || {});
+  setSbStatus("Enregistré.");
+}
+function renderBirthdayForm(config) {
+  $("bd-enabled").checked = !!config.enabled;
+  fillSimpleChannelSelect("bd-channel", config.channel_id || "");
+  $("bd-hour").value = config.hour ?? 9;
+  $("bd-offset").value = config.timezone_offset_minutes ?? 60;
+  $("bd-message").value = config.message || "";
+  fillSimpleRoleSelect("bd-mention-role", config.mention_role_id || "");
+  fillSimpleRoleSelect("bd-temp-role", config.temp_role_id || "");
+}
+function readBirthdayForm() {
+  return {
+    enabled: !!$("bd-enabled")?.checked,
+    channel_id: $("bd-channel")?.value || null,
+    hour: Number($("bd-hour")?.value || 9),
+    timezone_offset_minutes: Number($("bd-offset")?.value || 60),
+    message: $("bd-message")?.value || "",
+    mention_role_id: $("bd-mention-role")?.value || null,
+    temp_role_id: $("bd-temp-role")?.value || null,
+  };
+}
+async function loadBirthdaysPage() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  setBdStatus("Chargement…");
+  const res = await fetch(apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/birthdays`), fetchOptsGet());
+  if (!res.ok) { setBdStatus("Chargement impossible.", true); return; }
+  const data = await res.json();
+  renderBirthdayForm(data.config || {});
+  setBdStatus("");
+}
+async function saveBirthdayConfig() {
+  setBdStatus("Enregistrement…");
+  const res = await fetch(apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/birthdays`), {
+    method: "PUT", credentials: "include", headers: authHeaders(), body: JSON.stringify(readBirthdayForm()),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) { setBdStatus(data?.message || "Refusé.", true); return; }
+  renderBirthdayForm(data.config || {});
+  setBdStatus("Enregistré.");
+}
+$("btn-sb-save")?.addEventListener("click", () => saveStarboardConfig().catch(() => setSbStatus("Erreur.", true)));
+$("btn-bd-save")?.addEventListener("click", () => saveBirthdayConfig().catch(() => setBdStatus("Erreur.", true)));

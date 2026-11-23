@@ -127,6 +127,8 @@ function initDatabase() {
   migrateActivityTables();
   migrateGiveawaysTables();
   migrateTempVoiceTables();
+  migrateStarboardTables();
+  migrateBirthdayTables();
 
   console.log("✅ Base de données initialisée");
 }
@@ -2211,6 +2213,18 @@ function migrateGuildConfigExtras() {
       "UPDATE guild_config SET temp_voice_config = ? WHERE temp_voice_config IS NULL"
     ).run("{}");
   }
+  if (!names.has("starboard_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN starboard_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET starboard_config = ? WHERE starboard_config IS NULL"
+    ).run("{}");
+  }
+  if (!names.has("birthday_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN birthday_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET birthday_config = ? WHERE birthday_config IS NULL"
+    ).run("{}");
+  }
 }
 
 function migrateMemberLevelsTable() {
@@ -2279,6 +2293,8 @@ const {
   parseTempVoiceGuildConfig,
   MAX_SAVES_PER_HUB,
 } = require("./lib/tempVoiceConfig");
+const { parseStarboardConfig } = require("./lib/starboardConfig");
+const { parseBirthdayConfig } = require("./lib/birthdayConfig");
 
 function getWarnConfig(guildId) {
   const row = db
@@ -3111,6 +3127,232 @@ function getDefaultTempVoiceSave(guildId, hubId, userId) {
   return listTempVoiceSaves(guildId, hubId, userId).find((s) => s.is_default) || null;
 }
 
+function migrateStarboardTables() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS starboard_posts (
+      guild_id TEXT NOT NULL,
+      source_message_id TEXT NOT NULL,
+      source_channel_id TEXT NOT NULL,
+      starboard_message_id TEXT,
+      star_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (guild_id, source_message_id)
+    )
+  `
+  ).run();
+}
+
+function getStarboardConfig(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return parseStarboardConfig(null);
+  ensureGuildLogRow(id);
+  const row = db
+    .prepare("SELECT starboard_config FROM guild_config WHERE guild_id = ?")
+    .get(id);
+  return parseStarboardConfig(row?.starboard_config);
+}
+
+function setStarboardConfig(guildId, input) {
+  const id = guildSnowflake(guildId);
+  if (!id) throw new Error("Serveur invalide.");
+  ensureGuildLogRow(id);
+  const next = parseStarboardConfig(input);
+  db.prepare(
+    "UPDATE guild_config SET starboard_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), id);
+  return next;
+}
+
+function getStarboardPost(guildId, sourceMessageId) {
+  return (
+    db
+      .prepare(
+        `SELECT * FROM starboard_posts
+         WHERE guild_id = ? AND source_message_id = ?`
+      )
+      .get(String(guildId), String(sourceMessageId)) || null
+  );
+}
+
+function upsertStarboardPost(data) {
+  db.prepare(
+    `
+    INSERT INTO starboard_posts
+      (guild_id, source_message_id, source_channel_id, starboard_message_id, star_count, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(guild_id, source_message_id) DO UPDATE SET
+      source_channel_id = excluded.source_channel_id,
+      starboard_message_id = excluded.starboard_message_id,
+      star_count = excluded.star_count,
+      updated_at = datetime('now')
+  `
+  ).run(
+    String(data.guild_id),
+    String(data.source_message_id),
+    String(data.source_channel_id),
+    data.starboard_message_id || null,
+    Math.max(0, Math.floor(Number(data.star_count) || 0))
+  );
+  return getStarboardPost(data.guild_id, data.source_message_id);
+}
+
+function deleteStarboardPost(guildId, sourceMessageId) {
+  return (
+    db
+      .prepare(
+        "DELETE FROM starboard_posts WHERE guild_id = ? AND source_message_id = ?"
+      )
+      .run(String(guildId), String(sourceMessageId)).changes > 0
+  );
+}
+
+function migrateBirthdayTables() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS member_birthdays (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      month INTEGER NOT NULL,
+      day INTEGER NOT NULL,
+      year INTEGER,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_announced_year INTEGER,
+      updated_at INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (guild_id, user_id)
+    )
+  `
+  ).run();
+  db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_birthdays_md ON member_birthdays (guild_id, month, day)"
+  ).run();
+}
+
+function getBirthdayConfig(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return parseBirthdayConfig(null);
+  ensureGuildLogRow(id);
+  const row = db
+    .prepare("SELECT birthday_config FROM guild_config WHERE guild_id = ?")
+    .get(id);
+  return parseBirthdayConfig(row?.birthday_config);
+}
+
+function setBirthdayConfig(guildId, input) {
+  const id = guildSnowflake(guildId);
+  if (!id) throw new Error("Serveur invalide.");
+  ensureGuildLogRow(id);
+  const next = parseBirthdayConfig(input);
+  db.prepare(
+    "UPDATE guild_config SET birthday_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), id);
+  return next;
+}
+
+function getMemberBirthday(guildId, userId) {
+  return (
+    db
+      .prepare(
+        "SELECT * FROM member_birthdays WHERE guild_id = ? AND user_id = ?"
+      )
+      .get(String(guildId), String(userId)) || null
+  );
+}
+
+function setMemberBirthday(guildId, userId, { month, day, year, enabled = true }) {
+  const gid = guildSnowflake(guildId);
+  const uid = String(userId || "");
+  if (!gid || !/^\d{17,20}$/.test(uid)) throw new Error("Identifiants invalides.");
+  db.prepare(
+    `
+    INSERT INTO member_birthdays
+      (guild_id, user_id, month, day, year, enabled, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+      month = excluded.month,
+      day = excluded.day,
+      year = excluded.year,
+      enabled = excluded.enabled,
+      updated_at = excluded.updated_at
+  `
+  ).run(
+    gid,
+    uid,
+    Math.floor(month),
+    Math.floor(day),
+    year == null ? null : Math.floor(year),
+    enabled ? 1 : 0,
+    Date.now()
+  );
+  return getMemberBirthday(gid, uid);
+}
+
+function setMemberBirthdayEnabled(guildId, userId, enabled) {
+  const row = getMemberBirthday(guildId, userId);
+  if (!row) return null;
+  db.prepare(
+    "UPDATE member_birthdays SET enabled = ? WHERE guild_id = ? AND user_id = ?"
+  ).run(enabled ? 1 : 0, String(guildId), String(userId));
+  return getMemberBirthday(guildId, userId);
+}
+
+function deleteMemberBirthday(guildId, userId) {
+  return (
+    db
+      .prepare("DELETE FROM member_birthdays WHERE guild_id = ? AND user_id = ?")
+      .run(String(guildId), String(userId)).changes > 0
+  );
+}
+
+function listUpcomingBirthdays(guildId, limit = 15) {
+  const rows = db
+    .prepare(
+      `SELECT * FROM member_birthdays
+       WHERE guild_id = ? AND enabled = 1
+       ORDER BY month ASC, day ASC, user_id ASC`
+    )
+    .all(String(guildId));
+  const now = new Date();
+  const todayKey = (now.getUTCMonth() + 1) * 100 + now.getUTCDate();
+  const scored = rows.map((row) => {
+    const key = row.month * 100 + row.day;
+    const score = key >= todayKey ? key : key + 1300;
+    return { ...row, _score: score };
+  });
+  scored.sort((a, b) => a._score - b._score || a.user_id.localeCompare(b.user_id));
+  return scored.slice(0, Math.min(50, Math.max(1, limit))).map(({ _score, ...row }) => row);
+}
+
+function listBirthdaysForDay(guildId, month, day) {
+  return db
+    .prepare(
+      `SELECT * FROM member_birthdays
+       WHERE guild_id = ? AND enabled = 1 AND month = ? AND day = ?`
+    )
+    .all(String(guildId), Math.floor(month), Math.floor(day));
+}
+
+function markBirthdayAnnounced(guildId, userId, year) {
+  db.prepare(
+    `UPDATE member_birthdays SET last_announced_year = ?
+     WHERE guild_id = ? AND user_id = ?`
+  ).run(Math.floor(year), String(guildId), String(userId));
+}
+
+function listGuildsWithBirthdayEnabled() {
+  return db
+    .prepare(
+      `SELECT guild_id, birthday_config FROM guild_config
+       WHERE birthday_config IS NOT NULL AND birthday_config != '{}' AND birthday_config != ''`
+    )
+    .all()
+    .map((row) => ({
+      guild_id: row.guild_id,
+      config: parseBirthdayConfig(row.birthday_config),
+    }))
+    .filter((row) => row.config.enabled);
+}
+
 function getMemberLevel(guildId, userId) {
   return (
     db
@@ -3866,6 +4108,21 @@ module.exports = {
   setDefaultTempVoiceSave,
   deleteTempVoiceSave,
   getDefaultTempVoiceSave,
+  getStarboardConfig,
+  setStarboardConfig,
+  getStarboardPost,
+  upsertStarboardPost,
+  deleteStarboardPost,
+  getBirthdayConfig,
+  setBirthdayConfig,
+  getMemberBirthday,
+  setMemberBirthday,
+  setMemberBirthdayEnabled,
+  deleteMemberBirthday,
+  listUpcomingBirthdays,
+  listBirthdaysForDay,
+  markBirthdayAnnounced,
+  listGuildsWithBirthdayEnabled,
   getMemberLevel,
   listLevelLeaderboard,
   countMembersAboveXp,

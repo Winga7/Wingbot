@@ -95,6 +95,10 @@ const {
   updateTempVoiceHub,
   deleteTempVoiceHub,
   getTempVoiceHub,
+  getStarboardConfig,
+  setStarboardConfig,
+  getBirthdayConfig,
+  setBirthdayConfig,
   DB_PATH,
 } = require("../database");
 const { DEFAULT_HUB, MAX_CREATORS } = require("../lib/tempVoiceConfig");
@@ -3937,6 +3941,78 @@ app.delete(
       res.status(400).json({
         error: "tempvoice_hub_delete_failed",
         message: e.message || "Suppression refusée.",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/starboard",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      res.json({ config: getStarboardConfig(req.guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/starboard",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const next = { ...req.body };
+      if (next.channel_id) {
+        await assertGuildTextChannel(req.guildId, next.channel_id);
+      }
+      const saved = setStarboardConfig(req.guildId, next);
+      res.json({ config: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "starboard_invalid",
+        message: e.message || "Configuration refusée.",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/birthdays",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      res.json({ config: getBirthdayConfig(req.guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/birthdays",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const next = { ...req.body };
+      if (next.channel_id) {
+        await assertGuildTextChannel(req.guildId, next.channel_id);
+      }
+      const saved = setBirthdayConfig(req.guildId, next);
+      res.json({ config: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "birthdays_invalid",
+        message: e.message || "Configuration refusée.",
       });
     }
   }

@@ -236,14 +236,12 @@
                   <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                 </span>
                 <span class="nav-label">Starboard</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
               <a href="#birthdays" class="nav-link" data-view="birthdays">
                 <span class="nav-ico" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><path d="M20 21v-8a2 2 0 00-2-2H6a2 2 0 00-2 2v8"/><path d="M2 21h20"/><path d="M7 8v3"/><path d="M12 8v3"/><path d="M17 8v3"/></svg>
                 </span>
                 <span class="nav-label">Anniversaires</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
             </div>
           </div>
@@ -1417,6 +1415,53 @@
                 <button type="button" class="btn primary" id="btn-lvl-save">Enregistrer</button>
               </div>
               <p class="muted tiny" id="lvl-status"></p>
+            </div>
+          </section>
+
+          <section class="view" id="view-starboard" hidden>
+            <div class="view-head">
+              <h2>Starboard</h2>
+              <p class="muted tiny">
+                Les messages qui atteignent assez de réactions sont publiés dans un salon dédié.
+                Commande : <code>/starboard setup</code>.
+              </p>
+            </div>
+            <div class="panel-block">
+              <label class="switch-row"><input type="checkbox" id="sb-enabled" /><span>Activer</span></label>
+              <label class="field-row"><span>Salon starboard</span><select id="sb-channel" class="input-sm input-wide"></select></label>
+              <label class="field-row"><span>Émoji</span><input type="text" id="sb-emoji" class="input-sm" maxlength="32" value="⭐" /></label>
+              <label class="field-row"><span>Réactions minimum</span><input type="number" id="sb-min" class="input-sm" min="1" max="25" value="3" /></label>
+              <label class="switch-row"><input type="checkbox" id="sb-ignore-bots" checked /><span>Ignorer les messages de bots</span></label>
+              <label class="switch-row"><input type="checkbox" id="sb-remove-self" checked /><span>Retirer l'auto-réaction de l'auteur</span></label>
+              <label class="switch-row"><input type="checkbox" id="sb-embed" checked /><span>Publier en embed</span></label>
+              <label class="field-row"><span>Couleur embed</span><input type="color" id="sb-color" value="#fbbf24" /></label>
+              <label class="field-row"><span>Texte au-dessus</span><input type="text" id="sb-content" class="input-sm input-wide" maxlength="300" /></label>
+              <p class="muted tiny">Variables : <code>{emoji}</code> <code>{emoji.count}</code> <code>{message.url}</code></p>
+              <label class="field-row"><span>Salons ignorés</span><select id="sb-ignore-channels" class="input-sm input-wide" multiple size="4"></select></label>
+              <div class="fonda-actions"><button type="button" class="btn primary" id="btn-sb-save">Enregistrer</button></div>
+              <p class="muted tiny" id="sb-status"></p>
+            </div>
+          </section>
+
+          <section class="view" id="view-birthdays" hidden>
+            <div class="view-head">
+              <h2>Anniversaires</h2>
+              <p class="muted tiny">
+                Les membres enregistrent leur date avec <code>/birthday set 23/11</code>.
+                Le bot annonce le jour J à l'heure choisie (fuseau configurable).
+              </p>
+            </div>
+            <div class="panel-block">
+              <label class="switch-row"><input type="checkbox" id="bd-enabled" /><span>Activer les annonces</span></label>
+              <label class="field-row"><span>Salon d'annonce</span><select id="bd-channel" class="input-sm input-wide"></select></label>
+              <label class="field-row"><span>Heure locale (0-23)</span><input type="number" id="bd-hour" class="input-sm" min="0" max="23" value="9" /></label>
+              <label class="field-row"><span>Décalage UTC (minutes, ex. 60 = UTC+1)</span><input type="number" id="bd-offset" class="input-sm" min="-720" max="840" value="60" /></label>
+              <label class="field-row"><span>Message</span><textarea id="bd-message" class="input-sm input-wide" rows="2" maxlength="500"></textarea></label>
+              <p class="muted tiny">Variables : <code>{user}</code> <code>{role}</code></p>
+              <label class="field-row"><span>Rôle à mentionner</span><select id="bd-mention-role" class="input-sm input-wide"></select></label>
+              <label class="field-row"><span>Rôle temporaire du jour</span><select id="bd-temp-role" class="input-sm input-wide"></select></label>
+              <div class="fonda-actions"><button type="button" class="btn primary" id="btn-bd-save">Enregistrer</button></div>
+              <p class="muted tiny" id="bd-status"></p>
             </div>
           </section>
 

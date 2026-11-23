@@ -14,6 +14,7 @@ const INFOS = [
   "rank",
   "leaderboard",
   "stats",
+  "birthday",
 ];
 
 const MODERATION = [
@@ -37,6 +38,7 @@ const ADMIN = [
   "xp",
   "giveaway",
   "tempvoice",
+  "starboard",
 ];
 
 const PREMIUM = [
@@ -84,6 +86,17 @@ function buildEmbed() {
         name: "🔊 Vocaux temporaires",
         value:
           "`/tempvoice setup` `list` `enable` · dashboard : choisir une catégorie → « Créer votre salon »",
+        inline: false,
+      },
+      {
+        name: "⭐ Starboard",
+        value: "`starboard setup` `disable` `status` · dashboard : Communauté → Starboard",
+        inline: false,
+      },
+      {
+        name: "🎂 Anniversaires",
+        value:
+          "`birthday set 23/11` `list` `on`/`off` · admin : `birthday admin set` · dashboard : Communauté → Anniversaires",
         inline: false,
       },
       {
