@@ -2,10 +2,12 @@
  * Test local uniquement — pas d'HTTP, pas de Discord réseau.
  * Usage : node scripts/test-tempvoice-perms.js
  */
-const { buildTempVoiceOverwrites } = require("../lib/tempVoicePermissions");
+const {
+  buildTempVoiceOverwrites,
+  CONNECT,
+} = require("../lib/tempVoicePermissions");
 const { formatTempVoiceName } = require("../lib/tempVoiceNames");
 const { parseHubConfig } = require("../lib/tempVoiceConfig");
-const { PermissionFlagsBits } = require("discord.js");
 
 const hub = parseHubConfig({
   enabled: true,
@@ -41,10 +43,10 @@ const overs = buildTempVoiceOverwrites({
 
 const byId = Object.fromEntries(overs.map((o) => [o.id, o]));
 if (!byId[state.owner_id]) throw new Error("owner missing");
-if ((byId["333333333333333333"].deny & PermissionFlagsBits.Connect) === 0n) {
+if ((byId["333333333333333333"].deny & CONNECT) === 0n) {
   throw new Error("blacklist should deny connect");
 }
-if ((byId["222222222222222222"].allow & PermissionFlagsBits.Connect) === 0n) {
+if ((byId["222222222222222222"].allow & CONNECT) === 0n) {
   throw new Error("whitelist should allow connect");
 }
 
