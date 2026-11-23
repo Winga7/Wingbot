@@ -45,7 +45,7 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 |---|---|
 | **Utilitaires** | `ping` · `help` · `userinfo` · `user` · `roleinfo` · `botinfo` · `avatar` · `server` · `serverlogo` · `messageinfo` · `rank` · `leaderboard` · `stats` |
 | **Modération** | `kick` · `ban` · `timeout` · `untimeout` · `warn` · `warns` · `unwarn` · `slowmode` · `clear` |
-| **Admin** | `setlogchannel` · `togglelog` · `logconfig` · `logtest` · `clearcache` · `xp` · `giveaway` |
+| **Admin** | `setlogchannel` · `togglelog` · `logconfig` · `logtest` · `clearcache` · `xp` · `giveaway` · `tempvoice` |
 | **Premium** | `backup` — sauvegarde / restauration complète du serveur |
 
 ### Depuis le dashboard
@@ -64,6 +64,7 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 | **Niveaux** | XP à l'écrit, annonce, rôles récompense, `rank` / `leaderboard` / `xp` |
 | **Statistiques** | Compteurs d'activité (messages, vocal, arrivées), `stats` |
 | **Giveaways** | Tirages au sort (bouton Participer), `giveaway` |
+| **Vocaux temp.** | Hubs DraftBot-like + panel de réglages, `tempvoice` |
 
 ---
 
@@ -212,6 +213,30 @@ Participation uniquement via le bouton Discord (toggle). Tirage avec `crypto` c�
 
 ---
 
+## Vocaux temporaires
+
+Réglage dans le dashboard : **Communauté → Vocaux temp.** (parité DraftBot).
+
+| | |
+|---|---|
+| **Hub** | Rejoindre `➕ Créer votre salon` crée un vocal perso et y déplace le membre |
+| **Fin** | Salon supprimé quand il est vide (sauf salons marqués permanents) |
+| **Panel** | Ouvert / Fermé / Privé, listes blanche & noire, purge, micro, vidéo, soundboard, statut, réglages, transfert |
+| **Réquisition** | Si activée et que le propriétaire est parti, un membre peut reprendre le salon |
+| **Premium** | Jusqu'à 10 hubs, mots `{custom_word}`, sauvegardes de config (5 / hub / membre) |
+| **Gratuit** | 1 hub |
+
+| Commande | Effet |
+|---|---|
+| `/tempvoice hub-create` · `$tempvoice create` | Crée catégorie + hub |
+| `/tempvoice list` · `$tempvoice list` | Liste les hubs |
+| `/tempvoice enable` · `$tempvoice enable\|disable` | Active le module |
+| `/tempvoice hub-toggle` / `hub-delete` | Active ou retire un hub |
+
+Permissions bot : Gérer les salons, Déplacer des membres, Voir, Se connecter. Test local : `node scripts/test-tempvoice-perms.js`.
+
+---
+
 ## Structure du projet
 
 ```
@@ -219,7 +244,7 @@ Wingbot/
 ├── index.js           Point d’entrée bot
 ├── database.js        SQLite (better-sqlite3)
 ├── commands/          utility · moderation · admin · premium
-├── events/            logs · tickets · niveaux · stats · giveaways · antispam · feeds…
+├── events/            logs · tickets · niveaux · stats · giveaways · tempvoice · antispam · feeds…
 ├── dashboard/         Express + front
 ├── backup/            Capture / restore (premium)
 ├── lib/               Configs partagées

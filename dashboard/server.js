@@ -87,8 +87,17 @@ const {
   getGiveawayById,
   finishGiveaway,
   countGiveawayEntries,
+  getTempVoiceGuildConfig,
+  setTempVoiceGuildConfig,
+  listTempVoiceHubs,
+  countTempVoiceHubs,
+  createTempVoiceHub,
+  updateTempVoiceHub,
+  deleteTempVoiceHub,
+  getTempVoiceHub,
   DB_PATH,
 } = require("../database");
+const { DEFAULT_HUB, MAX_HUBS_FREE, MAX_HUBS_PREMIUM } = require("../lib/tempVoiceConfig");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
 const {
   parseCategories,
@@ -3763,6 +3772,170 @@ app.post(
       res.status(e.status || 400).json({
         error: "giveaway_cancel_failed",
         message: e.message || "Annulation refusée.",
+      });
+    }
+  }
+);
+
+function tempVoiceMaxHubs(req, guildId) {
+  const n = premiumGate.getFeatureLimit(
+    req.discordSession.userId,
+    guildId,
+    "temp_voice_multi_hubs",
+    "hubs"
+  );
+  if (n == null) return MAX_HUBS_FREE;
+  return Math.min(MAX_HUBS_PREMIUM, Math.max(1, n));
+}
+
+app.get(
+  "/api/guilds/:guildId/tempvoice",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      res.json({
+        config: getTempVoiceGuildConfig(req.guildId),
+        hubs: listTempVoiceHubs(req.guildId),
+        max_hubs: tempVoiceMaxHubs(req, req.guildId),
+        premium: premiumGate.isGuildPremium(req.guildId),
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/tempvoice",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const saved = setTempVoiceGuildConfig(req.guildId, req.body || {});
+      res.json({ config: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({
+        error: "tempvoice_invalid",
+        message: e.message || "Configuration refusée.",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/tempvoice/hubs",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const max = tempVoiceMaxHubs(req, req.guildId);
+      if (countTempVoiceHubs(req.guildId) >= max) {
+        return res.status(400).json({
+          error: "hub_limit",
+          message: `Limite de hubs atteinte (${max}).`,
+        });
+      }
+      let categoryId = String(req.body?.category_id || "").replace(/\D/g, "");
+      let hubChannelId = String(req.body?.hub_channel_id || "").replace(/\D/g, "");
+
+      if (req.body?.create_defaults || !categoryId || !hubChannelId) {
+        const category = await discordBotJson(
+          "POST",
+          `/guilds/${encodeURIComponent(req.guildId)}/channels`,
+          {
+            name: "Salons temporaires",
+            type: 4,
+          }
+        );
+        categoryId = category.id;
+        const hubCh = await discordBotJson(
+          "POST",
+          `/guilds/${encodeURIComponent(req.guildId)}/channels`,
+          {
+            name: "➕ Créer votre salon",
+            type: 2,
+            parent_id: categoryId,
+          }
+        );
+        hubChannelId = hubCh.id;
+      }
+
+      const hub = createTempVoiceHub(req.guildId, {
+        ...DEFAULT_HUB,
+        ...(req.body?.config || {}),
+        enabled: true,
+        hub_channel_id: hubChannelId,
+        category_id: categoryId,
+      });
+      setTempVoiceGuildConfig(req.guildId, { enabled: true });
+      res.json({ hub, config: getTempVoiceGuildConfig(req.guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "tempvoice_hub_create_failed",
+        message: e.message || "Création refusée.",
+      });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/tempvoice/hubs/:hubId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const hubId = Number(req.params.hubId);
+      const hub = getTempVoiceHub(hubId);
+      if (!hub || hub.guild_id !== req.guildId) {
+        return res.status(404).json({ error: "not_found", message: "Hub introuvable." });
+      }
+      const patch = { ...req.body };
+      if (
+        Array.isArray(patch.custom_words) &&
+        !canUseFeature(req.discordSession.userId, req.guildId, "temp_voice_custom_words")
+      ) {
+        patch.custom_words = [];
+      }
+      if (
+        patch.saves_enabled &&
+        !canUseFeature(req.discordSession.userId, req.guildId, "temp_voice_saves")
+      ) {
+        patch.saves_enabled = false;
+      }
+      const saved = updateTempVoiceHub(hubId, patch);
+      res.json({ hub: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({
+        error: "tempvoice_hub_invalid",
+        message: e.message || "Mise à jour refusée.",
+      });
+    }
+  }
+);
+
+app.delete(
+  "/api/guilds/:guildId/tempvoice/hubs/:hubId",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const hubId = Number(req.params.hubId);
+      const hub = getTempVoiceHub(hubId);
+      if (!hub || hub.guild_id !== req.guildId) {
+        return res.status(404).json({ error: "not_found", message: "Hub introuvable." });
+      }
+      deleteTempVoiceHub(hubId);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({
+        error: "tempvoice_hub_delete_failed",
+        message: e.message || "Suppression refusée.",
       });
     }
   }

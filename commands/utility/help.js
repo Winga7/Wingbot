@@ -36,6 +36,7 @@ const ADMIN = [
   "clearcache",
   "xp",
   "giveaway",
+  "tempvoice",
 ];
 
 const PREMIUM = [
@@ -77,6 +78,12 @@ function buildEmbed() {
         name: "🎁 Giveaways",
         value:
           "`giveaway start` `end` `cancel` `reroll` `list` · dashboard : Communauté → Giveaways",
+        inline: false,
+      },
+      {
+        name: "🔊 Vocaux temporaires",
+        value:
+          "`tempvoice create` `list` `enable` · dashboard : Communauté → Vocaux temp. (hub + panel style DraftBot)",
         inline: false,
       },
       {

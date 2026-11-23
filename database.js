@@ -126,6 +126,7 @@ function initDatabase() {
   migrateMemberLevelsTable();
   migrateActivityTables();
   migrateGiveawaysTables();
+  migrateTempVoiceTables();
 
   console.log("✅ Base de données initialisée");
 }
@@ -2204,6 +2205,12 @@ function migrateGuildConfigExtras() {
       "UPDATE guild_config SET giveaway_config = ? WHERE giveaway_config IS NULL"
     ).run("{}");
   }
+  if (!names.has("temp_voice_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN temp_voice_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET temp_voice_config = ? WHERE temp_voice_config IS NULL"
+    ).run("{}");
+  }
 }
 
 function migrateMemberLevelsTable() {
@@ -2267,6 +2274,11 @@ const {
   MAX_REQUIRED_ROLES,
   snowflakeList: giveawaySnowflakeList,
 } = require("./lib/giveawayConfig");
+const {
+  parseHubConfig,
+  parseTempVoiceGuildConfig,
+  MAX_SAVES_PER_HUB,
+} = require("./lib/tempVoiceConfig");
 
 function getWarnConfig(guildId) {
   const row = db
@@ -2740,6 +2752,363 @@ function setGiveawayWinners(giveawayId, winnerIds) {
     .run(JSON.stringify(winners), Number(giveawayId));
   if (!result.changes) return null;
   return getGiveawayById(giveawayId);
+}
+
+function migrateTempVoiceTables() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS temp_voice_hubs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
+      next_index INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `
+  ).run();
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS temp_voice_channels (
+      channel_id TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      hub_id INTEGER NOT NULL,
+      owner_id TEXT NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'open',
+      whitelist_users TEXT NOT NULL DEFAULT '[]',
+      whitelist_roles TEXT NOT NULL DEFAULT '[]',
+      blacklist_users TEXT NOT NULL DEFAULT '[]',
+      blacklist_roles TEXT NOT NULL DEFAULT '[]',
+      session_excludes TEXT NOT NULL DEFAULT '[]',
+      mic INTEGER NOT NULL DEFAULT 1,
+      video INTEGER NOT NULL DEFAULT 1,
+      soundboard INTEGER NOT NULL DEFAULT 1,
+      status INTEGER NOT NULL DEFAULT 1,
+      panel_message_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `
+  ).run();
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS temp_voice_saves (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      hub_id INTEGER NOT NULL,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `
+  ).run();
+  db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_tv_hubs_guild ON temp_voice_hubs (guild_id)"
+  ).run();
+  db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_tv_channels_guild ON temp_voice_channels (guild_id)"
+  ).run();
+  db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_tv_saves_user ON temp_voice_saves (guild_id, hub_id, user_id)"
+  ).run();
+}
+
+function parseJsonArray(raw) {
+  try {
+    const v = JSON.parse(raw || "[]");
+    return Array.isArray(v) ? v.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function mapTempVoiceHub(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    guild_id: row.guild_id,
+    next_index: row.next_index || 1,
+    created_at: row.created_at,
+    ...parseHubConfig(row.config),
+  };
+}
+
+function mapTempVoiceChannel(row) {
+  if (!row) return null;
+  return {
+    channel_id: row.channel_id,
+    guild_id: row.guild_id,
+    hub_id: row.hub_id,
+    owner_id: row.owner_id,
+    mode: row.mode || "open",
+    whitelist_users: parseJsonArray(row.whitelist_users),
+    whitelist_roles: parseJsonArray(row.whitelist_roles),
+    blacklist_users: parseJsonArray(row.blacklist_users),
+    blacklist_roles: parseJsonArray(row.blacklist_roles),
+    session_excludes: parseJsonArray(row.session_excludes),
+    mic: !!row.mic,
+    video: !!row.video,
+    soundboard: !!row.soundboard,
+    status: !!row.status,
+    panel_message_id: row.panel_message_id || null,
+    created_at: row.created_at,
+  };
+}
+
+function getTempVoiceGuildConfig(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return parseTempVoiceGuildConfig(null);
+  ensureGuildLogRow(id);
+  const row = db
+    .prepare("SELECT temp_voice_config FROM guild_config WHERE guild_id = ?")
+    .get(id);
+  return parseTempVoiceGuildConfig(row?.temp_voice_config);
+}
+
+function setTempVoiceGuildConfig(guildId, input) {
+  const id = guildSnowflake(guildId);
+  if (!id) throw new Error("Serveur invalide.");
+  ensureGuildLogRow(id);
+  const next = parseTempVoiceGuildConfig(input);
+  db.prepare(
+    "UPDATE guild_config SET temp_voice_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), id);
+  return next;
+}
+
+function listTempVoiceHubs(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return [];
+  return db
+    .prepare("SELECT * FROM temp_voice_hubs WHERE guild_id = ? ORDER BY id ASC")
+    .all(id)
+    .map(mapTempVoiceHub);
+}
+
+function countTempVoiceHubs(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return 0;
+  return (
+    db.prepare("SELECT COUNT(*) AS n FROM temp_voice_hubs WHERE guild_id = ?").get(id)?.n || 0
+  );
+}
+
+function getTempVoiceHub(hubId) {
+  return mapTempVoiceHub(
+    db.prepare("SELECT * FROM temp_voice_hubs WHERE id = ?").get(Number(hubId))
+  );
+}
+
+function getTempVoiceHubByChannel(guildId, channelId) {
+  const hubs = listTempVoiceHubs(guildId);
+  return hubs.find((h) => h.hub_channel_id === String(channelId)) || null;
+}
+
+function createTempVoiceHub(guildId, configInput) {
+  const id = guildSnowflake(guildId);
+  if (!id) throw new Error("Serveur invalide.");
+  const config = parseHubConfig(configInput || {});
+  const result = db
+    .prepare(
+      "INSERT INTO temp_voice_hubs (guild_id, config, next_index) VALUES (?, ?, 1)"
+    )
+    .run(id, JSON.stringify(config));
+  return getTempVoiceHub(result.lastInsertRowid);
+}
+
+function updateTempVoiceHub(hubId, configInput) {
+  const hub = getTempVoiceHub(hubId);
+  if (!hub) return null;
+  const config = parseHubConfig({ ...hub, ...configInput });
+  db.prepare("UPDATE temp_voice_hubs SET config = ? WHERE id = ?").run(
+    JSON.stringify(config),
+    Number(hubId)
+  );
+  return getTempVoiceHub(hubId);
+}
+
+function deleteTempVoiceHub(hubId) {
+  const id = Number(hubId);
+  db.prepare("DELETE FROM temp_voice_saves WHERE hub_id = ?").run(id);
+  db.prepare("DELETE FROM temp_voice_channels WHERE hub_id = ?").run(id);
+  return db.prepare("DELETE FROM temp_voice_hubs WHERE id = ?").run(id).changes > 0;
+}
+
+function takeTempVoiceIndex(hubId) {
+  const row = db.prepare("SELECT next_index FROM temp_voice_hubs WHERE id = ?").get(Number(hubId));
+  if (!row) return 1;
+  const current = row.next_index || 1;
+  db.prepare("UPDATE temp_voice_hubs SET next_index = ? WHERE id = ?").run(
+    current + 1,
+    Number(hubId)
+  );
+  return current;
+}
+
+function getTempVoiceChannel(channelId) {
+  return mapTempVoiceChannel(
+    db
+      .prepare("SELECT * FROM temp_voice_channels WHERE channel_id = ?")
+      .get(String(channelId))
+  );
+}
+
+function listTempVoiceChannels(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return [];
+  return db
+    .prepare("SELECT * FROM temp_voice_channels WHERE guild_id = ?")
+    .all(id)
+    .map(mapTempVoiceChannel);
+}
+
+function createTempVoiceChannelRow(data) {
+  db.prepare(
+    `INSERT INTO temp_voice_channels
+      (channel_id, guild_id, hub_id, owner_id, mode, whitelist_users, whitelist_roles,
+       blacklist_users, blacklist_roles, session_excludes, mic, video, soundboard, status, panel_message_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    String(data.channel_id),
+    String(data.guild_id),
+    Number(data.hub_id),
+    String(data.owner_id),
+    data.mode || "open",
+    JSON.stringify(data.whitelist_users || []),
+    JSON.stringify(data.whitelist_roles || []),
+    JSON.stringify(data.blacklist_users || []),
+    JSON.stringify(data.blacklist_roles || []),
+    JSON.stringify(data.session_excludes || []),
+    data.mic === false ? 0 : 1,
+    data.video === false ? 0 : 1,
+    data.soundboard === false ? 0 : 1,
+    data.status === false ? 0 : 1,
+    data.panel_message_id || null
+  );
+  return getTempVoiceChannel(data.channel_id);
+}
+
+function updateTempVoiceChannelRow(channelId, patch) {
+  const current = getTempVoiceChannel(channelId);
+  if (!current) return null;
+  const next = { ...current, ...patch };
+  db.prepare(
+    `UPDATE temp_voice_channels SET
+      owner_id = ?, mode = ?, whitelist_users = ?, whitelist_roles = ?,
+      blacklist_users = ?, blacklist_roles = ?, session_excludes = ?,
+      mic = ?, video = ?, soundboard = ?, status = ?, panel_message_id = ?
+     WHERE channel_id = ?`
+  ).run(
+    next.owner_id,
+    next.mode,
+    JSON.stringify(next.whitelist_users || []),
+    JSON.stringify(next.whitelist_roles || []),
+    JSON.stringify(next.blacklist_users || []),
+    JSON.stringify(next.blacklist_roles || []),
+    JSON.stringify(next.session_excludes || []),
+    next.mic ? 1 : 0,
+    next.video ? 1 : 0,
+    next.soundboard ? 1 : 0,
+    next.status ? 1 : 0,
+    next.panel_message_id || null,
+    String(channelId)
+  );
+  return getTempVoiceChannel(channelId);
+}
+
+function deleteTempVoiceChannelRow(channelId) {
+  return (
+    db
+      .prepare("DELETE FROM temp_voice_channels WHERE channel_id = ?")
+      .run(String(channelId)).changes > 0
+  );
+}
+
+function listTempVoiceSaves(guildId, hubId, userId) {
+  return db
+    .prepare(
+      `SELECT * FROM temp_voice_saves
+       WHERE guild_id = ? AND hub_id = ? AND user_id = ?
+       ORDER BY is_default DESC, id ASC`
+    )
+    .all(String(guildId), Number(hubId), String(userId))
+    .map((row) => ({
+      id: row.id,
+      guild_id: row.guild_id,
+      hub_id: row.hub_id,
+      user_id: row.user_id,
+      name: row.name,
+      payload: (() => {
+        try {
+          return JSON.parse(row.payload || "{}");
+        } catch {
+          return {};
+        }
+      })(),
+      is_default: !!row.is_default,
+      created_at: row.created_at,
+    }));
+}
+
+function countTempVoiceSaves(guildId, hubId, userId) {
+  return (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM temp_voice_saves
+         WHERE guild_id = ? AND hub_id = ? AND user_id = ?`
+      )
+      .get(String(guildId), Number(hubId), String(userId))?.n || 0
+  );
+}
+
+function createTempVoiceSave(data) {
+  const count = countTempVoiceSaves(data.guild_id, data.hub_id, data.user_id);
+  if (count >= MAX_SAVES_PER_HUB) throw new Error(`Maximum ${MAX_SAVES_PER_HUB} sauvegardes par hub.`);
+  const result = db
+    .prepare(
+      `INSERT INTO temp_voice_saves (guild_id, hub_id, user_id, name, payload, is_default)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      String(data.guild_id),
+      Number(data.hub_id),
+      String(data.user_id),
+      String(data.name || "Sauvegarde").slice(0, 80),
+      JSON.stringify(data.payload || {}),
+      data.is_default ? 1 : 0
+    );
+  return listTempVoiceSaves(data.guild_id, data.hub_id, data.user_id).find(
+    (s) => s.id === result.lastInsertRowid
+  );
+}
+
+function getTempVoiceSave(saveId) {
+  const row = db.prepare("SELECT * FROM temp_voice_saves WHERE id = ?").get(Number(saveId));
+  if (!row) return null;
+  return listTempVoiceSaves(row.guild_id, row.hub_id, row.user_id).find((s) => s.id === row.id);
+}
+
+function setDefaultTempVoiceSave(guildId, hubId, userId, saveId) {
+  db.prepare(
+    `UPDATE temp_voice_saves SET is_default = 0
+     WHERE guild_id = ? AND hub_id = ? AND user_id = ?`
+  ).run(String(guildId), Number(hubId), String(userId));
+  db.prepare(
+    `UPDATE temp_voice_saves SET is_default = 1
+     WHERE id = ? AND guild_id = ? AND hub_id = ? AND user_id = ?`
+  ).run(Number(saveId), String(guildId), Number(hubId), String(userId));
+}
+
+function deleteTempVoiceSave(saveId, userId) {
+  return (
+    db
+      .prepare("DELETE FROM temp_voice_saves WHERE id = ? AND user_id = ?")
+      .run(Number(saveId), String(userId)).changes > 0
+  );
+}
+
+function getDefaultTempVoiceSave(guildId, hubId, userId) {
+  return listTempVoiceSaves(guildId, hubId, userId).find((s) => s.is_default) || null;
 }
 
 function getMemberLevel(guildId, userId) {
@@ -3475,6 +3844,28 @@ module.exports = {
   listGiveawayEntryIds,
   finishGiveaway,
   setGiveawayWinners,
+  getTempVoiceGuildConfig,
+  setTempVoiceGuildConfig,
+  listTempVoiceHubs,
+  countTempVoiceHubs,
+  getTempVoiceHub,
+  getTempVoiceHubByChannel,
+  createTempVoiceHub,
+  updateTempVoiceHub,
+  deleteTempVoiceHub,
+  takeTempVoiceIndex,
+  getTempVoiceChannel,
+  listTempVoiceChannels,
+  createTempVoiceChannelRow,
+  updateTempVoiceChannelRow,
+  deleteTempVoiceChannelRow,
+  listTempVoiceSaves,
+  countTempVoiceSaves,
+  createTempVoiceSave,
+  getTempVoiceSave,
+  setDefaultTempVoiceSave,
+  deleteTempVoiceSave,
+  getDefaultTempVoiceSave,
   getMemberLevel,
   listLevelLeaderboard,
   countMembersAboveXp,

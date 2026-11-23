@@ -204,6 +204,12 @@ const COMMANDS = [
     description: "Lancer et gérer des giveaways",
   },
   {
+    id: "tempvoice",
+    category: "admin",
+    label: "tempvoice",
+    description: "Salons vocaux temporaires (hubs)",
+  },
+  {
     id: "backup",
     category: "premium",
     label: "backup",

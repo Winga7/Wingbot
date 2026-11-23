@@ -173,6 +173,9 @@ loadStats(client);
 const loadGiveaways = require("./events/giveaways");
 loadGiveaways(client);
 
+const loadTempVoice = require("./events/tempVoice");
+loadTempVoice(client);
+
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
