@@ -45,7 +45,7 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 |---|---|
 | **Utilitaires** | `ping` · `help` · `userinfo` · `user` · `roleinfo` · `botinfo` · `avatar` · `server` · `serverlogo` · `messageinfo` · `rank` · `leaderboard` · `stats` |
 | **Modération** | `kick` · `ban` · `timeout` · `untimeout` · `warn` · `warns` · `unwarn` · `slowmode` · `clear` |
-| **Admin** | `setlogchannel` · `togglelog` · `logconfig` · `logtest` · `clearcache` · `xp` |
+| **Admin** | `setlogchannel` · `togglelog` · `logconfig` · `logtest` · `clearcache` · `xp` · `giveaway` |
 | **Premium** | `backup` — sauvegarde / restauration complète du serveur |
 
 ### Depuis le dashboard
@@ -63,6 +63,7 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 | **Logs** | Salon + événements à tracer |
 | **Niveaux** | XP à l'écrit, annonce, rôles récompense, `rank` / `leaderboard` / `xp` |
 | **Statistiques** | Compteurs d'activité (messages, vocal, arrivées), `stats` |
+| **Giveaways** | Tirages au sort (bouton Participer), `giveaway` |
 
 ---
 
@@ -195,6 +196,22 @@ Seuls des compteurs sont gardés, pendant 31 jours (dates UTC) : nombre de messa
 
 ---
 
+## Giveaways
+
+Réglage dans le dashboard : **Communauté → Giveaways**. Désactivé par défaut.
+
+| Commande | Qui | Effet |
+|---|---|---|
+| `/giveaway start` · `$giveaway start 1h 1 Lot` | Gérer le serveur ou rôle organisateur | Lance un giveaway |
+| `/giveaway end` · `$giveaway end <id>` | idem | Termine et tire les gagnants |
+| `/giveaway cancel` · `$giveaway cancel <id>` | idem | Annule sans tirage |
+| `/giveaway reroll` · `$giveaway reroll <id>` | idem | Retire de nouveaux gagnants |
+| `/giveaway list` · `$giveaway list` | idem | Liste les giveaways actifs |
+
+Participation uniquement via le bouton Discord (toggle). Tirage avec `crypto` côté serveur. Durée de 1 minute à 30 jours, jusqu'à 20 gagnants. Pas d'inscription depuis le dashboard. Test local du tirage : `node scripts/test-giveaway-pick.js`.
+
+---
+
 ## Structure du projet
 
 ```
@@ -202,7 +219,7 @@ Wingbot/
 ├── index.js           Point d’entrée bot
 ├── database.js        SQLite (better-sqlite3)
 ├── commands/          utility · moderation · admin · premium
-├── events/            logs · tickets · niveaux · statistiques · antispam · feeds…
+├── events/            logs · tickets · niveaux · stats · giveaways · antispam · feeds…
 ├── dashboard/         Express + front
 ├── backup/            Capture / restore (premium)
 ├── lib/               Configs partagées

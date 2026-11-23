@@ -125,6 +125,7 @@ function initDatabase() {
   migrateTicketsTable();
   migrateMemberLevelsTable();
   migrateActivityTables();
+  migrateGiveawaysTables();
 
   console.log("✅ Base de données initialisée");
 }
@@ -2197,6 +2198,12 @@ function migrateGuildConfigExtras() {
       "UPDATE guild_config SET stats_config = ? WHERE stats_config IS NULL"
     ).run("{}");
   }
+  if (!names.has("giveaway_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN giveaway_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET giveaway_config = ? WHERE giveaway_config IS NULL"
+    ).run("{}");
+  }
 }
 
 function migrateMemberLevelsTable() {
@@ -2253,6 +2260,13 @@ const {
   RETENTION_DAYS,
   MAX_VOICE_SECONDS,
 } = require("./lib/statsConfig");
+const {
+  parseGiveawayConfig,
+  clipPrize,
+  MAX_WINNERS,
+  MAX_REQUIRED_ROLES,
+  snowflakeList: giveawaySnowflakeList,
+} = require("./lib/giveawayConfig");
 
 function getWarnConfig(guildId) {
   const row = db
@@ -2467,6 +2481,265 @@ function deleteGuildStats(guildId) {
   const guilds = db.prepare("DELETE FROM guild_activity_daily WHERE guild_id = ?").run(id);
   const channels = db.prepare("DELETE FROM channel_activity_daily WHERE guild_id = ?").run(id);
   return guilds.changes + channels.changes;
+}
+
+function migrateGiveawaysTables() {
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS giveaways (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      message_id TEXT,
+      prize TEXT NOT NULL,
+      winners_count INTEGER NOT NULL DEFAULT 1,
+      ends_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      host_id TEXT NOT NULL,
+      required_role_ids TEXT NOT NULL DEFAULT '[]',
+      winner_ids TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      ended_at TEXT
+    )
+  `
+  ).run();
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS giveaway_entries (
+      giveaway_id INTEGER NOT NULL,
+      user_id TEXT NOT NULL,
+      entered_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (giveaway_id, user_id),
+      FOREIGN KEY (giveaway_id) REFERENCES giveaways(id) ON DELETE CASCADE
+    )
+  `
+  ).run();
+  db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_giveaways_guild_status ON giveaways (guild_id, status)"
+  ).run();
+  db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_giveaways_due ON giveaways (status, ends_at)"
+  ).run();
+}
+
+function mapGiveawayRow(row) {
+  if (!row) return null;
+  let required = [];
+  let winners = [];
+  try {
+    required = JSON.parse(row.required_role_ids || "[]");
+  } catch {
+    required = [];
+  }
+  try {
+    winners = JSON.parse(row.winner_ids || "[]");
+  } catch {
+    winners = [];
+  }
+  return {
+    id: row.id,
+    guild_id: row.guild_id,
+    channel_id: row.channel_id,
+    message_id: row.message_id || null,
+    prize: row.prize,
+    winners_count: row.winners_count,
+    ends_at: row.ends_at,
+    status: row.status,
+    host_id: row.host_id,
+    required_role_ids: Array.isArray(required) ? required : [],
+    winner_ids: Array.isArray(winners) ? winners : [],
+    created_at: row.created_at,
+    ended_at: row.ended_at || null,
+  };
+}
+
+function getGiveawayConfig(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return parseGiveawayConfig(null);
+  ensureGuildLogRow(id);
+  const row = db
+    .prepare("SELECT giveaway_config FROM guild_config WHERE guild_id = ?")
+    .get(id);
+  return parseGiveawayConfig(row?.giveaway_config);
+}
+
+function setGiveawayConfig(guildId, input) {
+  const id = guildSnowflake(guildId);
+  if (!id) throw new Error("Serveur invalide.");
+  ensureGuildLogRow(id);
+  const next = parseGiveawayConfig(input);
+  db.prepare(
+    "UPDATE guild_config SET giveaway_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), id);
+  return next;
+}
+
+function countActiveGiveaways(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return 0;
+  return (
+    db
+      .prepare("SELECT COUNT(*) AS n FROM giveaways WHERE guild_id = ? AND status = 'active'")
+      .get(id)?.n || 0
+  );
+}
+
+function createGiveaway({
+  guildId,
+  channelId,
+  prize,
+  winnersCount,
+  endsAtIso,
+  hostId,
+  requiredRoleIds,
+}) {
+  const gid = guildSnowflake(guildId);
+  const channel = String(channelId || "");
+  const host = String(hostId || "");
+  const cleanPrize = clipPrize(prize);
+  const winners = Math.min(MAX_WINNERS, Math.max(1, Math.floor(Number(winnersCount) || 1)));
+  if (!gid || !/^\d{17,20}$/.test(channel) || !/^\d{17,20}$/.test(host) || !cleanPrize) {
+    throw new Error("Giveaway invalide.");
+  }
+  const roles = giveawaySnowflakeList(requiredRoleIds, MAX_REQUIRED_ROLES);
+  const result = db
+    .prepare(
+      `INSERT INTO giveaways
+        (guild_id, channel_id, prize, winners_count, ends_at, status, host_id, required_role_ids)
+       VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`
+    )
+    .run(gid, channel, cleanPrize, winners, String(endsAtIso), host, JSON.stringify(roles));
+  return getGiveawayById(result.lastInsertRowid);
+}
+
+function setGiveawayMessage(giveawayId, messageId) {
+  const mid = String(messageId || "");
+  if (!/^\d{17,20}$/.test(mid)) return false;
+  const result = db
+    .prepare(
+      "UPDATE giveaways SET message_id = ? WHERE id = ? AND status = 'active'"
+    )
+    .run(mid, Number(giveawayId));
+  return result.changes > 0;
+}
+
+function getGiveawayById(id) {
+  const row = db.prepare("SELECT * FROM giveaways WHERE id = ?").get(Number(id));
+  return mapGiveawayRow(row);
+}
+
+function getGiveawayByMessage(guildId, messageId) {
+  const gid = guildSnowflake(guildId);
+  const mid = String(messageId || "");
+  if (!gid || !/^\d{17,20}$/.test(mid)) return null;
+  const row = db
+    .prepare(
+      "SELECT * FROM giveaways WHERE guild_id = ? AND message_id = ? LIMIT 1"
+    )
+    .get(gid, mid);
+  return mapGiveawayRow(row);
+}
+
+function listGiveaways(guildId, { status = null, limit = 20 } = {}) {
+  const gid = guildSnowflake(guildId);
+  if (!gid) return [];
+  const cap = Math.min(50, Math.max(1, Math.floor(Number(limit) || 20)));
+  let rows;
+  if (status) {
+    rows = db
+      .prepare(
+        `SELECT * FROM giveaways WHERE guild_id = ? AND status = ?
+         ORDER BY id DESC LIMIT ?`
+      )
+      .all(gid, String(status), cap);
+  } else {
+    rows = db
+      .prepare(
+        `SELECT * FROM giveaways WHERE guild_id = ?
+         ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, id DESC
+         LIMIT ?`
+      )
+      .all(gid, cap);
+  }
+  return rows.map(mapGiveawayRow);
+}
+
+function listDueGiveaways(nowIso) {
+  return db
+    .prepare(
+      `SELECT * FROM giveaways
+       WHERE status = 'active' AND ends_at <= ?
+       ORDER BY ends_at ASC
+       LIMIT 25`
+    )
+    .all(String(nowIso))
+    .map(mapGiveawayRow);
+}
+
+function addGiveawayEntry(giveawayId, userId) {
+  const uid = String(userId || "");
+  if (!/^\d{17,20}$/.test(uid)) return { ok: false, reason: "invalid" };
+  const row = getGiveawayById(giveawayId);
+  if (!row || row.status !== "active") return { ok: false, reason: "closed" };
+  try {
+    db.prepare(
+      "INSERT INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)"
+    ).run(Number(giveawayId), uid);
+    return { ok: true, joined: true };
+  } catch {
+    return { ok: true, joined: false };
+  }
+}
+
+function removeGiveawayEntry(giveawayId, userId) {
+  const result = db
+    .prepare(
+      "DELETE FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?"
+    )
+    .run(Number(giveawayId), String(userId));
+  return result.changes > 0;
+}
+
+function countGiveawayEntries(giveawayId) {
+  return (
+    db
+      .prepare("SELECT COUNT(*) AS n FROM giveaway_entries WHERE giveaway_id = ?")
+      .get(Number(giveawayId))?.n || 0
+  );
+}
+
+function listGiveawayEntryIds(giveawayId) {
+  return db
+    .prepare("SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?")
+    .all(Number(giveawayId))
+    .map((row) => row.user_id);
+}
+
+function finishGiveaway(giveawayId, winnerIds, status = "ended") {
+  const id = Number(giveawayId);
+  const winners = giveawaySnowflakeList(winnerIds, MAX_WINNERS);
+  const nextStatus = status === "cancelled" ? "cancelled" : "ended";
+  const result = db
+    .prepare(
+      `UPDATE giveaways
+       SET status = ?, winner_ids = ?, ended_at = datetime('now')
+       WHERE id = ? AND status = 'active'`
+    )
+    .run(nextStatus, JSON.stringify(winners), id);
+  if (!result.changes) return null;
+  return getGiveawayById(id);
+}
+
+function setGiveawayWinners(giveawayId, winnerIds) {
+  const winners = giveawaySnowflakeList(winnerIds, MAX_WINNERS);
+  const result = db
+    .prepare(
+      `UPDATE giveaways SET winner_ids = ?
+       WHERE id = ? AND status = 'ended'`
+    )
+    .run(JSON.stringify(winners), Number(giveawayId));
+  if (!result.changes) return null;
+  return getGiveawayById(giveawayId);
 }
 
 function getMemberLevel(guildId, userId) {
@@ -3187,6 +3460,21 @@ module.exports = {
   addChannelMessages,
   getActivityReport,
   deleteGuildStats,
+  getGiveawayConfig,
+  setGiveawayConfig,
+  countActiveGiveaways,
+  createGiveaway,
+  setGiveawayMessage,
+  getGiveawayById,
+  getGiveawayByMessage,
+  listGiveaways,
+  listDueGiveaways,
+  addGiveawayEntry,
+  removeGiveawayEntry,
+  countGiveawayEntries,
+  listGiveawayEntryIds,
+  finishGiveaway,
+  setGiveawayWinners,
   getMemberLevel,
   listLevelLeaderboard,
   countMembersAboveXp,

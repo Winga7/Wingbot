@@ -81,6 +81,12 @@ const {
   setStatsConfig,
   getActivityReport,
   deleteGuildStats,
+  getGiveawayConfig,
+  setGiveawayConfig,
+  listGiveaways,
+  getGiveawayById,
+  finishGiveaway,
+  countGiveawayEntries,
   DB_PATH,
 } = require("../database");
 const { parseEmojiInput, emojiKeyToApiPath } = require("../lib/reactionRoleEmoji");
@@ -3656,6 +3662,107 @@ app.post(
       res.status(e.status || 400).json({
         error: "stats_reset_failed",
         message: e.message || "Effacement refusé.",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/giveaways",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const giveaways = listGiveaways(req.guildId, { limit: 30 }).map((row) => ({
+        ...row,
+        entries: countGiveawayEntries(row.id),
+      }));
+      res.json({
+        config: getGiveawayConfig(req.guildId),
+        giveaways,
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/giveaways",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const saved = setGiveawayConfig(req.guildId, req.body || {});
+      res.json({ config: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "giveaways_invalid",
+        message: e.message || "Configuration refusée.",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/guilds/:guildId/giveaways/:giveawayId/cancel",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      if (String(req.body?.confirmation || "") !== "CANCEL") {
+        return res.status(400).json({
+          error: "confirmation_required",
+          message: "Confirmation refusée.",
+        });
+      }
+      const giveawayId = Number(req.params.giveawayId);
+      if (!Number.isInteger(giveawayId) || giveawayId < 1) {
+        return res.status(400).json({ error: "invalid_id", message: "ID invalide." });
+      }
+      const row = getGiveawayById(giveawayId);
+      if (!row || row.guild_id !== req.guildId) {
+        return res.status(404).json({ error: "not_found", message: "Giveaway introuvable." });
+      }
+      if (row.status !== "active") {
+        return res.status(400).json({
+          error: "not_active",
+          message: "Ce giveaway n'est plus actif.",
+        });
+      }
+      const finished = finishGiveaway(row.id, [], "cancelled");
+      if (!finished) {
+        return res.status(400).json({
+          error: "cancel_failed",
+          message: "Annulation impossible.",
+        });
+      }
+      if (finished.channel_id && finished.message_id) {
+        try {
+          const {
+            buildGiveawayEmbed,
+            buildGiveawayComponents,
+          } = require("../lib/giveawayMessage");
+          await discordBotJson(
+            "PATCH",
+            `/channels/${encodeURIComponent(finished.channel_id)}/messages/${encodeURIComponent(finished.message_id)}`,
+            {
+              embeds: [buildGiveawayEmbed(finished, { entries: countGiveawayEntries(finished.id) }).toJSON()],
+              components: buildGiveawayComponents(finished, true).map((rowComp) => rowComp.toJSON()),
+            }
+          );
+        } catch (editError) {
+          console.error("[giveaways] dashboard cancel edit:", editError?.message || editError);
+        }
+      }
+      res.json({ ok: true, giveaway: finished });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "giveaway_cancel_failed",
+        message: e.message || "Annulation refusée.",
       });
     }
   }

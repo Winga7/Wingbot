@@ -198,6 +198,12 @@ const COMMANDS = [
     description: "Ajuster l’XP d’un membre (niveaux)",
   },
   {
+    id: "giveaway",
+    category: "admin",
+    label: "giveaway",
+    description: "Lancer et gérer des giveaways",
+  },
+  {
     id: "backup",
     category: "premium",
     label: "backup",

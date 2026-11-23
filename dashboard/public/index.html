@@ -224,7 +224,6 @@
                   <svg viewBox="0 0 24 24"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/></svg>
                 </span>
                 <span class="nav-label">Giveaways</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
               <a href="#tempvoice" class="nav-link" data-view="tempvoice">
                 <span class="nav-ico" aria-hidden="true">
@@ -1419,6 +1418,41 @@
                 <button type="button" class="btn primary" id="btn-lvl-save">Enregistrer</button>
               </div>
               <p class="muted tiny" id="lvl-status"></p>
+            </div>
+          </section>
+
+          <section class="view" id="view-giveaways" hidden>
+            <div class="view-head">
+              <h2>Giveaways</h2>
+              <p class="muted tiny">
+                Tirages au sort sur Discord avec bouton Participer.
+                Lancement : <code>/giveaway start</code> ou <code>$giveaway start 1h 1 Nitro</code>.
+                La participation se fait uniquement via le bouton Discord (pas depuis le web).
+              </p>
+            </div>
+            <div class="panel-block">
+              <label class="switch-row">
+                <input type="checkbox" id="gw-enabled" />
+                <span>Activer les giveaways</span>
+              </label>
+              <label class="field-row">
+                <span>Giveaways actifs maximum</span>
+                <input type="number" id="gw-max-active" class="input-sm" min="1" max="10" step="1" />
+              </label>
+              <label class="field-row">
+                <span>Rôles organisateurs (en plus de Gérer le serveur)</span>
+                <select id="gw-manager-roles" class="input-sm input-wide" multiple size="5"></select>
+              </label>
+              <p class="muted tiny">Durée entre 1 minute et 30 jours. Jusqu'à 20 gagnants. Tirage avec crypto côté serveur. Les bots ne participent pas.</p>
+              <div class="fonda-actions" style="margin-top:0.85rem">
+                <button type="button" class="btn primary" id="btn-gw-save">Enregistrer</button>
+                <button type="button" class="btn secondary" id="btn-gw-refresh">Actualiser la liste</button>
+              </div>
+              <p class="muted tiny" id="gw-status"></p>
+            </div>
+            <div class="panel-block">
+              <h3>Giveaways récents</h3>
+              <div id="gw-list"></div>
             </div>
           </section>
 

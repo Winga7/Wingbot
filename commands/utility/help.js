@@ -35,6 +35,7 @@ const ADMIN = [
   "logtest",
   "clearcache",
   "xp",
+  "giveaway",
 ];
 
 const PREMIUM = [
@@ -73,6 +74,12 @@ function buildEmbed() {
         inline: false,
       },
       {
+        name: "🎁 Giveaways",
+        value:
+          "`giveaway start` `end` `cancel` `reroll` `list` · dashboard : Communauté → Giveaways",
+        inline: false,
+      },
+      {
         name: "💎 Premium _(admin uniquement)_",
         value: fmt(PREMIUM),
         inline: false,
@@ -87,7 +94,7 @@ function buildEmbed() {
     ],
     timestamp: new Date(),
     footer: {
-      text: "Wingbot · /help ou $help · dashboard : niveaux, statistiques, annonces…",
+      text: "Wingbot · /help ou $help · dashboard : niveaux, stats, giveaways…",
     },
   };
 }

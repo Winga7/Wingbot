@@ -3972,6 +3972,22 @@ code.tok {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.gw-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.gw-row-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
 .level-reward-row .lvl-reward-role {
   flex: 1;
   min-width: 0;

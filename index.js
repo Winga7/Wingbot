@@ -170,6 +170,9 @@ loadLevels(client);
 const loadStats = require("./events/stats");
 loadStats(client);
 
+const loadGiveaways = require("./events/giveaways");
+loadGiveaways(client);
+
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);

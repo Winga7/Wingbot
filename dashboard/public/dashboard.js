@@ -230,10 +230,6 @@ const PLACEHOLDER_VIEWS = {
     title: "Fils auto",
     desc: "Ouvre un fil de discussion sur chaque message d’un salon.",
   },
-  giveaways: {
-    title: "Giveaways",
-    desc: "Concours et tirages au sort intégrés à Discord.",
-  },
   leaderboard: {
     title: "Classement",
     desc: "Podium des membres les plus actifs.",
@@ -474,6 +470,10 @@ function navigate(force = false) {
 
   if (name === "stats" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadStatsPage());
+  }
+
+  if (name === "giveaways" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadGiveawaysPage());
   }
 
   if (name === "ticketing" && selectedGuildId && currentGuildHasBot()) {
@@ -3977,6 +3977,7 @@ function setViewsDisabled(noBot) {
     "membercards",
     "levels",
     "stats",
+    "giveaways",
   ];
   for (const key of keys) {
     const el = viewEls.get(key);
@@ -4105,6 +4106,7 @@ async function applyGuildData(data) {
   if (getHashView() === "membercards") loadMemberCards();
   if (getHashView() === "levels") loadLevelsConfig();
   if (getHashView() === "stats") loadStatsPage();
+  if (getHashView() === "giveaways") loadGiveawaysPage();
   if (getHashView() === "embeds") {
     ensureEmbedWorkbenchLoaded()
       .then(() => window.wingbotEmbedWorkbench?.refresh())
@@ -6103,4 +6105,153 @@ $("btn-stats-save")?.addEventListener("click", () => {
 });
 $("btn-stats-reset")?.addEventListener("click", () => {
   resetStatsCounters().catch(() => setStatsStatus("Effacement impossible.", true));
+});
+
+let giveawaysPageState = null;
+
+function setGwStatus(text, isError) {
+  const el = $("gw-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+
+function renderGiveawayForm(config) {
+  $("gw-enabled").checked = !!config.enabled;
+  $("gw-max-active").value = config.max_active ?? 5;
+  fillLevelMulti(
+    "gw-manager-roles",
+    (lastGuildRolesList || []).filter((role) => role.name !== "@everyone" && !role.managed),
+    config.manager_role_ids,
+    (role) => role.name
+  );
+}
+
+function readGiveawayForm() {
+  return {
+    enabled: !!$("gw-enabled")?.checked,
+    max_active: Number($("gw-max-active")?.value),
+    manager_role_ids: [...($("gw-manager-roles")?.selectedOptions || [])].map((opt) => opt.value),
+  };
+}
+
+function renderGiveawaysList(rows) {
+  const root = $("gw-list");
+  if (!root) return;
+  root.replaceChildren();
+  if (!rows?.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted tiny";
+    empty.textContent = "Aucun giveaway pour l'instant.";
+    root.appendChild(empty);
+    return;
+  }
+  for (const row of rows) {
+    const line = document.createElement("div");
+    line.className = "gw-row";
+    const meta = document.createElement("div");
+    meta.className = "gw-row-meta";
+    const title = document.createElement("strong");
+    title.textContent = `#${row.id} · ${row.prize}`;
+    const detail = document.createElement("span");
+    detail.className = "muted tiny";
+    const ends = row.ends_at ? new Date(row.ends_at).toLocaleString("fr-FR") : "—";
+    detail.textContent = `${row.status} · ${row.entries || 0} participants · fin ${ends}`;
+    meta.append(title, detail);
+    line.appendChild(meta);
+    if (row.status === "active") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn danger tiny";
+      btn.textContent = "Annuler";
+      btn.addEventListener("click", () => {
+        cancelGiveawayFromDashboard(row.id).catch(() =>
+          setGwStatus("Annulation impossible.", true)
+        );
+      });
+      line.appendChild(btn);
+    }
+    root.appendChild(line);
+  }
+}
+
+async function loadGiveawaysPage() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  setGwStatus("Chargement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/giveaways`),
+    fetchOptsGet()
+  );
+  if (!res.ok) {
+    setGwStatus("Impossible de charger les giveaways.", true);
+    return;
+  }
+  const data = await res.json();
+  giveawaysPageState = data;
+  renderGiveawayForm(data.config || {});
+  renderGiveawaysList(data.giveaways || []);
+  setGwStatus("");
+}
+
+async function saveGiveawayConfig() {
+  if (!selectedGuildId) return;
+  setGwStatus("Enregistrement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/giveaways`),
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: authHeaders(),
+      body: JSON.stringify(readGiveawayForm()),
+    }
+  );
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    setGwStatus(data?.message || data?.error || "Enregistrement refusé.", true);
+    return;
+  }
+  giveawaysPageState = { ...(giveawaysPageState || {}), config: data.config };
+  renderGiveawayForm(data.config);
+  setGwStatus("Enregistré.");
+}
+
+async function cancelGiveawayFromDashboard(giveawayId) {
+  if (!selectedGuildId) return;
+  if (!window.confirm(`Annuler le giveaway #${giveawayId} sans tirage ?`)) return;
+  setGwStatus("Annulation…");
+  const res = await fetch(
+    apiUrl(
+      `/api/guilds/${encodeURIComponent(selectedGuildId)}/giveaways/${encodeURIComponent(giveawayId)}/cancel`
+    ),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: authHeaders(),
+      body: JSON.stringify({ confirmation: "CANCEL" }),
+    }
+  );
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    setGwStatus(data?.message || data?.error || "Annulation refusée.", true);
+    return;
+  }
+  await loadGiveawaysPage();
+  setGwStatus("Giveaway annulé.");
+}
+
+$("btn-gw-save")?.addEventListener("click", () => {
+  saveGiveawayConfig().catch(() => setGwStatus("Enregistrement impossible.", true));
+});
+$("btn-gw-refresh")?.addEventListener("click", () => {
+  loadGiveawaysPage().catch(() => setGwStatus("Chargement impossible.", true));
 });
