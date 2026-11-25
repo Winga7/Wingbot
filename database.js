@@ -2225,6 +2225,24 @@ function migrateGuildConfigExtras() {
       "UPDATE guild_config SET birthday_config = ? WHERE birthday_config IS NULL"
     ).run("{}");
   }
+  if (!names.has("autoresponse_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN autoresponse_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET autoresponse_config = ? WHERE autoresponse_config IS NULL"
+    ).run("{}");
+  }
+  if (!names.has("auto_actions_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN auto_actions_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET auto_actions_config = ? WHERE auto_actions_config IS NULL"
+    ).run("{}");
+  }
+  if (!names.has("autothread_config")) {
+    db.prepare("ALTER TABLE guild_config ADD COLUMN autothread_config TEXT").run();
+    db.prepare(
+      "UPDATE guild_config SET autothread_config = ? WHERE autothread_config IS NULL"
+    ).run("{}");
+  }
 }
 
 function migrateMemberLevelsTable() {
@@ -2295,6 +2313,9 @@ const {
 } = require("./lib/tempVoiceConfig");
 const { parseStarboardConfig } = require("./lib/starboardConfig");
 const { parseBirthdayConfig } = require("./lib/birthdayConfig");
+const { parseAutoresponseConfig } = require("./lib/autoresponseConfig");
+const { parseAutoActionsConfig } = require("./lib/autoActionsConfig");
+const { parseAutothreadConfig } = require("./lib/autothreadConfig");
 
 function getWarnConfig(guildId) {
   const row = db
@@ -3249,6 +3270,69 @@ function setBirthdayConfig(guildId, input) {
   return next;
 }
 
+function getAutoresponseConfig(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return parseAutoresponseConfig(null);
+  ensureGuildLogRow(id);
+  const row = db
+    .prepare("SELECT autoresponse_config FROM guild_config WHERE guild_id = ?")
+    .get(id);
+  return parseAutoresponseConfig(row?.autoresponse_config);
+}
+
+function setAutoresponseConfig(guildId, input) {
+  const id = guildSnowflake(guildId);
+  if (!id) throw new Error("Serveur invalide.");
+  ensureGuildLogRow(id);
+  const next = parseAutoresponseConfig(input);
+  db.prepare(
+    "UPDATE guild_config SET autoresponse_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), id);
+  return next;
+}
+
+function getAutoActionsConfig(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return parseAutoActionsConfig(null);
+  ensureGuildLogRow(id);
+  const row = db
+    .prepare("SELECT auto_actions_config FROM guild_config WHERE guild_id = ?")
+    .get(id);
+  return parseAutoActionsConfig(row?.auto_actions_config);
+}
+
+function setAutoActionsConfig(guildId, input) {
+  const id = guildSnowflake(guildId);
+  if (!id) throw new Error("Serveur invalide.");
+  ensureGuildLogRow(id);
+  const next = parseAutoActionsConfig(input);
+  db.prepare(
+    "UPDATE guild_config SET auto_actions_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), id);
+  return next;
+}
+
+function getAutothreadConfig(guildId) {
+  const id = guildSnowflake(guildId);
+  if (!id) return parseAutothreadConfig(null);
+  ensureGuildLogRow(id);
+  const row = db
+    .prepare("SELECT autothread_config FROM guild_config WHERE guild_id = ?")
+    .get(id);
+  return parseAutothreadConfig(row?.autothread_config);
+}
+
+function setAutothreadConfig(guildId, input) {
+  const id = guildSnowflake(guildId);
+  if (!id) throw new Error("Serveur invalide.");
+  ensureGuildLogRow(id);
+  const next = parseAutothreadConfig(input);
+  db.prepare(
+    "UPDATE guild_config SET autothread_config = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?"
+  ).run(JSON.stringify(next), id);
+  return next;
+}
+
 function getMemberBirthday(guildId, userId) {
   return (
     db
@@ -3364,7 +3448,7 @@ function getMemberLevel(guildId, userId) {
 }
 
 function listLevelLeaderboard(guildId, limit = 10) {
-  const cap = Math.min(10, Math.max(1, Math.floor(Number(limit) || 10)));
+  const cap = Math.min(25, Math.max(1, Math.floor(Number(limit) || 10)));
   return db
     .prepare(
       `SELECT user_id, xp FROM member_levels
@@ -4115,6 +4199,12 @@ module.exports = {
   deleteStarboardPost,
   getBirthdayConfig,
   setBirthdayConfig,
+  getAutoresponseConfig,
+  setAutoresponseConfig,
+  getAutoActionsConfig,
+  setAutoActionsConfig,
+  getAutothreadConfig,
+  setAutothreadConfig,
   getMemberBirthday,
   setMemberBirthday,
   setMemberBirthdayEnabled,

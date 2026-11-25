@@ -218,22 +218,6 @@ const PLACEHOLDER_VIEWS = {
     title: "Modèles",
     desc: "Enregistre et réutilise des modèles de messages et d’embeds.",
   },
-  autoresponses: {
-    title: "Réponses auto",
-    desc: "Réponds aux mots-clés ou expressions dans les messages du serveur.",
-  },
-  actions: {
-    title: "Actions auto",
-    desc: "Déclenche des actions quand un événement se produit sur le serveur.",
-  },
-  autothreads: {
-    title: "Fils auto",
-    desc: "Ouvre un fil de discussion sur chaque message d’un salon.",
-  },
-  leaderboard: {
-    title: "Classement",
-    desc: "Podium des membres les plus actifs.",
-  },
 };
 
 const PLACEHOLDER_SET = new Set(Object.keys(PLACEHOLDER_VIEWS));
@@ -474,6 +458,22 @@ function navigate(force = false) {
 
   if (name === "birthdays" && selectedGuildId && currentGuildHasBot()) {
     queueMicrotask(() => loadBirthdaysPage());
+  }
+
+  if (name === "autoresponses" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadAutoresponsesPage());
+  }
+
+  if (name === "actions" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadAutoActionsPage());
+  }
+
+  if (name === "autothreads" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadAutothreadsPage());
+  }
+
+  if (name === "leaderboard" && selectedGuildId && currentGuildHasBot()) {
+    queueMicrotask(() => loadLeaderboardPage());
   }
 
   if (name === "ticketing" && selectedGuildId && currentGuildHasBot()) {
@@ -4113,6 +4113,10 @@ async function applyGuildData(data) {
   if (getHashView() === "tempvoice") loadTempVoicePage();
   if (getHashView() === "starboard") loadStarboardPage();
   if (getHashView() === "birthdays") loadBirthdaysPage();
+  if (getHashView() === "autoresponses") loadAutoresponsesPage();
+  if (getHashView() === "actions") loadAutoActionsPage();
+  if (getHashView() === "autothreads") loadAutothreadsPage();
+  if (getHashView() === "leaderboard") loadLeaderboardPage();
   if (getHashView() === "embeds") {
     ensureEmbedWorkbenchLoaded()
       .then(() => window.wingbotEmbedWorkbench?.refresh())
@@ -6633,3 +6637,504 @@ async function saveBirthdayConfig() {
 }
 $("btn-sb-save")?.addEventListener("click", () => saveStarboardConfig().catch(() => setSbStatus("Erreur.", true)));
 $("btn-bd-save")?.addEventListener("click", () => saveBirthdayConfig().catch(() => setBdStatus("Erreur.", true)));
+
+/* ========== Automatisation ========== */
+
+let arState = { enabled: false, responses: [] };
+let aaState = { enabled: false, join_roles: { enabled: false, role_ids: [], delay_seconds: 0 }, auto_reacts: [] };
+let atState = { enabled: false, channels: [] };
+
+function setArStatus(text, isError) {
+  const el = $("ar-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+function setAaStatus(text, isError) {
+  const el = $("aa-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+function setAtStatus(text, isError) {
+  const el = $("at-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+function setLbStatus(text, isError) {
+  const el = $("lb-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("mc-status-err", !!isError);
+}
+
+function channelOptionsHtml(selectedIds) {
+  const chosen = new Set(selectedIds || []);
+  return (lastGuildChannelsList || [])
+    .filter((ch) => ch.type !== 2 && ch.type !== 13)
+    .map((ch) => {
+      const label = `${ch.category ? ch.category + " / " : ""}#${ch.name}`;
+      return `<option value="${ch.id}" ${chosen.has(ch.id) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+}
+
+function roleOptionsHtml(selectedIds) {
+  const chosen = new Set(selectedIds || []);
+  return (lastGuildRolesList || [])
+    .filter((role) => role.name !== "@everyone")
+    .map(
+      (role) =>
+        `<option value="${role.id}" ${chosen.has(role.id) ? "selected" : ""}>${escapeHtml(role.name)}</option>`
+    )
+    .join("");
+}
+
+
+function renderAutoresponsesList() {
+  const root = $("ar-list");
+  if (!root) return;
+  root.replaceChildren();
+  if (!arState.responses.length) {
+    root.innerHTML = `<p class="muted tiny">Aucune règle pour l’instant.</p>`;
+    return;
+  }
+  arState.responses.forEach((rule, index) => {
+    const card = document.createElement("div");
+    card.className = "auto-rule-card";
+    card.dataset.index = String(index);
+    card.innerHTML = `
+      <div class="auto-rule-card-head">
+        <label class="switch-row" style="margin:0;padding:0.35rem 0.5rem"><input type="checkbox" class="ar-rule-enabled" ${rule.enabled !== false ? "checked" : ""} /><span>Règle ${index + 1}</span></label>
+        <button type="button" class="btn danger tiny ar-rule-del">Retirer</button>
+      </div>
+      <div class="settings-grid">
+        <label class="field-row"><span>Déclencheur</span><input type="text" class="input-sm input-wide ar-trigger" maxlength="120" value="${escapeHtml(rule.trigger || "")}" /></label>
+        <label class="field-row"><span>Correspondance</span>
+          <select class="input-sm ar-match">
+            <option value="contains" ${rule.match === "contains" || !rule.match ? "selected" : ""}>Contient</option>
+            <option value="exact" ${rule.match === "exact" ? "selected" : ""}>Exact</option>
+            <option value="startswith" ${rule.match === "startswith" ? "selected" : ""}>Commence par</option>
+          </select>
+        </label>
+        <label class="field-row"><span>Cooldownai (s)</span><input type="number" class="input-sm ar-cooldown" min="0" max="3600" value="${Number(rule.cooldown_seconds ?? 5)}" /></label>
+        <label class="field-row"><span>Réactions (max 3, séparées par espace)</span><input type="text" class="input-sm input-wide ar-reactions" value="${escapeHtml((rule.reactions || []).join(" "))}" /></label>
+      </div>
+      <label class="field-row"><span>Réponse</span><textarea class="input-sm input-wide ar-response" rows="2" maxlength="1500">${escapeHtml(rule.response || "")}</textarea></label>
+      <label class="switch-row"><input type="checkbox" class="ar-reply" ${rule.reply ? "checked" : ""} /><span>Répondre en fil (reply)</span></label>
+      <label class="switch-row"><input type="checkbox" class="ar-delete" ${rule.delete_trigger ? "checked" : ""} /><span>Supprimer le message déclencheur</span></label>
+      <label class="switch-row"><input type="checkbox" class="ar-ignore-bots" ${rule.ignore_bots !== false ? "checked" : ""} /><span>Ignorer les bots</span></label>
+      <div class="settings-grid">
+        <label class="field-row"><span>Salons (vide = tous)</span><select class="input-sm input-wide ar-channels" multiple size="4">${channelOptionsHtml(rule.channel_ids)}</select></label>
+        <label class="field-row"><span>Salons ignorés</span><select class="input-sm input-wide ar-ignored" multiple size="4">${channelOptionsHtml(rule.ignored_channel_ids)}</select></label>
+        <label class="field-row"><span>Rôles requis (vide = tous)</span><select class="input-sm input-wide ar-roles" multiple size="4">${roleOptionsHtml(rule.required_role_ids)}</select></label>
+      </div>
+    `;
+    root.appendChild(card);
+  });
+  root.querySelectorAll(".ar-rule-del").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.closest(".auto-rule-card")?.dataset.index);
+      if (!Number.isInteger(idx)) return;
+      arState.responses.splice(idx, 1);
+      renderAutoresponsesList();
+    });
+  });
+}
+
+function collectAutoresponsesFromDom() {
+  const responses = [];
+  document.querySelectorAll("#ar-list .auto-rule-card").forEach((card, index) => {
+    const prev = arState.responses[index] || {};
+    const reactions = String(card.querySelector(".ar-reactions")?.value || "")
+      .split(/\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    responses.push({
+      id: prev.id,
+      enabled: !!card.querySelector(".ar-rule-enabled")?.checked,
+      trigger: card.querySelector(".ar-trigger")?.value || "",
+      match: card.querySelector(".ar-match")?.value || "contains",
+      response: card.querySelector(".ar-response")?.value || "",
+      reactions,
+      reply: !!card.querySelector(".ar-reply")?.checked,
+      delete_trigger: !!card.querySelector(".ar-delete")?.checked,
+      cooldown_seconds: Number(card.querySelector(".ar-cooldown")?.value || 5),
+      channel_ids: [...(card.querySelector(".ar-channels")?.selectedOptions || [])].map((o) => o.value),
+      ignored_channel_ids: [...(card.querySelector(".ar-ignored")?.selectedOptions || [])].map((o) => o.value),
+      required_role_ids: [...(card.querySelector(".ar-roles")?.selectedOptions || [])].map((o) => o.value),
+      ignore_bots: !!card.querySelector(".ar-ignore-bots")?.checked,
+    });
+  });
+  return {
+    enabled: !!$("ar-enabled")?.checked,
+    responses,
+  };
+}
+
+async function loadAutoresponsesPage() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  setArStatus("Chargement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/autoresponses`),
+    fetchOptsGet()
+  );
+  if (!res.ok) {
+    setArStatus("Chargement impossible.", true);
+    return;
+  }
+  const data = await res.json();
+  arState = data.config || { enabled: false, responses: [] };
+  $("ar-enabled").checked = !!arState.enabled;
+  renderAutoresponsesList();
+  setArStatus("");
+}
+
+async function saveAutoresponsesConfig() {
+  setArStatus("Enregistrement…");
+  const body = collectAutoresponsesFromDom();
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/autoresponses`),
+    { method: "PUT", credentials: "include", headers: authHeaders(), body: JSON.stringify(body) }
+  );
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    setArStatus(data?.message || "Refusé.", true);
+    return;
+  }
+  arState = data.config || body;
+  $("ar-enabled").checked = !!arState.enabled;
+  renderAutoresponsesList();
+  setArStatus("Enregistré.");
+}
+
+function renderAutoReactList() {
+  const root = $("aa-react-list");
+  if (!root) return;
+  root.replaceChildren();
+  if (!aaState.auto_reacts.length) {
+    root.innerHTML = `<p class="muted tiny">Aucune règle d’auto-réaction.</p>`;
+    return;
+  }
+  aaState.auto_reacts.forEach((rule, index) => {
+    const card = document.createElement("div");
+    card.className = "auto-rule-card";
+    card.dataset.index = String(index);
+    card.innerHTML = `
+      <div class="auto-rule-card-head">
+        <label class="switch-row" style="margin:0;padding:0.35rem 0.5rem"><input type="checkbox" class="aa-react-enabled" ${rule.enabled !== false ? "checked" : ""} /><span>Réaction ${index + 1}</span></label>
+        <button type="button" class="btn danger tiny aa-react-del">Retirer</button>
+      </div>
+      <label class="field-row"><span>Salons</span><select class="input-sm input-wide aa-react-channels" multiple size="4">${channelOptionsHtml(rule.channel_ids)}</select></label>
+      <label class="field-row"><span>Émojis (max 3, séparés par espace)</span><input type="text" class="input-sm input-wide aa-react-emojis" value="${escapeHtml((rule.emojis || []).join(" "))}" /></label>
+      <label class="switch-row"><input type="checkbox" class="aa-react-ignore-bots" ${rule.ignore_bots !== false ? "checked" : ""} /><span>Ignorer les bots</span></label>
+    `;
+    root.appendChild(card);
+  });
+  root.querySelectorAll(".aa-react-del").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.closest(".auto-rule-card")?.dataset.index);
+      if (!Number.isInteger(idx)) return;
+      aaState.auto_reacts.splice(idx, 1);
+      renderAutoReactList();
+    });
+  });
+}
+
+function collectAutoActionsFromDom() {
+  const auto_reacts = [];
+  document.querySelectorAll("#aa-react-list .auto-rule-card").forEach((card, index) => {
+    const prev = aaState.auto_reacts[index] || {};
+    auto_reacts.push({
+      id: prev.id,
+      enabled: !!card.querySelector(".aa-react-enabled")?.checked,
+      channel_ids: [...(card.querySelector(".aa-react-channels")?.selectedOptions || [])].map((o) => o.value),
+      emojis: String(card.querySelector(".aa-react-emojis")?.value || "")
+        .split(/\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+      ignore_bots: !!card.querySelector(".aa-react-ignore-bots")?.checked,
+    });
+  });
+  return {
+    enabled: !!$("aa-enabled")?.checked,
+    join_roles: {
+      enabled: !!$("aa-join-enabled")?.checked,
+      role_ids: selectedMulti("aa-join-roles"),
+      delay_seconds: Number($("aa-join-delay")?.value || 0),
+    },
+    auto_reacts,
+  };
+}
+
+async function loadAutoActionsPage() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  setAaStatus("Chargement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/actions`),
+    fetchOptsGet()
+  );
+  if (!res.ok) {
+    setAaStatus("Chargement impossible.", true);
+    return;
+  }
+  const data = await res.json();
+  aaState = data.config || {
+    enabled: false,
+    join_roles: { enabled: false, role_ids: [], delay_seconds: 0 },
+    auto_reacts: [],
+  };
+  $("aa-enabled").checked = !!aaState.enabled;
+  $("aa-join-enabled").checked = !!aaState.join_roles?.enabled;
+  $("aa-join-delay").value = aaState.join_roles?.delay_seconds ?? 0;
+  fillLevelMulti(
+    "aa-join-roles",
+    (lastGuildRolesList || []).filter((role) => role.name !== "@everyone"),
+    aaState.join_roles?.role_ids || [],
+    (role) => role.name
+  );
+  renderAutoReactList();
+  setAaStatus("");
+}
+
+async function saveAutoActionsConfig() {
+  setAaStatus("Enregistrement…");
+  const body = collectAutoActionsFromDom();
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/actions`),
+    { method: "PUT", credentials: "include", headers: authHeaders(), body: JSON.stringify(body) }
+  );
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    setAaStatus(data?.message || "Refusé.", true);
+    return;
+  }
+  aaState = data.config || body;
+  $("aa-enabled").checked = !!aaState.enabled;
+  $("aa-join-enabled").checked = !!aaState.join_roles?.enabled;
+  $("aa-join-delay").value = aaState.join_roles?.delay_seconds ?? 0;
+  fillLevelMulti(
+    "aa-join-roles",
+    (lastGuildRolesList || []).filter((role) => role.name !== "@everyone"),
+    aaState.join_roles?.role_ids || [],
+    (role) => role.name
+  );
+  renderAutoReactList();
+  setAaStatus("Enregistré.");
+}
+
+function renderAutothreadsList() {
+  const root = $("at-list");
+  if (!root) return;
+  root.replaceChildren();
+  if (!atState.channels.length) {
+    root.innerHTML = `<p class="muted tiny">Aucun salon configuré.</p>`;
+    return;
+  }
+  atState.channels.forEach((rule, index) => {
+    const card = document.createElement("div");
+    card.className = "auto-rule-card";
+    card.dataset.index = String(index);
+    card.innerHTML = `
+      <div class="auto-rule-card-head">
+        <label class="switch-row" style="margin:0;padding:0.35rem 0.5rem"><input type="checkbox" class="at-rule-enabled" ${rule.enabled !== false ? "checked" : ""} /><span>Salon ${index + 1}</span></label>
+        <button type="button" class="btn danger tiny at-rule-del">Retirer</button>
+      </div>
+      <div class="settings-grid">
+        <label class="field-row"><span>Salon</span><select class="input-sm input-wide at-channel">${channelOptionsHtml([rule.channel_id]).replace(/multiple[\s\S]*?size="4"/, "")}</select></label>
+        <label class="field-row"><span>Nom du fil</span><input type="text" class="input-sm input-wide at-name" maxlength="90" value="${escapeHtml(rule.name_format || "💬 {username}")}" /></label>
+        <label class="field-row"><span>Auto-archive</span>
+          <select class="input-sm at-archive">
+            <option value="60" ${Number(rule.auto_archive_minutes) === 60 ? "selected" : ""}>1 heure</option>
+            <option value="1440" ${Number(rule.auto_archive_minutes) === 1440 || !rule.auto_archive_minutes ? "selected" : ""}>24 heures</option>
+            <option value="4320" ${Number(rule.auto_archive_minutes) === 4320 ? "selected" : ""}>3 jours</option>
+            <option value="10080" ${Number(rule.auto_archive_minutes) === 10080 ? "selected" : ""}>7 jours</option>
+          </select>
+        </label>
+      </div>
+      <label class="switch-row"><input type="checkbox" class="at-ignore-bots" ${rule.ignore_bots !== false ? "checked" : ""} /><span>Ignorer les bots</span></label>
+      <label class="switch-row"><input type="checkbox" class="at-ignore-existing" ${rule.ignore_existing_thread !== false ? "checked" : ""} /><span>Ignorer si un fil existe déjà</span></label>
+    `;
+    // Rebuild single-select properly
+    const sel = card.querySelector(".at-channel");
+    if (sel) {
+      sel.removeAttribute("multiple");
+      sel.size = 1;
+      sel.innerHTML = `<option value="">— Choisir —</option>` + channelOptionsHtml([rule.channel_id]);
+      // channelOptionsHtml marks selected; ensure single
+      [...sel.options].forEach((o) => {
+        o.selected = o.value === (rule.channel_id || "");
+      });
+    }
+    root.appendChild(card);
+  });
+  root.querySelectorAll(".at-rule-del").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.closest(".auto-rule-card")?.dataset.index);
+      if (!Number.isInteger(idx)) return;
+      atState.channels.splice(idx, 1);
+      renderAutothreadsList();
+    });
+  });
+}
+
+function collectAutothreadsFromDom() {
+  const channels = [];
+  document.querySelectorAll("#at-list .auto-rule-card").forEach((card, index) => {
+    const prev = atState.channels[index] || {};
+    channels.push({
+      id: prev.id,
+      enabled: !!card.querySelector(".at-rule-enabled")?.checked,
+      channel_id: card.querySelector(".at-channel")?.value || "",
+      name_format: card.querySelector(".at-name")?.value || "💬 {username}",
+      auto_archive_minutes: Number(card.querySelector(".at-archive")?.value || 1440),
+      ignore_bots: !!card.querySelector(".at-ignore-bots")?.checked,
+      ignore_existing_thread: !!card.querySelector(".at-ignore-existing")?.checked,
+    });
+  });
+  return {
+    enabled: !!$("at-enabled")?.checked,
+    channels,
+  };
+}
+
+async function loadAutothreadsPage() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  setAtStatus("Chargement…");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/autothreads`),
+    fetchOptsGet()
+  );
+  if (!res.ok) {
+    setAtStatus("Chargement impossible.", true);
+    return;
+  }
+  const data = await res.json();
+  atState = data.config || { enabled: false, channels: [] };
+  $("at-enabled").checked = !!atState.enabled;
+  renderAutothreadsList();
+  setAtStatus("");
+}
+
+async function saveAutothreadsConfig() {
+  setAtStatus("Enregistrement…");
+  const body = collectAutothreadsFromDom();
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/autothreads`),
+    { method: "PUT", credentials: "include", headers: authHeaders(), body: JSON.stringify(body) }
+  );
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    setAtStatus(data?.message || "Refusé.", true);
+    return;
+  }
+  atState = data.config || body;
+  $("at-enabled").checked = !!atState.enabled;
+  renderAutothreadsList();
+  setAtStatus("Enregistré.");
+}
+
+async function loadLeaderboardPage() {
+  if (!selectedGuildId || !currentGuildHasBot()) return;
+  setLbStatus("Chargement…");
+  const hint = $("lb-hint");
+  const list = $("lb-list");
+  const res = await fetch(
+    apiUrl(`/api/guilds/${encodeURIComponent(selectedGuildId)}/leaderboard`),
+    fetchOptsGet()
+  );
+  if (!res.ok) {
+    setLbStatus("Chargement impossible.", true);
+    return;
+  }
+  const data = await res.json();
+  if (hint) {
+    hint.textContent = data.levels_enabled
+      ? "Classement basé sur l’XP du module Niveaux."
+      : "Le module Niveaux est désactivé — active-le pour faire monter le classement.";
+  }
+  if (list) {
+    list.replaceChildren();
+    if (!data.entries?.length) {
+      list.innerHTML = `<p class="muted tiny">Personne n’a encore d’XP.</p>`;
+    } else {
+      data.entries.forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "lb-row";
+        row.innerHTML = `
+          <span class="lb-rank">#${entry.rank}</span>
+          <span class="lb-user mono">${escapeHtml(entry.user_id)}</span>
+          <span class="lb-level">Niv. ${entry.level}</span>
+          <span class="lb-xp">${entry.xp} XP</span>
+        `;
+        list.appendChild(row);
+      });
+    }
+  }
+  setLbStatus("");
+}
+
+$("btn-ar-add")?.addEventListener("click", () => {
+  if (arState.responses.length >= 25) {
+    setArStatus("Maximum 25 règles.", true);
+    return;
+  }
+  arState.responses.push({
+    enabled: true,
+    trigger: "",
+    match: "contains",
+    response: "",
+    reactions: [],
+    reply: false,
+    delete_trigger: false,
+    cooldown_seconds: 5,
+    channel_ids: [],
+    ignored_channel_ids: [],
+    required_role_ids: [],
+    ignore_bots: true,
+  });
+  renderAutoresponsesList();
+});
+$("btn-ar-save")?.addEventListener("click", () =>
+  saveAutoresponsesConfig().catch(() => setArStatus("Erreur.", true))
+);
+
+$("btn-aa-add-react")?.addEventListener("click", () => {
+  if (aaState.auto_reacts.length >= 15) {
+    setAaStatus("Maximum 15 règles.", true);
+    return;
+  }
+  aaState.auto_reacts.push({
+    enabled: true,
+    channel_ids: [],
+    emojis: ["👍"],
+    ignore_bots: true,
+  });
+  renderAutoReactList();
+});
+$("btn-aa-save")?.addEventListener("click", () =>
+  saveAutoActionsConfig().catch(() => setAaStatus("Erreur.", true))
+);
+
+$("btn-at-add")?.addEventListener("click", () => {
+  if (atState.channels.length >= 25) {
+    setAtStatus("Maximum 25 salons.", true);
+    return;
+  }
+  atState.channels.push({
+    enabled: true,
+    channel_id: "",
+    name_format: "💬 {username}",
+    auto_archive_minutes: 1440,
+    ignore_bots: true,
+    ignore_existing_thread: true,
+  });
+  renderAutothreadsList();
+});
+$("btn-at-save")?.addEventListener("click", () =>
+  saveAutothreadsConfig().catch(() => setAtStatus("Erreur.", true))
+);
+$("btn-lb-refresh")?.addEventListener("click", () =>
+  loadLeaderboardPage().catch(() => setLbStatus("Erreur.", true))
+);

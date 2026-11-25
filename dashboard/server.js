@@ -99,6 +99,13 @@ const {
   setStarboardConfig,
   getBirthdayConfig,
   setBirthdayConfig,
+  getAutoresponseConfig,
+  setAutoresponseConfig,
+  getAutoActionsConfig,
+  setAutoActionsConfig,
+  getAutothreadConfig,
+  setAutothreadConfig,
+  listLevelLeaderboard,
   DB_PATH,
 } = require("../database");
 const { DEFAULT_HUB, MAX_CREATORS } = require("../lib/tempVoiceConfig");
@@ -122,7 +129,7 @@ const {
   renderMemberCardPng,
   fetchImageBuffer,
 } = require("../lib/memberCardImage");
-const { parseLevelConfig } = require("../lib/levelConfig");
+const { parseLevelConfig, progressFromXp } = require("../lib/levelConfig");
 const {
   defaultEmbedPayload,
   mergeEmbedPayload,
@@ -4014,6 +4021,134 @@ app.put(
         error: "birthdays_invalid",
         message: e.message || "Configuration refusée.",
       });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/autoresponses",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      res.json({ config: getAutoresponseConfig(req.guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/autoresponses",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const saved = setAutoresponseConfig(req.guildId, req.body || {});
+      res.json({ config: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "autoresponses_invalid",
+        message: e.message || "Configuration refusée.",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/actions",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      res.json({ config: getAutoActionsConfig(req.guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/actions",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const saved = setAutoActionsConfig(req.guildId, req.body || {});
+      res.json({ config: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "actions_invalid",
+        message: e.message || "Configuration refusée.",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/autothreads",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      res.json({ config: getAutothreadConfig(req.guildId) });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
+    }
+  }
+);
+
+app.put(
+  "/api/guilds/:guildId/autothreads",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  async (req, res) => {
+    try {
+      const body = req.body || {};
+      const channels = Array.isArray(body.channels) ? body.channels : [];
+      for (const ch of channels) {
+        if (ch?.channel_id) {
+          await assertGuildTextChannel(req.guildId, ch.channel_id);
+        }
+      }
+      const saved = setAutothreadConfig(req.guildId, body);
+      res.json({ config: saved });
+    } catch (e) {
+      console.error(e);
+      res.status(e.status || 400).json({
+        error: "autothreads_invalid",
+        message: e.message || "Configuration refusée.",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/guilds/:guildId/leaderboard",
+  requireDiscordSession,
+  requireGuildManageAccess,
+  (req, res) => {
+    try {
+      const levelsEnabled = !!getLevelConfig(req.guildId).enabled;
+      const rows = listLevelLeaderboard(req.guildId, 25);
+      const entries = rows.map((row, index) => {
+        const progress = progressFromXp(row.xp);
+        return {
+          rank: index + 1,
+          user_id: row.user_id,
+          xp: progress.total,
+          level: progress.level,
+        };
+      });
+      res.json({ levels_enabled: levelsEnabled, entries });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message) });
     }
   }
 );

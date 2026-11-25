@@ -265,28 +265,24 @@
                   <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
                 </span>
                 <span class="nav-label">Réponses auto</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
               <a href="#actions" class="nav-link" data-view="actions">
                 <span class="nav-ico" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 </span>
                 <span class="nav-label">Actions auto</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
               <a href="#autothreads" class="nav-link" data-view="autothreads">
                 <span class="nav-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                  <svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>
                 </span>
                 <span class="nav-label">Fils auto</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
               <a href="#leaderboard" class="nav-link" data-view="leaderboard">
                 <span class="nav-ico" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg>
                 </span>
                 <span class="nav-label">Classement</span>
-                <span class="nav-badge soon">Bientôt</span>
               </a>
             </div>
           </div>
@@ -1956,6 +1952,165 @@
               <p class="muted tiny">
                 Active le log <strong>Avertissements</strong> dans l’onglet Logs. Tu peux aussi retirer un warn ici avec le bouton <strong>Retirer</strong>.
               </p>
+            </div>
+          </section>
+
+          <section class="view" id="view-autoresponses" hidden>
+            <div class="view-head">
+              <h2>Réponses auto</h2>
+              <p class="muted tiny">
+                Quand un message contient un déclencheur, le bot répond et/ou réagit.
+                Jusqu'à 25 règles. Variables : <code>{user}</code> <code>{username}</code> <code>{channel}</code> <code>{server}</code> <code>{trigger}</code>.
+              </p>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Module</h3>
+                  <p class="muted tiny">Active ou coupe toutes les réponses</p>
+                </div>
+              </div>
+              <label class="switch-row">
+                <input type="checkbox" id="ar-enabled" />
+                <span>Activer les réponses auto</span>
+              </label>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Règles</h3>
+                  <p class="muted tiny">Déclencheur → texte et/ou réactions (max 3)</p>
+                </div>
+                <div class="panel-block-actions">
+                  <button type="button" class="btn secondary tiny" id="btn-ar-add">+ Ajouter</button>
+                </div>
+              </div>
+              <div id="ar-list"></div>
+              <div class="form-actions">
+                <button type="button" class="btn primary" id="btn-ar-save">Enregistrer</button>
+                <p class="muted tiny" id="ar-status"></p>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="view-actions" hidden>
+            <div class="view-head">
+              <h2>Actions auto</h2>
+              <p class="muted tiny">
+                Rôles donnés à l'arrivée, et réactions automatiques sur les messages de certains salons.
+              </p>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Module</h3>
+                  <p class="muted tiny">Active toutes les actions auto</p>
+                </div>
+              </div>
+              <label class="switch-row">
+                <input type="checkbox" id="aa-enabled" />
+                <span>Activer les actions auto</span>
+              </label>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Rôles à l'arrivée</h3>
+                  <p class="muted tiny">Le bot doit être au-dessus de ces rôles</p>
+                </div>
+              </div>
+              <label class="switch-row">
+                <input type="checkbox" id="aa-join-enabled" />
+                <span>Donner des rôles aux nouveaux membres</span>
+              </label>
+              <div class="settings-grid">
+                <label class="field-row">
+                  <span>Rôles</span>
+                  <select id="aa-join-roles" class="input-sm input-wide" multiple size="5"></select>
+                </label>
+                <label class="field-row">
+                  <span>Délai (secondes)</span>
+                  <input type="number" id="aa-join-delay" class="input-sm" min="0" max="300" value="0" />
+                </label>
+              </div>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Auto-réactions</h3>
+                  <p class="muted tiny">Réagit aux messages dans les salons choisis</p>
+                </div>
+                <div class="panel-block-actions">
+                  <button type="button" class="btn secondary tiny" id="btn-aa-add-react">+ Règle</button>
+                </div>
+              </div>
+              <div id="aa-react-list"></div>
+              <div class="form-actions">
+                <button type="button" class="btn primary" id="btn-aa-save">Enregistrer</button>
+                <p class="muted tiny" id="aa-status"></p>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="view-autothreads" hidden>
+            <div class="view-head">
+              <h2>Fils auto</h2>
+              <p class="muted tiny">
+                Ouvre un fil sous chaque message des salons choisis (suggestions, reports…).
+                Variables du nom : <code>{username}</code> <code>{message}</code> <code>{channel}</code>.
+              </p>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Module</h3>
+                  <p class="muted tiny">Création automatique de fils</p>
+                </div>
+              </div>
+              <label class="switch-row">
+                <input type="checkbox" id="at-enabled" />
+                <span>Activer les fils auto</span>
+              </label>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Salons</h3>
+                  <p class="muted tiny">Un réglage par salon (max 25)</p>
+                </div>
+                <div class="panel-block-actions">
+                  <button type="button" class="btn secondary tiny" id="btn-at-add">+ Salon</button>
+                </div>
+              </div>
+              <div id="at-list"></div>
+              <div class="form-actions">
+                <button type="button" class="btn primary" id="btn-at-save">Enregistrer</button>
+                <p class="muted tiny" id="at-status"></p>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="view-leaderboard" hidden>
+            <div class="view-head">
+              <h2>Classement</h2>
+              <p class="muted tiny">
+                Top 25 des membres par XP (module Niveaux).
+                Commandes Discord : <code>/leaderboard</code> · <code>$leaderboard</code>.
+              </p>
+            </div>
+            <div class="panel-block">
+              <div class="panel-block-head">
+                <div>
+                  <h3>Podium XP</h3>
+                  <p class="muted tiny" id="lb-hint">Charge un serveur pour afficher le classement.</p>
+                </div>
+                <div class="panel-block-actions">
+                  <a class="btn ghost tiny" href="#levels">Configurer les niveaux</a>
+                  <button type="button" class="btn ghost tiny" id="btn-lb-refresh">Rafraîchir</button>
+                </div>
+              </div>
+              <div id="lb-list" class="lb-list"></div>
+              <p class="muted tiny" id="lb-status"></p>
             </div>
           </section>
 

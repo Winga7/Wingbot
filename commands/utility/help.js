@@ -100,6 +100,12 @@ function buildEmbed() {
         inline: false,
       },
       {
+        name: "⚡ Automatisation",
+        value:
+          "Dashboard : Réponses auto · Actions auto (rôles arrivée, auto-réactions) · Fils auto · Classement XP (`leaderboard`)",
+        inline: false,
+      },
+      {
         name: "💎 Premium _(admin uniquement)_",
         value: fmt(PREMIUM),
         inline: false,

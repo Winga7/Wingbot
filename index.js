@@ -182,6 +182,15 @@ loadStarboard(client);
 const loadBirthdays = require("./events/birthdays");
 loadBirthdays(client);
 
+const loadAutoresponses = require("./events/autoresponses");
+loadAutoresponses(client);
+
+const loadAutoActions = require("./events/autoActions");
+loadAutoActions(client);
+
+const loadAutothreads = require("./events/autothreads");
+loadAutothreads(client);
+
 // Événement quand le bot est prêt
 client.once("ready", () => {
   console.log(`Connecté en tant que ${client.user.tag}`);

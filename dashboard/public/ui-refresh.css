@@ -1304,6 +1304,69 @@ textarea::placeholder {
   align-items: center;
 }
 
+/* ========== Automatisation ========== */
+
+.auto-rule-card {
+  border-radius: 14px;
+  padding: 0.95rem 1.05rem;
+  margin: 0.65rem 0;
+  background: rgba(4, 6, 18, 0.45);
+  border: 1px solid rgba(148, 163, 255, 0.12);
+}
+
+.auto-rule-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.65rem;
+}
+
+.lb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+}
+
+.lb-row {
+  display: grid;
+  grid-template-columns: 3.2rem 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(4, 6, 18, 0.45);
+  border: 1px solid rgba(148, 163, 255, 0.1);
+}
+
+.lb-rank {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--nebula-violet);
+}
+
+.lb-level {
+  font-weight: 700;
+  color: #e8ecff;
+}
+
+.lb-xp {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 700px) {
+  .lb-row {
+    grid-template-columns: 2.5rem 1fr;
+  }
+  .lb-level,
+  .lb-xp {
+    grid-column: 2;
+  }
+}
+
 /* ========== Communauté : levels / stats / giveaways / etc. ========== */
 
 .level-reward-row {

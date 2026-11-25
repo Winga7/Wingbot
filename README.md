@@ -67,6 +67,10 @@ Wingbot gère la modération, les logs, les tickets et les annonces depuis Disco
 | **Vocaux temp.** | « Créer votre salon » + panel, `tempvoice` |
 | **Starboard** | Messages populaires (⭐) dans un salon dédié |
 | **Anniversaires** | Dates, annonce du jour, rôle temporaire |
+| **Réponses auto** | Mots-clés → message / réactions |
+| **Actions auto** | Rôles à l'arrivée, auto-réactions par salon |
+| **Fils auto** | Fil Discord sous chaque message d'un salon |
+| **Classement** | Top XP (dashboard + `leaderboard`) |
 
 ---
 
